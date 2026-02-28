@@ -23,6 +23,10 @@ class Config:
     model: str = "qwen3"
     ollama_base_url: str = "http://localhost:11434"
 
+    # Harness settings (new)
+    task_file: Path | None = None
+    forward_to: str | None = None
+
     # Skill settings
     skills: list[str] = field(default_factory=list)
     skills_dir: Path | None = None
@@ -43,12 +47,18 @@ class Config:
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> Config:
         """Create Config from parsed arguments."""
+        task_file = None
+        if hasattr(args, "task_file") and args.task_file:
+            task_file = Path(args.task_file)
+
         return cls(
             host=args.host,
             port=args.port,
             backend=args.backend,
             model=args.model,
             ollama_base_url=args.ollama_url,
+            task_file=task_file,
+            forward_to=getattr(args, "forward_to", None),
             skills=args.skills,
             skills_dir=Path(args.skills_dir) if args.skills_dir else None,
             max_retries=args.max_retries,
@@ -72,6 +82,8 @@ class Config:
             backend=data.get("backend", "ollama"),
             model=data.get("model", "qwen3"),
             ollama_base_url=data.get("ollama_base_url", "http://localhost:11434"),
+            task_file=Path(data["task_file"]) if data.get("task_file") else None,
+            forward_to=data.get("forward_to"),
             skills=data.get("skills", []),
             skills_dir=Path(data["skills_dir"]) if data.get("skills_dir") else None,
             max_retries=data.get("max_retries", 3),
@@ -91,6 +103,8 @@ class Config:
             "backend": self.backend,
             "model": self.model,
             "ollama_base_url": self.ollama_base_url,
+            "task_file": str(self.task_file) if self.task_file else None,
+            "forward_to": self.forward_to,
             "skills": self.skills,
             "skills_dir": str(self.skills_dir) if self.skills_dir else None,
             "max_retries": self.max_retries,
@@ -115,6 +129,9 @@ Examples:
   # Basic usage with default settings
   petsitter serve
 
+  # Using harness with a task file
+  petsitter harness/models/my-model/programming.yaml --listen-on 8000 --forward-to http://localhost:11434 --model qwen3
+
   # With stacked skills
   petsitter serve --skills github://emoRobot/programming:qwen3 github://emoRobot/soc-2:qwen3
 
@@ -131,7 +148,6 @@ Examples:
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
-    # Serve command
     serve_parser = subparsers.add_parser("serve", help="Start the PetSitter proxy server")
     serve_parser.add_argument(
         "--host",
@@ -223,7 +239,6 @@ Examples:
         help="Path to YAML config file",
     )
 
-    # Search command (placeholder for future)
     subparsers.add_parser("search", help="Search for skills (not yet implemented)")
 
     return parser
@@ -232,4 +247,69 @@ Examples:
 def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     """Parse command line arguments."""
     parser = create_parser()
+    return parser.parse_args(args)
+
+
+def parse_harness_args(args: list[str] | None = None) -> argparse.Namespace:
+    """Parse harness-style CLI arguments.
+
+    Usage: petsitter <task_file.yaml> --listen-on <port> --forward-to <url> --model <name>
+    """
+    parser = argparse.ArgumentParser(
+        prog="petsitter",
+        description="PetSitter - A lightweight proxy and babysitter for local LLMs",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Using harness with a task file
+  petsitter harness/models/my-model/programming.yaml --listen-on 8000 --forward-to http://localhost:11434 --model qwen3
+
+  # Using with a local task
+  petsitter ./my-task.yaml --listen-on 9000 --forward-to http://remote-host:11434 --model llama3
+        """,
+    )
+
+    parser.add_argument(
+        "task_file",
+        type=str,
+        help="Path to task YAML file (or model/task format)",
+    )
+    parser.add_argument(
+        "--listen-on",
+        type=int,
+        dest="port",
+        default=8000,
+        help="Port to listen on (default: 8000)",
+    )
+    parser.add_argument(
+        "--forward-to",
+        type=str,
+        dest="forward_to",
+        default="http://localhost:11434",
+        help="URL to forward requests to (default: http://localhost:11434)",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Model name to use (overrides task file model)",
+    )
+    parser.add_argument(
+        "--host",
+        type=str,
+        default="0.0.0.0",
+        help="Host to bind to (default: 0.0.0.0)",
+    )
+    parser.add_argument(
+        "--max-retries",
+        type=int,
+        default=3,
+        help="Maximum retry attempts (default: 3)",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable verbose logging",
+    )
+
     return parser.parse_args(args)

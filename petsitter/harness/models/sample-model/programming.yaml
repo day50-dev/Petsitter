@@ -1,0 +1,9 @@
+name: programming
+description: Programming task with validation
+model: qwen3
+validators:
+  - ruff_lint
+  - mypy_types
+  - no_eval_exec
+max_retries: 3
+system_prompt_file: system_prompt.md

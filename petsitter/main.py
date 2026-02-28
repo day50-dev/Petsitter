@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 import time
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncGenerator
 
 from fastapi import FastAPI, HTTPException, Request
@@ -23,6 +25,8 @@ from petsitter.api.openai import (
 )
 from petsitter.backends.ollama import OllamaBackend
 from petsitter.config import Config, create_parser, parse_args
+from petsitter.harness.loader import load_task
+from petsitter.harness.models import Task
 from petsitter.logging.metrics import init_logger
 from petsitter.models import (
     AnthropicRequest,
@@ -30,8 +34,11 @@ from petsitter.models import (
     ChatRequest,
     ChatResponse,
     HealthResponse,
+    Message,
+    MessageRole,
     OpenAIRequest,
     OpenAIResponse,
+    Skill,
 )
 from petsitter.retry.engine import RetryEngine
 from petsitter.skills.loader import load_skills
@@ -43,17 +50,32 @@ from petsitter.validators.registry import run_validators
 config: Config | None = None
 backend: OllamaBackend | None = None
 retry_engine: RetryEngine | None = None
+harness_task: Task | None = None
+harness_skill: Skill | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan manager."""
-    global config, backend, retry_engine
+    global config, backend, retry_engine, harness_task, harness_skill
 
-    # Startup
-    parser = create_parser()
-    args = parser.parse_args(["serve"])  # Default to serve command
-    config = Config.from_args(args)
+    # If config not set, we're in serve mode; parse args
+    if config is None:
+        parser = create_parser()
+        args = parser.parse_args(["serve"])
+        config = Config.from_args(args)
+
+    # Create harness_skill from harness_task if available
+    if harness_task is not None and harness_skill is None:
+        harness_skill = Skill(
+            name=harness_task.name,
+            description=harness_task.description,
+            validators=harness_task.validators,
+            model_pin=harness_task.model,
+            system_prompt=harness_task.system_prompt,
+            source=str(harness_task.source) if harness_task.source else "",
+            tools=[],
+        )
 
     # Initialize logger
     init_logger(config)
@@ -108,9 +130,11 @@ async def anthropic_messages(request: AnthropicRequest) -> AnthropicResponse:
         # Convert to internal format
         internal_request = anthropic_to_internal(request)
 
-        # Load skills if specified
+        # Load skills: use harness_skill if available, otherwise load from request
         skills = []
-        if internal_request.skills:
+        if harness_skill:
+            skills = [harness_skill]
+        elif internal_request.skills:
             skills = load_skills(internal_request.skills)
 
         # Process with retry loop
@@ -162,8 +186,12 @@ async def openai_chat_completions(request: OpenAIRequest) -> OpenAIResponse:
         # Convert to internal format
         internal_request = openai_to_internal(request)
 
-        # Load skills if specified (via extra params or model name parsing)
+        # Load skills: use harness_skill if available, otherwise load from request
         skills = []
+        if harness_skill:
+            skills = [harness_skill]
+        elif internal_request.skills:
+            skills = load_skills(internal_request.skills)
 
         # Process with retry loop
         response = await process_with_retry(
@@ -240,7 +268,7 @@ async def process_with_retry(
         if messages and messages[0].role.value == "system":
             messages[0].content = system_prompt + "\n\n" + messages[0].content
         else:
-            messages.insert(0, Message(role="system", content=system_prompt))
+            messages.insert(0, Message(role=MessageRole.SYSTEM, content=system_prompt))
 
     last_response = ""
     validator_results = []
@@ -261,7 +289,7 @@ async def process_with_retry(
                 if messages and messages[0].role.value == "system":
                     messages[0].content = system_prompt + "\n\n" + messages[0].content
                 else:
-                    messages.insert(0, Message(role="system", content=system_prompt))
+                    messages.insert(0, Message(role=MessageRole.SYSTEM, content=system_prompt))
 
         # Call backend
         chat_request = ChatRequest(
@@ -282,6 +310,7 @@ async def process_with_retry(
             code_blocks = extract_python_code_blocks(response.content)
 
             if code_blocks:
+                all_passed = True
                 # Run validators on each code block
                 for code in code_blocks:
                     results = run_validators(stacked_skills.validators, code, response.content)
@@ -291,8 +320,7 @@ async def process_with_retry(
                     if retry_engine.should_early_fail(results):
                         all_passed = False
                         break
-                else:
-                    all_passed = all(r.passed for r in results)
+                    all_passed = all_passed and all(r.passed for r in results)
             else:
                 # No code to validate, pass by default
                 all_passed = True
@@ -333,10 +361,15 @@ def cli() -> None:
 
     from petsitter.logging.metrics import init_logger
 
+    if len(sys.argv) > 1 and not sys.argv[1].startswith("-") and sys.argv[1] not in ("serve", "search"):
+        from petsitter.config import parse_harness_args
+
+        args = parse_harness_args()
+        return run_harness(args)
+
     args = parse_args()
 
     if args.command is None or args.command == "serve":
-        # Load config
         if args.command and hasattr(args, "config") and args.config:
             from pathlib import Path
 
@@ -344,10 +377,8 @@ def cli() -> None:
         else:
             config = Config.from_args(args)
 
-        # Initialize logger
         init_logger(config)
 
-        # Run server
         import uvicorn
 
         uvicorn.run(
@@ -362,6 +393,42 @@ def cli() -> None:
     else:
         print(f"Unknown command: {args.command}")
         sys.exit(1)
+
+
+def run_harness(args) -> None:
+    """Run petsitter in harness mode with a task file."""
+    global config, harness_task, harness_skill
+
+    try:
+        task = load_task(args.task_file)
+    except Exception as e:
+        print(f"Error loading task: {e}")
+        import sys
+        sys.exit(1)
+
+    ollama_url = args.forward_to if args.forward_to else "http://localhost:11434"
+    model = args.model or task.model or "qwen3"
+
+    config = Config(
+        host=args.host,
+        port=args.port,
+        model=model,
+        ollama_base_url=ollama_url,
+        max_retries=args.max_retries,
+        verbose=args.verbose,
+    )
+    harness_task = task
+    harness_skill = None
+
+    init_logger(config)
+
+    import uvicorn
+    uvicorn.run(
+        "petsitter.main:app",
+        host=config.host,
+        port=config.port,
+        reload=False,
+    )
 
 
 if __name__ == "__main__":

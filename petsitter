@@ -1,0 +1,11 @@
+#!/bin/bash
+# PetSitter CLI wrapper - direct invocation
+# Usage:
+#   ./petsitter                              # Start with defaults
+#   ./petsitter serve --port 9000            # Start server with custom port
+#   ./petsitter task.yaml --model qwen3     # Run with task file
+#   ./petsitter --help                       # Show all options
+
+set -e
+cd "$(dirname "$0")"
+PYTHONPATH=src exec python -m petsitter.main "$@"

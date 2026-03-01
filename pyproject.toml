@@ -50,7 +50,7 @@ Homepage = "https://github.com/emoRobot/petsitter"
 Repository = "https://github.com/emoRobot/petsitter.git"
 
 [tool.setuptools.packages.find]
-where = ["."]
+where = ["src"]
 include = ["petsitter*"]
 
 [tool.pytest.ini_options]

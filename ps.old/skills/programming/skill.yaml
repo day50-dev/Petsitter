@@ -1,0 +1,8 @@
+name: programming
+description: Enforce Python best practices, linting, type hints, and no unsafe patterns. Use when coding or reviewing code.
+model_pin: qwen3-8b
+validators:
+  - ruff_lint
+  - mypy_types
+  - no_eval_exec
+version: "2026-02-21"

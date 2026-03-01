@@ -1,0 +1,19 @@
+[
+  {
+    "role": "system",
+    "content": "IMPORTANT: To call a tool, respond ONLY with a JSON object in this exact format:\n{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"<function_name>\",\"arguments\":{<arguments_as_json>}}}\nDo not include any other text in your response when calling a tool.\n\nCRITICAL: After receiving tool results, analyze them and decide your next action.\nDo NOT call the same tool twice with the same arguments. If you already have the information you need, use a different tool or provide your final answer.\n\nThe tools you have access to are:\n[\n  {\n    \"type\": \"function\",\n    \"function\": {\n      \"name\": \"list_mp3s\",\n      \"description\": \"List all MP3 files in the music library\",\n      \"parameters\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"path\": {\n            \"type\": \"string\",\n            \"description\": \"An optional path to search for files, otherwise cwd\"\n          }\n        }\n      }\n    }\n  },\n  {\n    \"type\": \"function\",\n    \"function\": {\n      \"name\": \"play_mp3\",\n      \"description\": \"Play a specific MP3 file from the library. Remember to pass the path if necessary\",\n      \"parameters\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"filename\": {\n            \"type\": \"string\",\n            \"description\": \"The name of the MP3 file to play\"\n          },\n          \"path\": {\n            \"type\": \"string\",\n            \"description\": \"The path that was previously used\"\n          }\n        },\n        \"required\": [\n          \"filename\"\n        ]\n      }\n    }\n  }\n]"
+  },
+  {
+    "role": "user",
+    "content": "what files do I have in my ~/mp3 path\n"
+  },
+  {
+    "role": "tool",
+    "tool_call_id": "call_mhi8xrv3",
+    "content": "[\"Elektrobopacek - Towards the final Battle.mp3\", \"Elektrobopacek - Escape the Labyrinth.mp3\", \"Elektrobopacek - Journey to the misty Lands.mp3\", \"Elektrobopacek - Mistral Forte.mp3\", \"Elektrobopacek - Leaving Spaceport X-19.mp3\", \"Elektrobopacek - Dracula Rising.mp3\"]"
+  },
+  {
+    "role": "assistant",
+    "content": "Here are the MP3 files currently in your `~/mp3` directory:\n\n1. **Elektrobopacek - Towards the final Battle.mp3**  \n2. **Elektrobopacek - Escape the Labyrinth.mp3**  \n3. **Elektrobopacek - Journey to the misty Lands.mp3**  \n4. **Elektrobopacek - Mistral Forte.mp3**  \n5. **Elektrobopacek - Leaving Spaceport X-19.mp3**  \n6. **Elektrobopacek - Dracula Rising.mp3**  \n\nLet me know if you\u2019d like to play any of these tracks or need anything else!"
+  }
+]

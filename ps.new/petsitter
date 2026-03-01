@@ -1,0 +1,7 @@
+#!/usr/bin/env python3
+"""Petsitter CLI entry point."""
+
+from src.server import cli
+
+if __name__ == "__main__":
+    cli()

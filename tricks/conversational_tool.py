@@ -1,13 +1,9 @@
 """Conversational tool calling trick for small models.
 
-Uses madlib-style templates that small models can complete:
-- "DEAR ORACLE, <REQUEST> ON <ARG1> AND <ARG2>"
-- "THE ORACLE RESPONDS: <RESULT>"
-
-This works better because:
-- Clear slots to fill (like a form)
-- Models are trained on similar patterns
-- No complex syntax to remember
+Uses an iterative conversational approach:
+1. Shows only function names and descriptions
+2. Collects parameters one-by-one through dialogue
+3. Handles confusion by retrying with original context
 """
 
 import json
@@ -18,55 +14,44 @@ from src.trick import Trick
 
 
 class ConversationalToolTrick(Trick):
-    """Enable tool calling using madlib-style conversational markers."""
+    """Enable tool calling through iterative parameter collection."""
 
     def __init__(self):
         self._tools_cache = None
         self._model_has_native_tools = False
+        self._pending_tool = None
+        self._original_user_request = ""
+        self._collected_params = {}
+        self._optional_asked = {}
 
     def system_prompt(self, to_add: str) -> str:
-        """Add madlib-style tool calling instructions."""
+        """Show only function names and descriptions."""
         if self._model_has_native_tools:
             return ""
         
-        # Build tool list with parameter descriptions
         tool_list = ""
         if self._tools_cache:
-            examples = []
+            lines = []
             for tool in self._tools_cache:
                 func = tool.get("function", {})
                 name = func.get("name", "").upper()
-                params_def = func.get("parameters", {})
-                props = params_def.get("properties", {})
-                required = params_def.get("required", [])
-                
-                # Build parameter description
-                param_descs = []
-                for param_name, param_def in props.items():
-                    desc = param_def.get("description", "")
-                    req_marker = " (required)" if param_name in required else ""
-                    param_descs.append(f"{param_name}{req_marker}: {desc}")
-                
-                if param_descs:
-                    examples.append(f"{name} - {', '.join(param_descs)}")
-                else:
-                    examples.append(name)
-            
-            if examples:
-                tool_list = "\n\n" + "\n".join(examples)
+                desc = func.get("description", "")
+                lines.append(f"{name}: {desc}")
+            if lines:
+                tool_list = "\n".join(lines)
         
         return (
-            "You are an assistant for a user. You have access to a magical oracle.\n\n"
-            "To make a request, use this EXACT format:\n"
-            "DEAR ORACLE, <REQUEST> ON <PARAMETER>\n\n"
-            "IMPORTANT: Only say the request line. DO NOT continue writing after it.\n"
-            "Wait for the oracle's response before continuing.\n\n"
-            f"THINGS YOU CAN ASK THE ORACLE:{tool_list}\n\n"
-            "NEVER call the oracle twice with the same request."
+            "You are an assistant for a user. You have access to ANDYBOT.\n\n"
+            "THINGS YOU CAN ASK ANDYBOT:\n"
+            f"{tool_list}\n\n"
+            "To make a request, say:\n"
+            "DEAR ANDYBOT, <FUNCTION_NAME>\n\n"
+            "ANDYBOT will guide you through providing parameters.\n"
+            "Wait for ANDYBOT's response before continuing."
         )
 
     def pre_hook(self, context: list, params: dict) -> list:
-        """Inject tool definitions and format tool results as oracle responses."""
+        """Inject tool definitions and handle tool results."""
         tools = params.get("tools")
         if tools:
             self._tools_cache = tools
@@ -74,67 +59,22 @@ class ConversationalToolTrick(Trick):
         if not tools:
             tools = self._tools_cache
         
-        # Find the original user request
         original_request = ""
         for msg in context:
             if msg.get("role") == "user":
                 original_request = msg.get("content", "").strip()
                 break
         
-        # Build tool info for responses
-        tool_list_detailed = ""
-        tool_names = []
-        tool_params = {}
-        if tools:
-            for tool in tools:
-                func = tool.get("function", {})
-                name = func.get("name", "").upper()
-                tool_names.append(name)
-                # Store parameter descriptions
-                params_def = func.get("parameters", {})
-                props = params_def.get("properties", {})
-                required = params_def.get("required", [])
-                tool_params[func.get("name", "")] = {
-                    "params": props,
-                    "required": required,
-                }
-            
-            # Build detailed tool list with parameter descriptions
-            examples = []
-            for tool in tools:
-                func = tool.get("function", {})
-                name = func.get("name", "").upper()
-                params_def = func.get("parameters", {})
-                props = params_def.get("properties", {})
-                required = params_def.get("required", [])
-                
-                param_descs = []
-                for param_name, param_def in props.items():
-                    desc = param_def.get("description", "")
-                    req_marker = " (required)" if param_name in required else ""
-                    param_descs.append(f"{param_name}{req_marker}: {desc}")
-                
-                if param_descs:
-                    examples.append(f"{name} - {', '.join(param_descs)}")
-                else:
-                    examples.append(name)
-            
-            if examples:
-                tool_list_detailed = "\n\n" + "\n".join(examples)
+        if original_request:
+            self._original_user_request = original_request
 
-        # Format any tool results as oracle responses with context
         for i, msg in enumerate(context):
             if msg.get("role") == "tool" and "content" in msg:
-                # Convert tool result to oracle response format
                 content = msg["content"]
                 try:
-                    # If it's a JSON list, format nicely
                     items = json.loads(content)
                     if isinstance(items, list):
-                        if items:
-                            response = f"THE ORACLE RESPONDS: {', '.join(items)}"
-                        else:
-                            response = "THE ORACLE RESPONDS: (empty result)"
+                        response = f"THE ORACLE RESPONDS: {', '.join(items)}" if items else "THE ORACLE RESPONDS: (empty result)"
                     elif isinstance(items, dict):
                         response = f"THE ORACLE RESPONDS: {json.dumps(items)}"
                     else:
@@ -142,18 +82,15 @@ class ConversationalToolTrick(Trick):
                 except (json.JSONDecodeError, TypeError):
                     response = f"THE ORACLE RESPONDS: {content}"
 
-                # Add context for multi-turn conversations
                 msg["content"] = (
-                    f"{response}\n\n"
-                    f"THE ORIGINAL USER REQUEST: {original_request}\n\n"
-                    f"THINGS YOU CAN ASK THE ORACLE:{tool_list_detailed}\n\n"
-                    "If you need to ask the oracle to do more things, he eagerly awaits your request."
+                    f"ANDYBOT RESPONDS: {response}\n\n"
+                    f"THE ORIGINAL USER REQUEST: {self._original_user_request}\n\n"
+                    "If you need ANDYBOT to do more things, it awaits your request."
                 )
         
         if not tools:
             return context
 
-        # Regenerate system prompt with current tools
         if context and context[0].get("role") == "system":
             context[0]["content"] = self.system_prompt("")
         else:
@@ -162,18 +99,13 @@ class ConversationalToolTrick(Trick):
         return context
 
     def post_hook(self, context: list) -> list:
-        """Detect conversational tool calls and convert to OpenAI format.
-        
-        Also checks if tool calls have all required parameters.
-        If not, adds a clarifying oracle message.
-        """
+        """Detect tool calls and collect parameters iteratively."""
         if not context:
             return context
 
         last_message = context[-1]
         content = last_message.get("content", "")
 
-        # Check for native tool_calls
         if "tool_calls" in last_message:
             self._model_has_native_tools = True
             cleaned_tool_calls = []
@@ -188,247 +120,236 @@ class ConversationalToolTrick(Trick):
                 }
                 cleaned_tool_calls.append(cleaned)
             last_message["tool_calls"] = cleaned_tool_calls
+            self._reset_state()
             return context
 
-        # Parse conversational tool calls
-        tool_calls = self._parse_conversational_calls(content)
-        if tool_calls:
-            # Check if tool calls have all required parameters
-            missing_params = self._check_missing_params(tool_calls)
-            if missing_params:
-                # Add oracle question about missing params - replace content
-                oracle_question = self._build_oracle_question(missing_params)
-                last_message["content"] = oracle_question
-                return context
-            
-            # Preserve original content for debugging/persistence
-            original_content = content
-            
-            last_message["tool_calls"] = [
-                {
-                    "id": f"call_{self._generate_id()}",
-                    "type": "function",
-                    "function": {
-                        "name": tc["name"],
-                        "arguments": json.dumps(tc["arguments"]),
-                    },
-                }
-                for tc in tool_calls
-            ]
-            # Preserve original content - don't set to null so llcat can replay correctly
-            # The tool_calls field takes precedence for OpenAI API
+        if self._pending_tool:
+            return self._handle_param_response(context, content)
+
+        parsed = self._parse_tool_request_with_args(content)
+        if parsed:
+            tool_name, inline_args = parsed
+            return self._start_tool_collection(context, tool_name, inline_args)
 
         return context
 
-    def _check_missing_params(self, tool_calls: list) -> list:
-        """Check if any tool calls are missing required parameters."""
-        missing = []
-        for tc in tool_calls:
-            tool_name = tc.get("name", "")
-            args = tc.get("arguments", {})
-            
-            # Get required params for this tool
-            required = []
-            if self._tools_cache:
-                for tool in self._tools_cache:
-                    func = tool.get("function", {})
-                    if func.get("name") == tool_name:
-                        params_def = func.get("parameters", {})
-                        required = params_def.get("required", [])
-                        break
-            
-            # Check which required params are missing
-            for param in required:
-                if param not in args or not args[param]:
-                    missing.append({
-                        "tool": tool_name,
-                        "param": param,
-                    })
-        
-        return missing
+    def _reset_state(self):
+        self._pending_tool = None
+        self._collected_params = {}
+        self._optional_asked = {}
 
-    def _build_oracle_question(self, missing_params: list) -> str:
-        """Build an oracle question for missing parameters."""
-        if not missing_params:
-            return ""
+    def _parse_tool_request_with_args(self, content: str) -> tuple | None:
+        """Parse 'DEAR ORACLE, <FUNCTION_NAME> [args...]' from content.
         
-        parts = []
-        for mp in missing_params:
-            tool_name = mp["tool"]
-            param = mp["param"]
+        Returns (tool_name, inline_args) or None.
+        """
+        pattern = r'DEAR\s+ANDYBOT,\s*(\w+)(?:\s*(.+))?'
+        match = re.search(pattern, content, re.IGNORECASE | re.DOTALL)
+        if match:
+            requested = match.group(1).upper()
+            args_str = match.group(2).strip() if match.group(2) else ""
+            tool_name = self._find_tool_name(requested)
+            if tool_name:
+                inline_args = self._parse_inline_args(args_str, tool_name)
+                return (tool_name, inline_args)
+        return None
+
+    def _parse_inline_args(self, args_str: str, tool_name: str) -> dict:
+        """Parse inline arguments like 'PATH=~/mp3' or '~/mp3' or 'path: ~/mp3'."""
+        if not args_str:
+            return {}
+        
+        args = {}
+        param_names = self._get_param_names(tool_name)
+        
+        args_str = args_str.strip()
+        
+        pattern = r'(\w+)\s*[=:]\s*([^\n,]+)'
+        for match in re.finditer(pattern, args_str, re.IGNORECASE):
+            key = match.group(1).lower()
+            value = match.group(2).strip().strip('"\'')
+            for pname in param_names:
+                if pname.lower() == key:
+                    args[pname] = value
+                    break
+        
+        if not args:
+            parts = re.split(r'\s+AND\s+|\s*,\s+', args_str, flags=re.IGNORECASE)
+            cleaned = []
+            for part in parts:
+                part = part.strip()
+                if ':' in part:
+                    maybe_key, val = part.split(':', 1)
+                    maybe_key = maybe_key.strip().lower()
+                    found = False
+                    for pname in param_names:
+                        if pname.lower() == maybe_key:
+                            cleaned.append(val.strip().strip('"\''))
+                            found = True
+                            break
+                    if not found:
+                        cleaned.append(part.strip().strip('"\''))
+                else:
+                    cleaned.append(part.strip().strip('"\''))
             
-            # Get parameter description
-            desc = ""
-            if self._tools_cache:
-                for tool in self._tools_cache:
-                    func = tool.get("function", {})
-                    if func.get("name") == tool_name:
-                        props = func.get("parameters", {}).get("properties", {})
-                        desc = props.get(param, {}).get("description", "")
-                        break
-            
-            if desc:
-                parts.append(f"For {tool_name}, the parameter '{param}' requires: {desc}")
+            for i, pname in enumerate(param_names):
+                if i < len(cleaned) and cleaned[i]:
+                    args[pname] = cleaned[i]
+        
+        return args
+
+    def _get_param_names(self, tool_name: str) -> list:
+        """Get parameter names for a tool."""
+        if not self._tools_cache:
+            return []
+        for tool in self._tools_cache:
+            func = tool.get("function", {})
+            if func.get("name") == tool_name:
+                params = func.get("parameters", {}).get("properties", {})
+                return list(params.keys())
+        return []
+
+    def _start_tool_collection(self, context: list, tool_name: str, inline_args: dict) -> list:
+        """Start collecting parameters for a tool."""
+        self._pending_tool = tool_name
+        self._collected_params = inline_args.copy()
+        self._optional_asked = {k: True for k in inline_args.keys()}
+        
+        missing = self._get_next_missing_param()
+        if not missing:
+            return self._finalize_tool_call(context)
+        
+        last_message = context[-1]
+        last_message["content"] = self._build_param_question(missing["param"], missing["description"], missing["required"])
+        return context
+
+    def _handle_param_response(self, context: list, content: str) -> list:
+        """Handle the model's response to a parameter question."""
+        content_stripped = content.strip()
+        content_lower = content_stripped.lower()
+        
+        if content_lower in ["i am confused", "i do not know", "i'm confused", "i don't know", "skip", "none", "", "not required"]:
+            missing = self._get_next_missing_param()
+            if missing and not missing["required"]:
+                if missing["param"] not in self._optional_asked:
+                    self._optional_asked[missing["param"]] = True
+                    next_missing = self._get_next_missing_param()
+                    if next_missing:
+                        last_message = context[-1]
+                        last_message["content"] = self._build_param_question(
+                            next_missing["param"], next_missing["description"], next_missing["required"]
+                        )
+                        return context
+                    else:
+                        return self._finalize_tool_call(context)
+                else:
+                    return self._finalize_tool_call(context)
+            elif missing and missing["required"]:
+                self._reset_state()
+                last_message = context[-1]
+                last_message["content"] = (
+                    "ANDYBOT SAYS: Let me help you!\n\n"
+                    f"THE ORIGINAL USER REQUEST: {self._original_user_request}\n\n"
+                    "What would you like to ask ANDYBOT?"
+                )
+                return context
             else:
-                parts.append(f"For {tool_name}, the parameter '{param}' is required")
+                return self._finalize_tool_call(context)
         
+        missing = self._get_next_missing_param()
+        if missing:
+            self._collected_params[missing["param"]] = content_stripped
+            if not missing["required"]:
+                self._optional_asked[missing["param"]] = True
+        
+        next_missing = self._get_next_missing_param()
+        if not next_missing:
+            return self._finalize_tool_call(context)
+        
+        last_message = context[-1]
+        last_message["content"] = self._build_param_question(
+            next_missing["param"], next_missing["description"], next_missing["required"]
+        )
+        return context
+
+    def _get_next_missing_param(self) -> dict | None:
+        """Get the next parameter that hasn't been collected.
+        
+        Returns required params first, then optional ones.
+        """
+        if not self._pending_tool or not self._tools_cache:
+            return None
+        
+        for tool in self._tools_cache:
+            func = tool.get("function", {})
+            if func.get("name") == self._pending_tool:
+                params_def = func.get("parameters", {})
+                required = params_def.get("required", [])
+                props = params_def.get("properties", {})
+                
+                for param in required:
+                    if param not in self._collected_params:
+                        return {
+                            "param": param,
+                            "description": props.get(param, {}).get("description", param),
+                            "required": True
+                        }
+                
+                for param in props:
+                    if param not in self._collected_params and param not in self._optional_asked:
+                        return {
+                            "param": param,
+                            "description": props.get(param, {}).get("description", param),
+                            "required": False
+                        }
+                break
+        
+        return None
+
+    def _build_param_question(self, param_name: str, description: str, required: bool) -> str:
+        """Build the oracle's question for a parameter."""
+        req_text = " (required)" if required else " (optional)"
         return (
-            "THE ORACLE HAS A QUESTION!\n"
-            + "\n".join(parts)
-            + "\n\nPlease provide the missing information."
+            f"ANDYBOT WOULD LIKE TO KNOW: {description}{req_text}?\n"
+            "Answer as succinctly as possible! ANDYBOT has little patience!\n"
+            "You can also say \"I am confused\", \"I do not know\", or \"not required\"."
         )
 
-    def _parse_conversational_calls(self, content: str) -> list:
-        """Parse madlib-style tool calls like 'DEAR ORACLE, LISTMP3 ON ~/mp3'.
+    def _finalize_tool_call(self, context: list) -> list:
+        """Create the final tool call with all collected parameters."""
+        last_message = context[-1]
+        last_message["tool_calls"] = [
+            {
+                "id": f"call_{self._generate_id()}",
+                "type": "function",
+                "function": {
+                    "name": self._pending_tool,
+                    "arguments": json.dumps(self._collected_params),
+                },
+            }
+        ]
+        last_message["content"] = None
         
-        Only parses the FIRST tool call and ignores everything after.
-        Small models tend to continue rambling after the call.
-        """
-        tool_calls = []
+        self._reset_state()
         
-        # Match "DEAR ORACLE, <REQUEST> ON <ARG1>..."
-        # Stop at first match - models often ramble after
-        pattern = r'DEAR\s+ORACLE,\s*(\w+)\s+ON\s+([^\n\.]+)'
-        match = re.search(pattern, content, re.IGNORECASE)
-        
-        if match:
-            tool_name = match.group(1).upper()
-            arg1 = match.group(2).strip()
-            
-            # Find matching tool from cache by normalizing names
-            mapped_name = self._find_tool_name(tool_name)
-            if not mapped_name:
-                return []  # No matching tool found
-            
-            # Build args dict based on tool's parameter names
-            args = self._build_args(arg1, mapped_name)
-            
-            tool_calls.append({
-                "name": mapped_name,
-                "arguments": args,
-            })
-            return tool_calls  # Return after first match
-        
-        # Fallback: try simpler pattern without ON
-        simple_pattern = r'DEAR\s+ORACLE,\s*(\w+)(?:\s+([^\n\.]+))?'
-        match = re.search(simple_pattern, content, re.IGNORECASE)
-        if match:
-            tool_name = match.group(1).upper()
-            args_str = match.group(2).strip() if match.group(2) else ""
-            
-            mapped_name = self._find_tool_name(tool_name)
-            if mapped_name:
-                args = self._parse_args(args_str, mapped_name)
-                tool_calls.append({"name": mapped_name, "arguments": args})
-        
-        return tool_calls
+        return context
 
     def _find_tool_name(self, requested_name: str) -> str | None:
-        """Find a tool name from cache that matches the requested name.
-        
-        Normalizes names for matching:
-        - LISTMP3S, LIST_MP3S, LISTMP3 -> list_mp3s
-        - PLAYMP3, PLAY_MP3 -> play_mp3
-        """
+        """Find a tool name from cache matching the requested name."""
         if not self._tools_cache:
             return None
         
-        # Normalize requested name: remove underscores, uppercase
         requested_normalized = requested_name.upper().replace("_", "")
         
         for tool in self._tools_cache:
             func = tool.get("function", {})
             actual_name = func.get("name", "")
-            # Normalize actual name the same way
             actual_normalized = actual_name.upper().replace("_", "")
             
             if requested_normalized == actual_normalized:
                 return actual_name
         
         return None
-
-    def _build_args(self, arg_string: str, tool_name: str) -> dict:
-        """Build args dict based on tool's actual parameter names.
-        
-        Handles formats like:
-        - "~/mp3" -> {"path": "~/mp3"}
-        - "path: ~/mp3" -> {"path": "~/mp3"}
-        - "filename AND path" -> {"filename": "...", "path": "..."}
-        """
-        args = {}
-
-        # Get parameter names from tool definition
-        param_names = []
-        if self._tools_cache:
-            for tool in self._tools_cache:
-                func = tool.get("function", {})
-                if func.get("name") == tool_name:
-                    params = func.get("parameters", {}).get("properties", {})
-                    param_names = list(params.keys())
-                    break
-
-        if not param_names:
-            # Fallback: use generic parsing
-            return self._parse_args(arg_string, tool_name)
-
-        # Split args by " AND " and map to parameter names
-        parts = [p.strip() for p in arg_string.split(" AND ")]
-        
-        # Clean up each part - remove "param:" prefixes
-        cleaned_parts = []
-        for part in parts:
-            # Remove "param:" prefix if present
-            if ":" in part:
-                maybe_param, value = part.split(":", 1)
-                maybe_param = maybe_param.strip().lower()
-                # Check if it matches a real parameter
-                if maybe_param in [p.lower() for p in param_names]:
-                    part = value.strip()
-            cleaned_parts.append(part.strip('"\''))
-        
-        for i, param_name in enumerate(param_names):
-            if i < len(cleaned_parts):
-                args[param_name] = cleaned_parts[i]
-
-        return args
-
-    def _parse_args(self, args_str: str, tool_name: str) -> dict:
-        """Parse argument string into dict based on tool's actual parameters."""
-        if not args_str:
-            return {}
-        
-        args_str = args_str.strip().strip('"\'')
-        
-        # Try JSON first
-        try:
-            return json.loads(args_str)
-        except json.JSONDecodeError:
-            pass
-        
-        # Get actual parameter names from tool definition
-        param_names = []
-        if self._tools_cache:
-            for tool in self._tools_cache:
-                func = tool.get("function", {})
-                if func.get("name") == tool_name:
-                    params = func.get("parameters", {}).get("properties", {})
-                    param_names = list(params.keys())
-                    break
-        
-        if not param_names:
-            # No params defined, return empty
-            return {}
-        
-        # Split by " AND " and map to parameter names
-        parts = [p.strip() for p in args_str.split(" AND ")]
-        args = {}
-        for i, param_name in enumerate(param_names):
-            if i < len(parts):
-                args[param_name] = parts[i]
-            else:
-                args[param_name] = ""
-        
-        return args
 
     def _generate_id(self) -> str:
         """Generate a random ID for tool call."""
@@ -439,21 +360,3 @@ class ConversationalToolTrick(Trick):
         """Declare tool calling capability."""
         capabilities["tools_support"] = True
         return capabilities
-
-
-def format_oracle_response(result: str) -> str:
-    """Format a tool result as an oracle response.
-    
-    Use this in llcat's tool_program.py to format results.
-    
-    Example:
-        result = format_oracle_response('["a.mp3", "b.mp3"]')
-        # Returns: "THE ORACLE RESPONDS: a.mp3, b.mp3"
-    """
-    try:
-        items = json.loads(result)
-        if isinstance(items, list):
-            return f"THE ORACLE RESPONDS: {', '.join(items)}"
-    except (json.JSONDecodeError, TypeError):
-        pass
-    return f"THE ORACLE RESPONDS: {result}"

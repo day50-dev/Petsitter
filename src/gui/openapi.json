@@ -1,0 +1,384 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "PetSitter API",
+    "version": "0.1.0",
+    "description": "OpenAI-compatible proxy that adds functionality to models through dynamically loadable tricks.\n\nTeach old models new tricks — intercept requests/responses to add tool calling, JSON mode enforcement, and more."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "Local PetSitter instance"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health check",
+        "operationId": "health",
+        "tags": ["System"],
+        "responses": {
+          "200": {
+            "description": "Server is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string", "example": "ok" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/completions": {
+      "post": {
+        "summary": "Chat completions (proxy)",
+        "operationId": "chatCompletions",
+        "tags": ["Proxy"],
+        "description": "Proxies chat completion requests to the upstream model, applying loaded tricks. Supports both streaming and non-streaming modes.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["messages"],
+                "properties": {
+                  "model": { "type": "string", "description": "Model identifier" },
+                  "messages": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "role": { "type": "string", "enum": ["system", "user", "assistant", "tool"] },
+                        "content": { "type": "string" }
+                      }
+                    }
+                  },
+                  "stream": { "type": "boolean", "description": "If true, returns a Server-Sent Events stream" },
+                  "temperature": { "type": "number" },
+                  "max_tokens": { "type": "integer" },
+                  "tools": {
+                    "type": "array",
+                    "description": "Tool definitions (handled by tricks for models without native tool support)",
+                    "items": { "type": "object" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Chat completion response (or SSE stream if streaming)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "object": { "type": "string" },
+                    "created": { "type": "integer" },
+                    "model": { "type": "string" },
+                    "choices": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "index": { "type": "integer" },
+                          "message": {
+                            "type": "object",
+                            "properties": {
+                              "role": { "type": "string" },
+                              "content": { "type": "string" },
+                              "tool_calls": { "type": "array", "items": { "type": "object" } }
+                            }
+                          },
+                          "finish_reason": { "type": "string" }
+                        }
+                      }
+                    },
+                    "usage": { "type": "object" },
+                    "capabilities": {
+                      "type": "object",
+                      "description": "Merged capabilities from all loaded tricks"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/models": {
+      "get": {
+        "summary": "List models",
+        "operationId": "listModels",
+        "tags": ["Proxy"],
+        "description": "Proxies the model listing request to the upstream provider.",
+        "responses": {
+          "200": {
+            "description": "List of available models",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": { "type": "string" },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string" },
+                          "object": { "type": "string" },
+                          "created": { "type": "integer" },
+                          "owned_by": { "type": "string" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/gui/info": {
+      "get": {
+        "summary": "Server information",
+        "operationId": "guiInfo",
+        "tags": ["GUI"],
+        "description": "Returns information about the running PetSitter instance.",
+        "responses": {
+          "200": {
+            "description": "Server info",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "listen_on": { "type": "string", "example": "localhost:8080" },
+                    "model_url": { "type": "string", "example": "http://localhost:11434" },
+                    "model_name": { "type": "string", "nullable": true }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/gui/tricks": {
+      "get": {
+        "summary": "List loaded tricks",
+        "operationId": "listTricks",
+        "tags": ["GUI"],
+        "description": "Returns a list of currently loaded trick instances.",
+        "responses": {
+          "200": {
+            "description": "List of loaded tricks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": { "type": "string", "description": "Trick class name", "example": "ToolCallTrick" },
+                      "module": { "type": "string", "description": "Python module path", "example": "tricks.tool_call" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/gui/tricks/available": {
+      "get": {
+        "summary": "List available trick modules",
+        "operationId": "listAvailableTricks",
+        "tags": ["GUI"],
+        "description": "Scans the built-in tricks directory and returns file paths that can be loaded.",
+        "responses": {
+          "200": {
+            "description": "List of available trick file paths",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "example": "tricks/tool_call.py"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/gui/tricks/load": {
+      "post": {
+        "summary": "Load a trick",
+        "operationId": "loadTrick",
+        "tags": ["GUI"],
+        "description": "Dynamically loads a trick module from a file path.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["path"],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "Path to the trick .py file",
+                    "example": "tricks/xml_tool.py"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Trick loaded successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "name": { "type": "string", "example": "XmlToolTrick" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Failed to load trick",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": false },
+                    "error": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/gui/tricks/unload": {
+      "post": {
+        "summary": "Unload a trick",
+        "operationId": "unloadTrick",
+        "tags": ["GUI"],
+        "description": "Removes a loaded trick by class name.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Class name of the trick to remove",
+                    "example": "JsonModeTrick"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Trick removed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Trick not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": false },
+                    "error": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/gui/logs": {
+      "get": {
+        "summary": "Get activity logs",
+        "operationId": "getLogs",
+        "tags": ["GUI"],
+        "description": "Returns recent log entries from the server's in-memory log buffer.",
+        "parameters": [
+          {
+            "name": "level",
+            "in": "query",
+            "schema": { "type": "string", "enum": ["INFO", "DEBUG", "WARNING", "ERROR"] },
+            "description": "Filter by log level"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": { "type": "integer", "default": 100, "maximum": 500 },
+            "description": "Maximum number of entries to return"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of log entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "time": { "type": "string", "example": "14:23:01" },
+                      "level": { "type": "string", "example": "INFO" },
+                      "message": { "type": "string" },
+                      "name": { "type": "string", "example": "petsitter" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

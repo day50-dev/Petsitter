@@ -7,13 +7,11 @@ from typing import Any
 import httpx
 
 from src.context import append_to_system_prompt
-from src.trick import Trick, callmodel
-
+from src.trick import Trick, callmodel, configure
 logger = logging.getLogger("petsitter")
 
 
 class ProxyHandler:
-    """Handles proxied requests to the upstream model."""
 
     def __init__(
         self,
@@ -26,43 +24,64 @@ class ProxyHandler:
         self.model_name = model_name
         self.api_key = api_key
         self.tricks = tricks or []
+        configure(self.model_url, self.model_name or "", self.api_key)
 
     def _build_headers(self) -> dict[str, str]:
-        """Build request headers."""
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
 
     def _apply_system_prompt_tricks(self, system_prompt: str) -> str:
-        """Apply system_prompt hooks from all tricks."""
         result = system_prompt
-        for trick in self.tricks:
+        for trick in list(self.tricks):
             addition = trick.system_prompt(result)
             if addition:
                 result = result + "\n" + addition if result else addition
         return result
 
     def _apply_pre_hooks(self, context: list, params: dict) -> list:
-        """Apply pre_hook from all tricks."""
         result = context
-        for trick in self.tricks:
+        for trick in list(self.tricks):
             result = trick.pre_hook(result, params)
         return result
 
     def _apply_post_hooks(self, context: list) -> list:
-        """Apply post_hook from all tricks."""
         result = context
-        for trick in self.tricks:
+        for trick in list(self.tricks):
             result = trick.post_hook(result)
         return result
 
     def _merge_capabilities(self) -> dict:
-        """Merge capabilities from all tricks."""
         capabilities = {}
-        for trick in self.tricks:
+        for trick in list(self.tricks):
             capabilities = trick.info(capabilities)
         return capabilities
+
+    def add_trick(self, path: str) -> Trick:
+        from src.loader import load_trick_from_path
+        trick_class = load_trick_from_path(path)
+        trick = trick_class()
+        self.tricks.append(trick)
+        logger.info("Loaded trick: %s (%s)", type(trick).__name__, path)
+        return trick
+
+    def remove_trick(self, class_name: str) -> bool:
+        for i, trick in enumerate(self.tricks):
+            if type(trick).__name__ == class_name:
+                del self.tricks[i]
+                logger.info("Removed trick: %s", class_name)
+                return True
+        return False
+
+    def get_tricks_info(self) -> list[dict]:
+        return [
+            {
+                "name": type(t).__name__,
+                "module": type(t).__module__,
+            }
+            for t in self.tricks
+        ]
 
     async def chat_completions(self, payload: dict) -> dict:
         """Handle /v1/chat/completions request.
@@ -139,7 +158,6 @@ class ProxyHandler:
 
         # Apply post-hooks
         context = self._apply_post_hooks(context)
-
         logger.debug(f"Context after post-hooks: {json.dumps(context, indent=2)}")
 
         # Update result with potentially modified response

@@ -74,13 +74,13 @@ class ConversationalToolTrick(Trick):
                 try:
                     items = json.loads(content)
                     if isinstance(items, list):
-                        response = f"THE ORACLE RESPONDS: {', '.join(items)}" if items else "THE ORACLE RESPONDS: (empty result)"
+                        response = f"THE ANDYBOT RESPONDS: {', '.join(items)}" if items else "THE ORACLE RESPONDS: (empty result)"
                     elif isinstance(items, dict):
-                        response = f"THE ORACLE RESPONDS: {json.dumps(items)}"
+                        response = f"THE ANDYBOT RESPONDS: {json.dumps(items)}"
                     else:
-                        response = f"THE ORACLE RESPONDS: {items}"
+                        response = f"THE ANDYBOT RESPONDS: {items}"
                 except (json.JSONDecodeError, TypeError):
-                    response = f"THE ORACLE RESPONDS: {content}"
+                    response = f"THE ANDYBOT RESPONDS: {content}"
 
                 msg["content"] = (
                     f"ANDYBOT RESPONDS: {response}\n\n"
@@ -139,7 +139,7 @@ class ConversationalToolTrick(Trick):
         self._optional_asked = {}
 
     def _parse_tool_request_with_args(self, content: str) -> tuple | None:
-        """Parse 'DEAR ORACLE, <FUNCTION_NAME> [args...]' from content.
+        """Parse 'DEAR ANDYBOT, <FUNCTION_NAME> [args...]' from content.
         
         Returns (tool_name, inline_args) or None.
         """

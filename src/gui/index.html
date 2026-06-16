@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PetSitter Control Panel</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f0f1a;color:#c8d6e5;padding:20px;font-size:14px}
+h1{font-size:20px;font-weight:600;color:#fff}
+h2{font-size:15px;font-weight:600;color:#a4b8d4;margin-bottom:10px}
+header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:12px;border-bottom:1px solid #1e2a3a}
+header .info{display:flex;gap:20px;font-size:13px;color:#6b8299}
+header .info span{display:flex;align-items:center;gap:4px}
+header .info .label{color:#4a6572}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+.card{background:#16162a;border-radius:8px;padding:16px;border:1px solid #1e2a3a}
+.trick-item,.avail-item{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;margin-bottom:4px;border-radius:4px;background:#1a1a33}
+.trick-item .name{font-weight:500;color:#e0e0e0;font-size:13px}
+.trick-item .module{font-size:11px;color:#5a7a95;margin-left:8px}
+.avail-item .name{font-size:13px;color:#c8d6e5}
+.btn{display:inline-flex;align-items:center;gap:4px;padding:4px 12px;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:500;transition:background .15s}
+.btn-sm{padding:3px 10px;font-size:11px}
+.btn-danger{background:#3d1a2a;color:#ff6b8a}
+.btn-danger:hover{background:#5a253a}
+.btn-success{background:#1a3d2a;color:#6bff8a}
+.btn-success:hover{background:#255a3a}
+.btn-primary{background:#1a2a4d;color:#8ab4ff}
+.btn-primary:hover{background:#253a6a}
+.btn-secondary{background:#1e2a3a;color:#7a9ab5}
+.btn-secondary:hover{background:#2a3a4a}
+.loader{color:#5a7a95;font-size:13px;padding:10px 0}
+.empty{color:#4a6572;font-size:13px;font-style:italic;padding:10px 0}
+.log-section{margin-bottom:20px}
+.log-controls{display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap}
+.log-controls label{display:flex;align-items:center;gap:4px;font-size:12px;color:#7a9ab5;cursor:pointer}
+.log-controls input[type=checkbox]{accent-color:#5a8ab5}
+.log-viewer{background:#0a0a15;border:1px solid #1e2a3a;border-radius:6px;height:320px;overflow-y:auto;font-family:'SF Mono','Fira Code','Consolas',monospace;font-size:12px;line-height:1.6;padding:10px}
+.log-entry{padding:1px 4px;border-radius:2px;white-space:pre-wrap;word-break:break-all}
+.log-entry:hover{background:#12122a}
+.log-entry .time{color:#4a6572;margin-right:8px}
+.log-entry.lvl-INFO{color:#8ab4ff}
+.log-entry.lvl-DEBUG{color:#4a6572}
+.log-entry.lvl-WARNING{color:#f5c542}
+.log-entry.lvl-ERROR{color:#ff6b8a}
+.log-entry.lvl-CRITICAL{color:#ff3b5a;font-weight:700}
+.log-count{font-size:12px;color:#4a6572;margin-left:auto}
+.custom-path{display:flex;gap:8px;margin-top:12px}
+.custom-path input{flex:1;background:#0f0f1a;border:1px solid #1e2a3a;border-radius:4px;padding:8px 10px;color:#c8d6e5;font-size:13px;font-family:monospace}
+.custom-path input::placeholder{color:#3a4a5a}
+.toast{position:fixed;bottom:20px;right:20px;background:#1a3d2a;color:#6bff8a;padding:10px 20px;border-radius:6px;font-size:13px;z-index:100;animation:fadeIn .2s}
+.toast.error{background:#3d1a2a;color:#ff6b8a}
+@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.nav{display:flex;gap:10px;margin-left:auto}
+.nav a{color:#5a8ab5;text-decoration:none;font-size:13px;padding:4px 10px;border-radius:4px}
+.nav a:hover{background:#1a2a4d}
+</style>
+</head>
+<body>
+<header>
+<h1>PetSitter Control Panel</h1>
+<div class="nav">
+<a href="/docs">API Docs</a>
+<a href="/static/openapi.json">OpenAPI Spec</a>
+</div>
+<div class="info">
+<span><span class="label">Server:</span><span id="info-listen">--</span></span>
+<span><span class="label">Upstream:</span><span id="info-upstream">--</span></span>
+<span><span class="label">Model:</span><span id="info-model">--</span></span>
+</div>
+</header>
+
+<div class="grid">
+<div class="card">
+<h2>Loaded Tricks</h2>
+<div id="loaded-tricks"><div class="loader">Loading...</div></div>
+</div>
+<div class="card">
+<h2>Available Tricks</h2>
+<div id="available-tricks"><div class="loader">Loading...</div></div>
+<div class="custom-path">
+<input type="text" id="custom-path" placeholder="Path to trick .py file">
+<button class="btn btn-success" onclick="loadCustomTrick()">Load</button>
+</div>
+</div>
+</div>
+
+<div class="log-section">
+<div class="log-controls">
+<h2>Activity Log</h2>
+<label><input type="checkbox" id="autorefresh" checked> Auto-refresh</label>
+<select id="level-filter" onchange="fetchLogs()">
+<option value="">All levels</option>
+<option value="INFO">INFO</option>
+<option value="DEBUG">DEBUG</option>
+<option value="WARNING">WARNING</option>
+<option value="ERROR">ERROR</option>
+</select>
+<button class="btn btn-secondary btn-sm" onclick="clearLogDisplay()">Clear display</button>
+<span class="log-count" id="log-count"></span>
+</div>
+<div class="log-viewer" id="log-viewer"><div class="loader">Loading logs...</div></div>
+</div>
+
+<script>
+let lastLogCount = 0;
+function showToast(msg, isError) {
+  const el = document.createElement('div');
+  el.className = 'toast' + (isError ? ' error' : '');
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2500);
+}
+async function fetchJSON(url, opts) {
+  const r = await fetch(url, opts);
+  if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.error || r.statusText); }
+  return r.json();
+}
+async function fetchInfo() {
+  try {
+    const d = await fetchJSON('/gui/info');
+    document.getElementById('info-listen').textContent = d.listen_on;
+    document.getElementById('info-upstream').textContent = d.model_url;
+    document.getElementById('info-model').textContent = d.model_name || '(default)';
+  } catch(e) { console.error(e); }
+}
+async function fetchTricks() {
+  try {
+    const tricks = await fetchJSON('/gui/tricks');
+    const el = document.getElementById('loaded-tricks');
+    if (!tricks.length) { el.innerHTML = '<div class="empty">No tricks loaded</div>'; return; }
+    el.innerHTML = tricks.map(t => '<div class="trick-item"><div><span class="name">' + t.name + '</span><span class="module">' + t.module + '</span></div><button class="btn btn-danger btn-sm" onclick="unloadTrick(\'' + t.name + '\')">Remove</button></div>').join('');
+  } catch(e) { document.getElementById('loaded-tricks').innerHTML = '<div class="loader">Error loading tricks</div>'; }
+}
+async function fetchAvailable() {
+  try {
+    const files = await fetchJSON('/gui/tricks/available');
+    const el = document.getElementById('available-tricks');
+    if (!files.length) { el.innerHTML = '<div class="empty">No built-in tricks found</div>'; return; }
+    el.innerHTML = files.map(f => '<div class="avail-item"><span class="name">' + f + '</span><button class="btn btn-success btn-sm" onclick="loadTrick(\'' + f + '\')">Load</button></div>').join('');
+  } catch(e) { document.getElementById('available-tricks').innerHTML = '<div class="loader">Error loading</div>'; }
+}
+async function loadTrick(path) {
+  try {
+    const d = await fetchJSON('/gui/tricks/load', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path}) });
+    showToast('Loaded: ' + d.name);
+    fetchTricks(); fetchAvailable();
+  } catch(e) { showToast(e.message, true); }
+}
+async function loadCustomTrick() {
+  const inp = document.getElementById('custom-path');
+  const path = inp.value.trim();
+  if (!path) return;
+  await loadTrick(path);
+  inp.value = '';
+}
+async function unloadTrick(name) {
+  try {
+    await fetchJSON('/gui/tricks/unload', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name}) });
+    showToast('Removed: ' + name);
+    fetchTricks(); fetchAvailable();
+  } catch(e) { showToast(e.message, true); }
+}
+async function fetchLogs() {
+  try {
+    const level = document.getElementById('level-filter').value;
+    const d = await fetchJSON('/gui/logs?level=' + encodeURIComponent(level) + '&limit=200');
+    const viewer = document.getElementById('log-viewer');
+    const isAtBottom = viewer.scrollHeight - viewer.scrollTop - viewer.clientHeight < 40;
+    viewer.innerHTML = d.map(l => '<div class="log-entry lvl-' + l.level + '"><span class="time">' + l.time + '</span>' + escapeHtml(l.level) + ': ' + escapeHtml(l.message) + '</div>').join('');
+    document.getElementById('log-count').textContent = d.length + ' entries';
+    if (isAtBottom) viewer.scrollTop = viewer.scrollHeight;
+    lastLogCount = d.length;
+  } catch(e) { console.error(e); }
+}
+function escapeHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function clearLogDisplay() { document.getElementById('log-viewer').innerHTML = ''; document.getElementById('log-count').textContent = '0 entries'; }
+fetchInfo(); fetchTricks(); fetchAvailable(); fetchLogs();
+setInterval(() => { if (document.getElementById('autorefresh').checked) fetchLogs(); }, 2000);
+</script>
+</body>
+</html>

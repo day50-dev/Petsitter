@@ -3,6 +3,9 @@
 import json
 import logging
 import os
+from collections import deque
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import click
@@ -10,10 +13,34 @@ import uvicorn
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
+from starlette.staticfiles import StaticFiles
 
 from src.loader import load_tricks
 from src.proxy import ProxyHandler
 from src.trick import Trick
+
+
+class LogCaptureHandler(logging.Handler):
+    def __init__(self, maxlen: int = 500):
+        super().__init__()
+        self.logs = deque(maxlen=maxlen)
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.logs.append({
+            "time": datetime.fromtimestamp(record.created).strftime("%H:%M:%S"),
+            "level": record.levelname,
+            "message": self.format(record),
+            "name": record.name,
+        })
+
+    def get_logs(self, level: str | None = None, limit: int = 100) -> list[dict]:
+        logs = list(self.logs)
+        if level:
+            logs = [l for l in logs if l["level"] == level.upper()]
+        return logs[-limit:]
+
+
+_log_capture: LogCaptureHandler | None = None
 
 
 def create_app(
@@ -35,6 +62,11 @@ def create_app(
     """
     tricks = load_tricks(trick_paths) if trick_paths else []
     handler = ProxyHandler(model_url, model_name, api_key, tricks)
+
+    global _log_capture
+    _log_capture = LogCaptureHandler()
+    _log_capture.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+    logging.getLogger().addHandler(_log_capture)
 
     app = Starlette()
 
@@ -121,8 +153,72 @@ def create_app(
 
     @app.route("/health", methods=["GET"])
     async def health(request: Request) -> Response:
-        """Health check endpoint."""
         return JSONResponse({"status": "ok"})
+
+    gui_dir = Path(__file__).parent / "gui"
+
+    app.mount("/static", StaticFiles(directory=str(gui_dir)), name="static")
+
+    @app.route("/gui", methods=["GET"])
+    async def gui_page(request: Request) -> Response:
+        content = (gui_dir / "index.html").read_text()
+        return Response(content=content, media_type="text/html")
+
+    @app.route("/docs", methods=["GET"])
+    async def docs_page(request: Request) -> Response:
+        content = (gui_dir / "swagger.html").read_text()
+        return Response(content=content, media_type="text/html")
+
+    @app.route("/gui/info", methods=["GET"])
+    async def gui_info(request: Request) -> Response:
+        return JSONResponse({
+            "listen_on": f"{request.url.hostname}:{request.url.port}",
+            "model_url": model_url,
+            "model_name": model_name,
+        })
+
+    @app.route("/gui/tricks", methods=["GET"])
+    async def gui_tricks(request: Request) -> Response:
+        return JSONResponse(handler.get_tricks_info())
+
+    @app.route("/gui/tricks/available", methods=["GET"])
+    async def gui_tricks_available(request: Request) -> Response:
+        tricks_dir = Path("tricks")
+        files = []
+        if tricks_dir.exists():
+            for f in sorted(tricks_dir.glob("*.py")):
+                if f.name != "__init__.py":
+                    files.append(str(f))
+        return JSONResponse(files)
+
+    @app.route("/gui/tricks/load", methods=["POST"])
+    async def gui_tricks_load(request: Request) -> Response:
+        data = await request.json()
+        path = data.get("path", "")
+        try:
+            trick = handler.add_trick(path)
+            return JSONResponse({"success": True, "name": type(trick).__name__})
+        except Exception as e:
+            return JSONResponse({"success": False, "error": str(e)}, status_code=400)
+
+    @app.route("/gui/tricks/unload", methods=["POST"])
+    async def gui_tricks_unload(request: Request) -> Response:
+        data = await request.json()
+        name = data.get("name", "")
+        if handler.remove_trick(name):
+            return JSONResponse({"success": True})
+        return JSONResponse({"success": False, "error": f"Trick '{name}' not found"}, status_code=404)
+
+    @app.route("/gui/logs", methods=["GET"])
+    async def gui_logs(request: Request) -> Response:
+        level = request.query_params.get("level")
+        limit_str = request.query_params.get("limit", "100")
+        try:
+            limit = max(1, min(500, int(limit_str)))
+        except (ValueError, TypeError):
+            limit = 100
+        logs = _log_capture.get_logs(level=level, limit=limit) if _log_capture else []
+        return JSONResponse(logs)
 
     return app
 

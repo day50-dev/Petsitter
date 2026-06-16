@@ -1,6 +1,8 @@
-# Petsitter
-
-**Teach old models new tricks.**
+<p align="center">
+<h1>Petsitter</h1>
+<a href=https://pypi.org/project/petsitter><img src=https://badge.fury.io/py/petsitter.svg/></a>
+<br/><strong>Teach old models new tricks</strong>
+</p>
 
 Petsitter is an OpenAI-compatible proxy that layers smart harnesses on top of language models, giving them capabilities they don't natively have. Smaller models can't do tool calling? Petsitter tricks them into it. Need structured JSON output? Petsitter will loop until it gets it right.
 

@@ -3,7 +3,9 @@
 <a href=https://pypi.org/project/petsitter><img src=https://badge.fury.io/py/petsitter.svg/></a>
 </p>
 
-Petsitter is an OpenAI-compatible proxy that layers smart harnesses on top of language models, giving them capabilities they don't natively have. Smaller models can't do tool calling? Petsitter tricks them into it. Need structured JSON output? Petsitter will loop until it gets it right.
+Petsitter is an OpenAI-compatible proxy that layers smart harnesses on top of language models, giving them capabilities they don't natively have and makes undependenable desired behaviors reliable and dependable. 
+
+Smaller models can't do tool calling? Petsitter tricks them into it. Need structured JSON output? Petsitter will loop until it gets it right.
 
 But that's only the beginning. Cyclomatic complexity? Halstead metrics? Chidamber and Kemerer? Why not!
 

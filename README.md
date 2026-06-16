@@ -4,6 +4,8 @@
 
 Petsitter is an OpenAI-compatible proxy that layers smart harnesses on top of language models, giving them capabilities they don't natively have. Smaller models can't do tool calling? Petsitter tricks them into it. Need structured JSON output? Petsitter will loop until it gets it right.
 
+But that's only the beginning. Cyclomatic complexity? Halstead metrics? Chidamber and Kemerer? Why not!
+
 ## Who Is This For?
 
 - **You run local models** (Ollama, llama.cpp, vllm, sglang) and miss OpenAI's features

@@ -150,7 +150,7 @@
         }
       }
     },
-    "/gui/info": {
+    "/api/info": {
       "get": {
         "summary": "Server information",
         "operationId": "guiInfo",
@@ -175,7 +175,7 @@
         }
       }
     },
-    "/gui/tricks": {
+    "/api/tricks": {
       "get": {
         "summary": "List loaded tricks",
         "operationId": "listTricks",
@@ -202,7 +202,7 @@
         }
       }
     },
-    "/gui/tricks/available": {
+    "/api/tricks/available": {
       "get": {
         "summary": "List available trick modules",
         "operationId": "listAvailableTricks",
@@ -226,7 +226,7 @@
         }
       }
     },
-    "/gui/tricks/load": {
+    "/api/tricks/load": {
       "post": {
         "summary": "Load a trick",
         "operationId": "loadTrick",
@@ -282,7 +282,7 @@
         }
       }
     },
-    "/gui/tricks/unload": {
+    "/api/tricks/unload": {
       "post": {
         "summary": "Unload a trick",
         "operationId": "unloadTrick",
@@ -337,7 +337,67 @@
         }
       }
     },
-    "/gui/logs": {
+    "/api/tricks/reorder": {
+      "post": {
+        "summary": "Reorder a trick",
+        "operationId": "reorderTrick",
+        "tags": ["GUI"],
+        "description": "Moves a loaded trick to a new position in the execution order. Tricks run in order: system_prompt, then pre_hook, then post_hook.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "new_index"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Class name of the trick to move",
+                    "example": "JsonModeTrick"
+                  },
+                  "new_index": {
+                    "type": "integer",
+                    "description": "New position (0-based index)",
+                    "example": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Trick reordered successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Trick not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": false },
+                    "error": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/logs": {
       "get": {
         "summary": "Get activity logs",
         "operationId": "getLogs",

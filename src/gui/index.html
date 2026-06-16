@@ -16,6 +16,9 @@ header .info .label{color:#4a6572}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
 .card{background:#16162a;border-radius:8px;padding:16px;border:1px solid #1e2a3a}
 .trick-item,.avail-item{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;margin-bottom:4px;border-radius:4px;background:#1a1a33}
+.trick-item{cursor:grab}
+.trick-item.dragging{opacity:.4}
+.trick-item.drag-over{border-top:2px solid #5a8ab5}
 .trick-item .name{font-weight:500;color:#e0e0e0;font-size:13px}
 .trick-item .module{font-size:11px;color:#5a7a95;margin-left:8px}
 .avail-item .name{font-size:13px;color:#c8d6e5}
@@ -118,23 +121,64 @@ async function fetchJSON(url, opts) {
 }
 async function fetchInfo() {
   try {
-    const d = await fetchJSON('/gui/info');
+    const d = await fetchJSON('/api/info');
     document.getElementById('info-listen').textContent = d.listen_on;
     document.getElementById('info-upstream').textContent = d.model_url;
     document.getElementById('info-model').textContent = d.model_name || '(default)';
   } catch(e) { console.error(e); }
 }
+let dragSrc = null;
 async function fetchTricks() {
   try {
-    const tricks = await fetchJSON('/gui/tricks');
+    const tricks = await fetchJSON('/api/tricks');
     const el = document.getElementById('loaded-tricks');
     if (!tricks.length) { el.innerHTML = '<div class="empty">No tricks loaded</div>'; return; }
-    el.innerHTML = tricks.map(t => '<div class="trick-item"><div><span class="name">' + t.name + '</span><span class="module">' + t.module + '</span></div><button class="btn btn-danger btn-sm" onclick="unloadTrick(\'' + t.name + '\')">Remove</button></div>').join('');
+    el.innerHTML = tricks.map((t,i) => '<div class="trick-item" draggable="true" data-name="' + t.name + '" data-index="' + i + '"><div><span class="name">' + t.name + '</span><span class="module">' + t.module + '</span></div><button class="btn btn-danger btn-sm" onclick="unloadTrick(\'' + t.name + '\')">Remove</button></div>').join('');
+    el.querySelectorAll('.trick-item').forEach(item => {
+      item.addEventListener('dragstart', onDragStart);
+      item.addEventListener('dragend', onDragEnd);
+      item.addEventListener('dragover', onDragOver);
+      item.addEventListener('dragleave', onDragLeave);
+      item.addEventListener('drop', onDrop);
+    });
   } catch(e) { document.getElementById('loaded-tricks').innerHTML = '<div class="loader">Error loading tricks</div>'; }
+}
+function onDragStart(e) {
+  dragSrc = this;
+  this.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', this.dataset.name);
+}
+function onDragEnd(e) {
+  this.classList.remove('dragging');
+  document.querySelectorAll('.trick-item').forEach(i => i.classList.remove('drag-over'));
+  dragSrc = null;
+}
+function onDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  this.classList.add('drag-over');
+}
+function onDragLeave(e) {
+  this.classList.remove('drag-over');
+}
+async function onDrop(e) {
+  e.preventDefault();
+  this.classList.remove('drag-over');
+  if (dragSrc === this) return;
+  const items = [...document.querySelectorAll('.trick-item')];
+  const srcIdx = items.indexOf(dragSrc);
+  const dstIdx = items.indexOf(this);
+  if (srcIdx === dstIdx) return;
+  try {
+    await fetchJSON('/api/tricks/reorder', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name: dragSrc.dataset.name, new_index: dstIdx}) });
+    showToast('Reordered: ' + dragSrc.dataset.name);
+    fetchTricks();
+  } catch(e) { showToast(e.message, true); }
 }
 async function fetchAvailable() {
   try {
-    const files = await fetchJSON('/gui/tricks/available');
+    const files = await fetchJSON('/api/tricks/available');
     const el = document.getElementById('available-tricks');
     if (!files.length) { el.innerHTML = '<div class="empty">No built-in tricks found</div>'; return; }
     el.innerHTML = files.map(f => '<div class="avail-item"><span class="name">' + f + '</span><button class="btn btn-success btn-sm" onclick="loadTrick(\'' + f + '\')">Load</button></div>').join('');
@@ -142,7 +186,7 @@ async function fetchAvailable() {
 }
 async function loadTrick(path) {
   try {
-    const d = await fetchJSON('/gui/tricks/load', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path}) });
+    const d = await fetchJSON('/api/tricks/load', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path}) });
     showToast('Loaded: ' + d.name);
     fetchTricks(); fetchAvailable();
   } catch(e) { showToast(e.message, true); }
@@ -156,7 +200,7 @@ async function loadCustomTrick() {
 }
 async function unloadTrick(name) {
   try {
-    await fetchJSON('/gui/tricks/unload', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name}) });
+    await fetchJSON('/api/tricks/unload', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name}) });
     showToast('Removed: ' + name);
     fetchTricks(); fetchAvailable();
   } catch(e) { showToast(e.message, true); }
@@ -164,7 +208,7 @@ async function unloadTrick(name) {
 async function fetchLogs() {
   try {
     const level = document.getElementById('level-filter').value;
-    const d = await fetchJSON('/gui/logs?level=' + encodeURIComponent(level) + '&limit=200');
+    const d = await fetchJSON('/api/logs?level=' + encodeURIComponent(level) + '&limit=200');
     const viewer = document.getElementById('log-viewer');
     const isAtBottom = viewer.scrollHeight - viewer.scrollTop - viewer.clientHeight < 40;
     viewer.innerHTML = d.map(l => '<div class="log-entry lvl-' + l.level + '"><span class="time">' + l.time + '</span>' + escapeHtml(l.level) + ': ' + escapeHtml(l.message) + '</div>').join('');

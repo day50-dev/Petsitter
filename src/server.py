@@ -175,11 +175,11 @@ def create_app(
             "model_url": model_url,
             "model_name": model_name,
         })
-    app.add_route("/gui/info", gui_info, methods=["GET"])
+    app.add_route("/api/info", gui_info, methods=["GET"])
 
     async def gui_tricks(request: Request) -> Response:
         return JSONResponse(handler.get_tricks_info())
-    app.add_route("/gui/tricks", gui_tricks, methods=["GET"])
+    app.add_route("/api/tricks", gui_tricks, methods=["GET"])
 
     async def gui_tricks_available(request: Request) -> Response:
         tricks_dir = Path("tricks")
@@ -189,7 +189,7 @@ def create_app(
                 if f.name != "__init__.py":
                     files.append(str(f))
         return JSONResponse(files)
-    app.add_route("/gui/tricks/available", gui_tricks_available, methods=["GET"])
+    app.add_route("/api/tricks/available", gui_tricks_available, methods=["GET"])
 
     async def gui_tricks_load(request: Request) -> Response:
         data = await request.json()
@@ -199,7 +199,7 @@ def create_app(
             return JSONResponse({"success": True, "name": type(trick).__name__})
         except Exception as e:
             return JSONResponse({"success": False, "error": str(e)}, status_code=400)
-    app.add_route("/gui/tricks/load", gui_tricks_load, methods=["POST"])
+    app.add_route("/api/tricks/load", gui_tricks_load, methods=["POST"])
 
     async def gui_tricks_unload(request: Request) -> Response:
         data = await request.json()
@@ -207,7 +207,7 @@ def create_app(
         if handler.remove_trick(name):
             return JSONResponse({"success": True})
         return JSONResponse({"success": False, "error": f"Trick '{name}' not found"}, status_code=404)
-    app.add_route("/gui/tricks/unload", gui_tricks_unload, methods=["POST"])
+    app.add_route("/api/tricks/unload", gui_tricks_unload, methods=["POST"])
 
     async def gui_tricks_reorder(request: Request) -> Response:
         data = await request.json()
@@ -216,7 +216,7 @@ def create_app(
         if handler.reorder_trick(name, new_index):
             return JSONResponse({"success": True})
         return JSONResponse({"success": False, "error": f"Trick '{name}' not found"}, status_code=404)
-    app.add_route("/gui/tricks/reorder", gui_tricks_reorder, methods=["POST"])
+    app.add_route("/api/tricks/reorder", gui_tricks_reorder, methods=["POST"])
 
     async def gui_logs(request: Request) -> Response:
         level = request.query_params.get("level")
@@ -227,7 +227,7 @@ def create_app(
             limit = 100
         logs = _log_capture.get_logs(level=level, limit=limit) if _log_capture else []
         return JSONResponse(logs)
-    app.add_route("/gui/logs", gui_logs, methods=["GET"])
+    app.add_route("/api/logs", gui_logs, methods=["GET"])
 
     return app
 

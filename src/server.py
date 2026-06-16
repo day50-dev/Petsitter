@@ -110,7 +110,6 @@ def create_app(
             }
             yield f"data: {json.dumps(error_data)}\n\n"
 
-    @app.route("/v1/chat/completions", methods=["POST"])
     async def chat_completions(request: Request) -> Response:
         """Proxy chat completions to upstream model."""
         try:
@@ -134,8 +133,8 @@ def create_app(
                 {"error": {"message": str(e), "type": "proxy_error", "traceback": tb}},
                 status_code=500,
             )
+    app.add_route("/v1/chat/completions", chat_completions, methods=["POST"])
 
-    @app.route("/v1/models", methods=["GET"])
     async def models(request: Request) -> Response:
         """Proxy models listing to upstream."""
         try:
@@ -150,38 +149,37 @@ def create_app(
                 {"error": {"message": str(e), "type": "proxy_error", "traceback": tb}},
                 status_code=500,
             )
+    app.add_route("/v1/models", models, methods=["GET"])
 
-    @app.route("/health", methods=["GET"])
     async def health(request: Request) -> Response:
         return JSONResponse({"status": "ok"})
+    app.add_route("/health", health, methods=["GET"])
 
     gui_dir = Path(__file__).parent / "gui"
-
     app.mount("/static", StaticFiles(directory=str(gui_dir)), name="static")
 
-    @app.route("/gui", methods=["GET"])
     async def gui_page(request: Request) -> Response:
         content = (gui_dir / "index.html").read_text()
         return Response(content=content, media_type="text/html")
+    app.add_route("/gui", gui_page, methods=["GET"])
 
-    @app.route("/docs", methods=["GET"])
     async def docs_page(request: Request) -> Response:
         content = (gui_dir / "swagger.html").read_text()
         return Response(content=content, media_type="text/html")
+    app.add_route("/docs", docs_page, methods=["GET"])
 
-    @app.route("/gui/info", methods=["GET"])
     async def gui_info(request: Request) -> Response:
         return JSONResponse({
             "listen_on": f"{request.url.hostname}:{request.url.port}",
             "model_url": model_url,
             "model_name": model_name,
         })
+    app.add_route("/gui/info", gui_info, methods=["GET"])
 
-    @app.route("/gui/tricks", methods=["GET"])
     async def gui_tricks(request: Request) -> Response:
         return JSONResponse(handler.get_tricks_info())
+    app.add_route("/gui/tricks", gui_tricks, methods=["GET"])
 
-    @app.route("/gui/tricks/available", methods=["GET"])
     async def gui_tricks_available(request: Request) -> Response:
         tricks_dir = Path("tricks")
         files = []
@@ -190,8 +188,8 @@ def create_app(
                 if f.name != "__init__.py":
                     files.append(str(f))
         return JSONResponse(files)
+    app.add_route("/gui/tricks/available", gui_tricks_available, methods=["GET"])
 
-    @app.route("/gui/tricks/load", methods=["POST"])
     async def gui_tricks_load(request: Request) -> Response:
         data = await request.json()
         path = data.get("path", "")
@@ -200,16 +198,16 @@ def create_app(
             return JSONResponse({"success": True, "name": type(trick).__name__})
         except Exception as e:
             return JSONResponse({"success": False, "error": str(e)}, status_code=400)
+    app.add_route("/gui/tricks/load", gui_tricks_load, methods=["POST"])
 
-    @app.route("/gui/tricks/unload", methods=["POST"])
     async def gui_tricks_unload(request: Request) -> Response:
         data = await request.json()
         name = data.get("name", "")
         if handler.remove_trick(name):
             return JSONResponse({"success": True})
         return JSONResponse({"success": False, "error": f"Trick '{name}' not found"}, status_code=404)
+    app.add_route("/gui/tricks/unload", gui_tricks_unload, methods=["POST"])
 
-    @app.route("/gui/logs", methods=["GET"])
     async def gui_logs(request: Request) -> Response:
         level = request.query_params.get("level")
         limit_str = request.query_params.get("limit", "100")
@@ -219,6 +217,7 @@ def create_app(
             limit = 100
         logs = _log_capture.get_logs(level=level, limit=limit) if _log_capture else []
         return JSONResponse(logs)
+    app.add_route("/gui/logs", gui_logs, methods=["GET"])
 
     return app
 

@@ -11,7 +11,7 @@ But that's only the beginning. Cyclomatic complexity? Halstead metrics? Chidambe
 
 ## Who Is This For?
 
-- **You run local models** (Ollama, llama.cpp, vllm, sglang) and miss OpenAI's features
+- **You run local models** (Ollama, llama.cpp, vllm, sglang) and want them to not be a lazy goofball
 - **You use small/cheap models** that lack tool calling or JSON mode
 - **You build agentic systems** that need consistent capabilities across different models
 - **You want to experiment** with prompt engineering tricks without changing your application code

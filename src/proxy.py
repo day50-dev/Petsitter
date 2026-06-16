@@ -74,6 +74,16 @@ class ProxyHandler:
                 return True
         return False
 
+    def reorder_trick(self, name: str, new_index: int) -> bool:
+        for i, trick in enumerate(self.tricks):
+            if type(trick).__name__ == name:
+                t = self.tricks.pop(i)
+                new_index = max(0, min(new_index, len(self.tricks)))
+                self.tricks.insert(new_index, t)
+                logger.info("Reordered trick: %s -> %d", name, new_index)
+                return True
+        return False
+
     def get_tricks_info(self) -> list[dict]:
         return [
             {

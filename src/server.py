@@ -162,6 +162,7 @@ def create_app(
         content = (gui_dir / "index.html").read_text()
         return Response(content=content, media_type="text/html")
     app.add_route("/gui", gui_page, methods=["GET"])
+    app.add_route("/", gui_page, methods=["GET"])
 
     async def docs_page(request: Request) -> Response:
         content = (gui_dir / "swagger.html").read_text()
@@ -207,6 +208,15 @@ def create_app(
             return JSONResponse({"success": True})
         return JSONResponse({"success": False, "error": f"Trick '{name}' not found"}, status_code=404)
     app.add_route("/gui/tricks/unload", gui_tricks_unload, methods=["POST"])
+
+    async def gui_tricks_reorder(request: Request) -> Response:
+        data = await request.json()
+        name = data.get("name", "")
+        new_index = data.get("new_index", 0)
+        if handler.reorder_trick(name, new_index):
+            return JSONResponse({"success": True})
+        return JSONResponse({"success": False, "error": f"Trick '{name}' not found"}, status_code=404)
+    app.add_route("/gui/tricks/reorder", gui_tricks_reorder, methods=["POST"])
 
     async def gui_logs(request: Request) -> Response:
         level = request.query_params.get("level")

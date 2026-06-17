@@ -66,7 +66,7 @@ Now point your AI applications to `http://localhost:8080/v1`.
 
 ## Built-in Tricks
 
-### JSON Mode (`tricks/json_mode.py`)
+#### JSON Mode (`tricks/json_mode.py`)
 
 Enforces valid JSON output by:
 - Adding formatting instructions to the system prompt
@@ -77,7 +77,7 @@ Enforces valid JSON output by:
 ./petsitter --model_url http://localhost:11434 --trick tricks/json_mode.py
 ```
 
-### Tool Calling (`tricks/tool_call.py`)
+#### Tool Calling (`tricks/tool_call.py`)
 
 Enables tool calling for models without native support:
 - Injects tool definitions into prompts
@@ -88,7 +88,7 @@ Enables tool calling for models without native support:
 ./petsitter --model_url http://localhost:11434 --trick tricks/tool_call.py
 ```
 
-### List Files (`tricks/list_files.py`)
+#### List Files (`tricks/list_files.py`)
 
 Test trick that provides a `list_files` tool. Useful for testing tool calling functionality.
 

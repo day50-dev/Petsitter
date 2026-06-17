@@ -206,7 +206,6 @@ class TestCLI:
                     ],
                 )
                 assert mock_create.called
-                # Check tricks were passed
                 call_args = mock_create.call_args
-                assert "tricks/json_mode.py" in call_args[0][3]
-                assert "tricks/tool_call.py" in call_args[0][3]
+                assert "tricks/json_mode.py" in call_args[1]["trick_paths"]
+                assert "tricks/tool_call.py" in call_args[1]["trick_paths"]

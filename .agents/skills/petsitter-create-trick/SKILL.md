@@ -27,9 +27,9 @@ The execution order of hooks matches the list order in the ProxyHandler. Tricks 
 ## Required conventions
 
 - The class must be a direct subclass of `Trick` (not `Trick` itself)
-- The file path must be loadable via `importlib` — use a `.py` extension
-- Keep hooks free of `await` if the trick needs sync-only support — tricks that use `callmodel_sync` work in both contexts
-- Store per-trick state on `self` — each loaded trick is a fresh instance
+- The file path must be loadable via `importlib` - use a `.py` extension
+- Keep hooks free of `await` if the trick needs sync-only support - tricks that use `callmodel_sync` work in both contexts
+- Store per-trick state on `self` - each loaded trick is a fresh instance
 
 ## Gotchas
 

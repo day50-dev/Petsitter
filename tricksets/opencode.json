@@ -1,0 +1,11 @@
+{
+  "schema": "0.3.0",
+  "filters": {
+    "X-Title": "opencode*",
+    "Model": "*"
+  },
+  "tricks": [
+    "tricks/json_mode.py",
+    "tricks/tool_call.py"
+  ]
+}

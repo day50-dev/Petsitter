@@ -439,6 +439,259 @@
           }
         }
       }
+    },
+    "/api/tricksets": {
+      "get": {
+        "summary": "List loaded tricksets",
+        "operationId": "listTricksets",
+        "tags": ["Tricksets"],
+        "description": "Returns all currently loaded tricksets with their filters, trick paths, and loaded trick names.",
+        "responses": {
+          "200": {
+            "description": "List of loaded tricksets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": { "type": "string" },
+                      "schema": { "type": "string" },
+                      "filters": { "type": "object", "additionalProperties": { "type": "string" } },
+                      "tricks": { "type": "array", "items": { "type": "string" } },
+                      "file_path": { "type": "string", "nullable": true },
+                      "trick_names": { "type": "array", "items": { "type": "string" } }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tricksets/available": {
+      "get": {
+        "summary": "List available trickset files",
+        "operationId": "listAvailableTricksets",
+        "tags": ["Tricksets"],
+        "description": "Scans the tricksets/ directory for .json files that can be loaded.",
+        "responses": {
+          "200": {
+            "description": "List of available trickset files",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "path": { "type": "string" },
+                      "name": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tricksets/load": {
+      "post": {
+        "summary": "Load a trickset file",
+        "operationId": "loadTrickset",
+        "tags": ["Tricksets"],
+        "description": "Loads a trickset from a JSON file and adds all its tricks to the proxy.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["path"],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "Path to the trickset JSON file",
+                    "example": "tricksets/gemma4.json"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Trickset loaded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "name": { "type": "string" },
+                    "trick_count": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Failed to load trickset",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "error": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tricksets/unload": {
+      "post": {
+        "summary": "Unload a trickset",
+        "operationId": "unloadTrickset",
+        "tags": ["Tricksets"],
+        "description": "Removes a loaded trickset and its tricks from the proxy.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Name of the trickset to unload"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Trickset unloaded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Trickset not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "error": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tricksets/{name}": {
+      "get": {
+        "summary": "Get trickset details",
+        "operationId": "getTrickset",
+        "tags": ["Tricksets"],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Trickset details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string" },
+                    "schema": { "type": "string" },
+                    "filters": { "type": "object" },
+                    "tricks": { "type": "array", "items": { "type": "string" } },
+                    "file_path": { "type": "string", "nullable": true },
+                    "trick_names": { "type": "array", "items": { "type": "string" } }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "put": {
+        "summary": "Update trickset",
+        "operationId": "updateTrickset",
+        "tags": ["Tricksets"],
+        "description": "Updates filters and/or tricks of a loaded trickset. Saves to file if the trickset has a file path.",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "filters": { "type": "object", "additionalProperties": { "type": "string" } },
+                  "tricks": { "type": "array", "items": { "type": "string" } }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Trickset updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
     }
   }
 }

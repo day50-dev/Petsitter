@@ -18,6 +18,7 @@ from starlette.staticfiles import StaticFiles
 from src.loader import load_tricks
 from src.proxy import ProxyHandler
 from src.trick import Trick
+from src.trickset import Trickset
 
 
 class LogCaptureHandler(logging.Handler):
@@ -48,20 +49,26 @@ def create_app(
     model_name: str | None,
     api_key: str,
     trick_paths: list[str],
+    trickset_paths: list[str] | None = None,
 ) -> Starlette:
-    """Create the petsitter Starlette application.
+    tricksets: dict[str, Trickset] = {}
 
-    Args:
-        model_url: Base URL of the upstream model.
-        model_name: Optional model name override.
-        api_key: API key for upstream.
-        trick_paths: List of trick file paths.
+    if trickset_paths:
+        for tp in trickset_paths:
+            ts = Trickset.load_from_file(tp)
+            tricksets[ts.name] = ts
 
-    Returns:
-        Configured Starlette app.
-    """
-    tricks = load_tricks(trick_paths) if trick_paths else []
-    handler = ProxyHandler(model_url, model_name, api_key, tricks)
+    if trick_paths:
+        if "_default" in tricksets:
+            existing = tricksets["_default"]
+            for tp in trick_paths:
+                existing.add_trick(tp)
+        else:
+            default_ts = Trickset("_default", "0.3.0", {"X-Title": "*", "Model": "*"}, list(trick_paths))
+            default_ts.load_tricks()
+            tricksets["_default"] = default_ts
+
+    handler = ProxyHandler(model_url, model_name, api_key, tricksets=tricksets)
 
     global _log_capture
     _log_capture = LogCaptureHandler()
@@ -70,15 +77,10 @@ def create_app(
 
     app = Starlette()
 
-    async def stream_chat_completions(handler: ProxyHandler, payload: dict):
-        """Stream chat completions as SSE events in OpenAI format."""
+    async def stream_chat_completions(handler: ProxyHandler, payload: dict, x_title: str):
         try:
-            result = await handler.chat_completions(payload)
-            
-            # Convert to streaming format with delta instead of message
+            result = await handler.chat_completions(payload, x_title=x_title)
             message = result["choices"][0]["message"]
-            
-            # Build streaming response with delta
             stream_result = {
                 "id": result.get("id", "chatcmpl-petsitter"),
                 "object": "chat.completion.chunk",
@@ -93,11 +95,8 @@ def create_app(
                     "finish_reason": result["choices"][0].get("finish_reason", "stop"),
                 }],
             }
-            
-            # Add tool_calls to delta if present
             if "tool_calls" in message:
                 stream_result["choices"][0]["delta"]["tool_calls"] = message["tool_calls"]
-            
             yield f"data: {json.dumps(stream_result)}\n\n"
             yield "data: [DONE]\n\n"
         except Exception as e:
@@ -105,24 +104,20 @@ def create_app(
             tb = traceback.format_exc()
             click.echo(f"ERROR in stream_chat_completions: {e}")
             click.echo(tb)
-            error_data = {
-                "error": {"message": str(e), "type": "proxy_error"}
-            }
-            yield f"data: {json.dumps(error_data)}\n\n"
+            yield f"data: {json.dumps({'error': {'message': str(e), 'type': 'proxy_error'}})}\n\n"
 
     async def chat_completions(request: Request) -> Response:
-        """Proxy chat completions to upstream model."""
         try:
             payload = await request.json()
             stream = payload.get("stream", False)
-            
+            x_title = request.headers.get("X-Title", "")
             if stream:
                 return StreamingResponse(
-                    stream_chat_completions(handler, payload),
+                    stream_chat_completions(handler, payload, x_title),
                     media_type="text/event-stream",
                 )
             else:
-                result = await handler.chat_completions(payload)
+                result = await handler.chat_completions(payload, x_title=x_title)
                 return JSONResponse(result)
         except Exception as e:
             import traceback
@@ -136,7 +131,6 @@ def create_app(
     app.add_route("/v1/chat/completions", chat_completions, methods=["POST"])
 
     async def models(request: Request) -> Response:
-        """Proxy models listing to upstream."""
         try:
             result = await handler.models()
             return JSONResponse(result)
@@ -194,8 +188,9 @@ def create_app(
     async def gui_tricks_load(request: Request) -> Response:
         data = await request.json()
         path = data.get("path", "")
+        ts_name = data.get("trickset")
         try:
-            trick = handler.add_trick(path)
+            trick = handler.add_trick(path, ts_name=ts_name)
             return JSONResponse({"success": True, "name": type(trick).__name__})
         except Exception as e:
             return JSONResponse({"success": False, "error": str(e)}, status_code=400)
@@ -204,7 +199,8 @@ def create_app(
     async def gui_tricks_unload(request: Request) -> Response:
         data = await request.json()
         name = data.get("name", "")
-        if handler.remove_trick(name):
+        ts_name = data.get("trickset")
+        if handler.remove_trick(name, ts_name=ts_name):
             return JSONResponse({"success": True})
         return JSONResponse({"success": False, "error": f"Trick '{name}' not found"}, status_code=404)
     app.add_route("/api/tricks/unload", gui_tricks_unload, methods=["POST"])
@@ -213,7 +209,8 @@ def create_app(
         data = await request.json()
         name = data.get("name", "")
         new_index = data.get("new_index", 0)
-        if handler.reorder_trick(name, new_index):
+        ts_name = data.get("trickset")
+        if handler.reorder_trick(name, new_index, ts_name=ts_name):
             return JSONResponse({"success": True})
         return JSONResponse({"success": False, "error": f"Trick '{name}' not found"}, status_code=404)
     app.add_route("/api/tricks/reorder", gui_tricks_reorder, methods=["POST"])
@@ -228,6 +225,73 @@ def create_app(
         logs = _log_capture.get_logs(level=level, limit=limit) if _log_capture else []
         return JSONResponse(logs)
     app.add_route("/api/logs", gui_logs, methods=["GET"])
+
+    # ----- trickset API endpoints -----
+    # Fixed-path routes must come before {name} param route
+
+    async def list_tricksets(request: Request) -> Response:
+        result = []
+        for ts in handler.tricksets.values():
+            info = ts.to_dict()
+            info["trick_names"] = [type(t).__name__ for t in ts.tricks]
+            result.append(info)
+        return JSONResponse(result)
+    app.add_route("/api/tricksets", list_tricksets, methods=["GET"])
+
+    async def tricksets_available(request: Request) -> Response:
+        tricksets_dir = Path("tricksets")
+        files = []
+        if tricksets_dir.exists():
+            for f in sorted(tricksets_dir.glob("*.json")):
+                files.append({"path": str(f), "name": f.stem})
+        return JSONResponse(files)
+    app.add_route("/api/tricksets/available", tricksets_available, methods=["GET"])
+
+    async def tricksets_load(request: Request) -> Response:
+        data = await request.json()
+        path = data.get("path", "")
+        try:
+            ts = Trickset.load_from_file(path)
+            handler.tricksets[ts.name] = ts
+            return JSONResponse({"success": True, "name": ts.name, "trick_count": len(ts.tricks)})
+        except Exception as e:
+            return JSONResponse({"success": False, "error": str(e)}, status_code=400)
+    app.add_route("/api/tricksets/load", tricksets_load, methods=["POST"])
+
+    async def tricksets_unload(request: Request) -> Response:
+        data = await request.json()
+        name = data.get("name", "")
+        if name in handler.tricksets:
+            del handler.tricksets[name]
+            return JSONResponse({"success": True})
+        return JSONResponse({"success": False, "error": f"Trickset '{name}' not found"}, status_code=404)
+    app.add_route("/api/tricksets/unload", tricksets_unload, methods=["POST"])
+
+    async def get_trickset(request: Request) -> Response:
+        name = request.path_params.get("name")
+        ts = handler.tricksets.get(name)
+        if not ts:
+            return JSONResponse({"error": f"Trickset '{name}' not found"}, status_code=404)
+        info = ts.to_dict()
+        info["trick_names"] = [type(t).__name__ for t in ts.tricks]
+        return JSONResponse(info)
+    app.add_route("/api/tricksets/{name}", get_trickset, methods=["GET"])
+
+    async def update_trickset(request: Request) -> Response:
+        name = request.path_params.get("name")
+        ts = handler.tricksets.get(name)
+        if not ts:
+            return JSONResponse({"error": f"Trickset '{name}' not found"}, status_code=404)
+        data = await request.json()
+        if "filters" in data:
+            ts.filters = data["filters"]
+        if "tricks" in data:
+            ts.trick_paths = list(data["tricks"])
+            ts.load_tricks()
+        if ts.file_path:
+            ts.save()
+        return JSONResponse({"success": True})
+    app.add_route("/api/tricksets/{name}", update_trickset, methods=["PUT"])
 
     return app
 
@@ -255,6 +319,12 @@ def create_app(
     help="Path to a trick module (can be specified multiple times)",
 )
 @click.option(
+    "--trickset",
+    "tricksets",
+    multiple=True,
+    help="Path to a trickset JSON file (can be specified multiple times)",
+)
+@click.option(
     "--listen_on",
     default="localhost:8080",
     help="Host:port to listen on (default: localhost:8080)",
@@ -264,6 +334,7 @@ def cli(
     model_name: str | None,
     api_key: str,
     tricks: tuple[str, ...],
+    tricksets: tuple[str, ...],
     listen_on: str,
 ) -> None:
     """Petsitter - OpenAI-compatible proxy with tricks.
@@ -275,9 +346,9 @@ def cli(
                   --model_name llama3:8b \\
                   --trick tricks/tool_call.py \\
                   --trick tricks/json_mode.py \\
+                  --trickset tricksets/gemma4.json \\
                   --listen_on localhost:8080
     """
-    # Parse listen_on
     if ":" in listen_on:
         host, port_str = listen_on.rsplit(":", 1)
         port = int(port_str)
@@ -285,7 +356,11 @@ def cli(
         host = listen_on
         port = 8080
 
-    app = create_app(model_url, model_name, api_key, list(tricks))
+    app = create_app(
+        model_url, model_name, api_key,
+        trick_paths=list(tricks),
+        trickset_paths=list(tricksets),
+    )
 
     click.echo(f"Starting petsitter on {host}:{port}")
     click.echo(f"Upstream: {model_url}")
@@ -293,8 +368,9 @@ def cli(
         click.echo(f"Model: {model_name}")
     if tricks:
         click.echo(f"Tricks: {', '.join(tricks)}")
+    if tricksets:
+        click.echo(f"Tricksets: {', '.join(tricksets)}")
 
-    # Configure logging from environment
     log_level = os.getenv("LOGLEVEL", "INFO").upper()
     logging.basicConfig(
         level=getattr(logging, log_level, logging.INFO),

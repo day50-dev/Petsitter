@@ -34,19 +34,6 @@ Petsitter sits between your application and your model, intercepting requests an
 
 ---
 
-## Installation
-
-```bash
-# Create virtual environment
-uv venv
-
-# Activate it
-source .venv/bin/activate
-
-# Install petsitter
-pip install -e .
-```
-
 ## Quick Start
 
 ```bash
@@ -76,6 +63,34 @@ Now point your AI applications to `http://localhost:8080/v1`.
 | `--trick` | No | Path to a trick module (can be repeated) |
 | `--trickset` | No | Path to a trickset JSON file (can be repeated) |
 | `--listen_on` | No | Host:port to listen on (default: `localhost:8080`) |
+
+## Built-in Tricks
+
+### JSON Mode (`tricks/json_mode.py`)
+
+Enforces valid JSON output by:
+- Adding formatting instructions to the system prompt
+- Retrying with feedback if response isn't valid JSON
+- Stripping markdown code blocks
+
+```bash
+./petsitter --model_url http://localhost:11434 --trick tricks/json_mode.py
+```
+
+### Tool Calling (`tricks/tool_call.py`)
+
+Enables tool calling for models without native support:
+- Injects tool definitions into prompts
+- Parses JSONRPC-style tool call responses
+- Converts to OpenAI `tool_calls` format
+
+```bash
+./petsitter --model_url http://localhost:11434 --trick tricks/tool_call.py
+```
+
+### List Files (`tricks/list_files.py`)
+
+Test trick that provides a `list_files` tool. Useful for testing tool calling functionality.
 
 ## Tricksets
 
@@ -143,33 +158,6 @@ The default catch-all trickset matches `{"X-Title": "*", "Model": "*"}` so `--tr
 
 The `schema` field in a trickset JSON file records the petsitter version that wrote it. This tells tools how to interpret the file without needing an external lookup table.
 
-## Built-in Tricks
-
-### JSON Mode (`tricks/json_mode.py`)
-
-Enforces valid JSON output by:
-- Adding formatting instructions to the system prompt
-- Retrying with feedback if response isn't valid JSON
-- Stripping markdown code blocks
-
-```bash
-./petsitter --model_url http://localhost:11434 --trick tricks/json_mode.py
-```
-
-### Tool Calling (`tricks/tool_call.py`)
-
-Enables tool calling for models without native support:
-- Injects tool definitions into prompts
-- Parses JSONRPC-style tool call responses
-- Converts to OpenAI `tool_calls` format
-
-```bash
-./petsitter --model_url http://localhost:11434 --trick tricks/tool_call.py
-```
-
-### List Files (`tricks/list_files.py`)
-
-Test trick that provides a `list_files` tool. Useful for testing tool calling functionality.
 
 ## Creating Custom Tricks
 

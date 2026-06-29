@@ -116,6 +116,7 @@ For tool calls, the assistant message may also contain:
 tricks/
 ├── __init__.py
 ├── your_trick.py      # <-- your trick goes here
+├── code_validator.py   # self-healing code validation via model self-description
 ├── tool_call.py        # built-in examples
 ├── json_mode.py
 ├── list_files.py

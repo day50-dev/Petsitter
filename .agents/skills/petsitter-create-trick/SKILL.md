@@ -31,6 +31,22 @@ The execution order of hooks matches the list order in the ProxyHandler. Tricks 
 - Keep hooks free of `await` if the trick needs sync-only support - tricks that use `callmodel_sync` work in both contexts
 - Store per-trick state on `self` - each loaded trick is a fresh instance
 
+## Keyword activation (optional)
+
+Set `keywords` on your trick class to make it only activate when a keyword appears in the user's message. The keyword is stripped from the message before sending to the model. Tricks without `keywords` are always active (when their trickset matches).
+
+```python
+class MyTrick(Trick):
+    keywords = ["multiround"]  # activates only when user says "multiround"
+```
+
+Multiple keywords per trick are supported:
+
+```python
+class MyTrick(Trick):
+    keywords = ["multiround", "crossval"]
+```
+
 ## Gotchas
 
 - `system_prompt(to_add)` receives the *current* system prompt text. Return modified text or append to it. Return `""` to leave unchanged.

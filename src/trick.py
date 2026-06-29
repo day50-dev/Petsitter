@@ -59,7 +59,14 @@ class Trick:
     """Base class for all petsitter tricks.
 
     Subclass this and implement any of the hooks to add functionality.
+
+    Set `keywords` to a list of strings to make this trick keyword-activated.
+    When the user includes a keyword in their message, the trick is invoked
+    and the keyword is stripped before sending to the model.
+    Tricks with no keywords are always active (when their trickset matches).
     """
+
+    keywords: list[str] = []
 
     def system_prompt(self, to_add: str) -> str:
         """Add instructions to the system prompt.

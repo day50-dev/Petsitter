@@ -173,7 +173,19 @@ Key patterns:
 - Auto-detection of native tool support: if the model returns `tool_calls` on its own, switch to pass-through mode.
 - Multiple parsing strategies: full-content JSON parse, line-by-line, brace-matching fallback.
 
-## Example 4: XML-style tool calling (`tricks/xml_tool.py`)
+## Example 4: Multi-step self-validation (`tricks/code_validator.py`)
+
+Demonstrates multi-turn model calling within `post_hook` for self-healing validation:
+model proposes a change, describes it, compares against the original request, and retries on mismatch.
+
+Key patterns:
+- `_get_user_request` extracts the last user message from context for comparison.
+- Sub-calls to the model use **clean, minimal contexts** (just a system prompt) so the validation isn't polluted by conversation history.
+- The main `context` is only mutated during regeneration: the failed assistant message is removed, a user message with feedback is appended, and `callmodel_sync` produces a new attempt.
+- Retry loop with configurable `max_attempts` to avoid infinite loops.
+- Exception handling ensures the proxy doesn't crash if a sub-call fails.
+
+## Example 5: XML-style tool calling (`tricks/xml_tool.py`)
 
 Demonstrates an alternative calling convention for smaller models.
 

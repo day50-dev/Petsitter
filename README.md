@@ -88,6 +88,17 @@ Enables tool calling for models without native support:
 ./petsitter --model_url http://localhost:11434 --trick tricks/tool_call.py
 ```
 
+#### Code Validator (`tricks/code_validator.py`)
+
+Validates code changes through self-description and comparison:
+- After the model proposes a change, asks it to describe what the change does
+- Compares the description against the original user request
+- If they don't match, retries with feedback ("You must do a new approach")
+
+```bash
+./petsitter --model_url http://localhost:11434 --trick tricks/code_validator.py
+```
+
 #### List Files (`tricks/list_files.py`)
 
 Test trick that provides a `list_files` tool. Useful for testing tool calling functionality.
@@ -243,7 +254,9 @@ def info(self, capabilities: dict) -> dict:
     return capabilities
 ```
 
-## Full Trick Example
+## Full Trick Examples
+
+### Always-on: Haiku Mode
 
 Here's a trick that makes any model respond in haiku:
 
@@ -270,6 +283,28 @@ class HaikuTrick(Trick):
 Use it:
 ```bash
 ./petsitter --model_url http://localhost:11434 --trick haiku.py
+```
+
+### Self-healing: Code Validator
+
+Validates model-generated code changes by asking the model to describe what it wrote, then comparing that description against the original user request. On mismatch it retries with feedback. See [`tricks/code_validator.py`](tricks/code_validator.py) for the implementation.
+
+```bash
+./petsitter --model_url http://localhost:11434 --trick tricks/code_validator.py
+```
+
+### Keyword-activated
+
+Set `keywords` on your trick class to activate only when the user includes that word in their message — the keyword is stripped before the model sees it. See [`tricks/multiround.py`](tricks/multiround.py) for a working example.
+
+```bash
+# Trick fires when "multiround" is present
+curl http://localhost:8080/v1/chat/completions \
+  -d '{"messages":[{"role":"user","content":"multiround explain the CAP theorem"}]}'
+
+# Trick does nothing without the keyword
+curl http://localhost:8080/v1/chat/completions \
+  -d '{"messages":[{"role":"user","content":"explain the CAP theorem"}]}'
 ```
 
 ## API Endpoints

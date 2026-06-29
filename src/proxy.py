@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -92,6 +93,28 @@ class ProxyHandler:
             capabilities = trick.info(capabilities)
         return capabilities
 
+    def _filter_tricks_by_keywords(self, tricks: list[Trick], messages: list) -> tuple[list[Trick], list]:
+        active: list[Trick] = []
+        modified = list(messages)
+        kw_tricks = [t for t in tricks if t.keywords]
+        non_kw_tricks = [t for t in tricks if not t.keywords]
+
+        for msg in reversed(modified):
+            if msg.get("role") == "user" and isinstance(msg.get("content"), str):
+                content = msg["content"]
+                for trick in kw_tricks:
+                    for kw in trick.keywords:
+                        pattern = re.compile(r'\b' + re.escape(kw) + r'\b', re.IGNORECASE)
+                        if pattern.search(content):
+                            content = pattern.sub("", content)
+                            if trick not in active:
+                                active.append(trick)
+                content = re.sub(r' +', ' ', content).strip()
+                msg["content"] = content
+                break
+
+        return non_kw_tricks + active, modified
+
     def get_default_trickset(self) -> Trickset | None:
         for ts in self.tricksets.values():
             return ts
@@ -146,6 +169,8 @@ class ProxyHandler:
         messages = payload.get("messages", [])
         model = payload.get("model", "")
         tricks = self._matching_tricks(x_title, model)
+
+        tricks, messages = self._filter_tricks_by_keywords(tricks, messages)
 
         system_prompt = ""
         if messages and messages[0].get("role") == "system":

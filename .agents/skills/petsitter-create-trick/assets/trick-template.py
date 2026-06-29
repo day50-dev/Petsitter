@@ -9,6 +9,8 @@ from src.trick import Trick
 class <Name>Trick(Trick):
     """<description>"""
 
+    keywords = ["<keyword>"]  # Optional: set to activate only when keyword is in user message
+
     def __init__(self):
         # Store per-instance state here
         pass

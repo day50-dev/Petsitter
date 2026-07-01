@@ -19,13 +19,27 @@ def configure(model_url: str, model_name: str = "", api_key: str = ""):
     _api_key = api_key
 
 
-def callmodel_sync(context: list, user_message: str = "") -> list:
+def callmodel_sync(
+    context: list,
+    user_message: str = "",
+    model_url: str = "",
+    model_name: str = "",
+    api_key: str = "",
+) -> list:
     """Synchronously call the model and get a response.
     
     Simple helper for tricks that need to loop back to the model.
     Appends the user_message and calls the model, returning updated context.
+    Can target a different model by passing model_url/model_name.
     """
-    if not _model_url:
+    if not model_url:
+        model_url = _model_url
+    if not model_name:
+        model_name = _model_name
+    if not api_key:
+        api_key = _api_key
+
+    if not model_url:
         raise ValueError("Model URL not configured")
     
     messages = context.copy()
@@ -33,17 +47,17 @@ def callmodel_sync(context: list, user_message: str = "") -> list:
         messages.append({"role": "user", "content": user_message})
     
     payload = {
-        "model": _model_name or "default",
+        "model": model_name or "default",
         "messages": messages,
     }
     
     headers = {"Content-Type": "application/json"}
-    if _api_key:
-        headers["Authorization"] = f"Bearer {_api_key}"
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
     
     with httpx.Client() as client:
         response = client.post(
-            f"{_model_url}/v1/chat/completions",
+            f"{model_url}/v1/chat/completions",
             json=payload,
             headers=headers,
             timeout=60.0,

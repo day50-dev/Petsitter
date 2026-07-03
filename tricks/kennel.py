@@ -7,7 +7,6 @@ import httpx
 
 from src.trick import Trick, callmodel_sync
 
-
 class KennelTrick(Trick):
     """Pipeline multiple specialized models: thinker -> tool-caller -> emitter.
 
@@ -17,15 +16,7 @@ class KennelTrick(Trick):
     """
 
     def __init__(self):
-        self.config = self._load_config()
-        self._tool_decision = None
-
-    def _load_config(self) -> dict:
-        path = os.getenv("KENNEL_CONFIG", "kennels/default.json")
-        config_file = Path(path)
-        if config_file.exists():
-            return json.loads(config_file.read_text())
-        return {
+        self.config = {
             "thinker": {
                 "model_url": "http://localhost:11434",
                 "model_name": "VibeThinker-3B",
@@ -35,6 +26,7 @@ class KennelTrick(Trick):
                 "model_name": "LFM2.5-230M",
             },
         }
+        self._tool_decision = None
 
     # -- hooks ----------------------------------------------------------------
 

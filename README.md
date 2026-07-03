@@ -53,31 +53,6 @@ source .venv/bin/activate
 
 Now point your AI applications to `http://localhost:8080/v1`.
 
-### Multi-Model Pipeline (Kennel)
-
-Route different cognitive subtasks to specialized models running simultaneously:
-
-```bash
-# Pull three small models that together fit on modest hardware (< 6B total)
-ollama pull VibeThinker-3B    # reasoning / chain-of-thought
-ollama pull LFM2.5-230M       # tool-calling (tiny, fast)
-ollama pull Qwen3.5-2B        # response generation
-
-# Run the kennel trick — thinker and tool-caller are called automatically
-# before the emitter (Qwen3.5-2B) generates the final response
-./petsitter --model_url http://localhost:11434 \
-            --model_name Qwen3.5-2B \
-            --trick tricks/kennel.py
-```
-
-Each model sees a procedurally constructed context window optimized for its role:
-
-1. **Thinker** gets the conversation + "think step by step" → produces reasoning
-2. **Tool-caller** (if tools are present) gets context + reasoning + tool definitions → decides which tool to call
-3. **Emitter** receives the enriched context and generates the final response
-
-Configure model URLs in `kennels/default.json` or override with `KENNEL_CONFIG=my-config.json`.
-
 ## CLI Options
 
 | Option | Required | Description |

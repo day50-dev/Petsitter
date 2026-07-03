@@ -124,9 +124,25 @@ Validates code changes through self-description and comparison:
 ./petsitter --model_url http://localhost:11434 --trick tricks/code_validator.py
 ```
 
-#### List Files (`tricks/list_files.py`)
+### Self-healing: Code Validator
 
-Test trick that provides a `list_files` tool. Useful for testing tool calling functionality.
+Validates model-generated code changes by asking the model to describe what it wrote, then comparing that description against the original user request. On mismatch it retries with feedback. See [`tricks/code_validator.py`](tricks/code_validator.py) for the implementation.
+
+```bash
+./petsitter --model_url http://localhost:11434 --trick tricks/code_validator.py
+```
+
+#### Secrets Protector (`tricks/secrets_protector.py`)
+
+Detects and pseudonymizes sensitive information before it reaches the model, then restores original values in the response:
+
+- **Detection** — regex patterns for API keys (OpenAI, Anthropic, AWS, Google, Stripe), tokens (JWT, GitHub, Slack, Bearer), credentials (database URLs, private keys), and PII (emails, phones, SSNs, credit cards, IPs)
+- **Format-preserving substitutes** — realistic replacements (e.g., `alice@example.com` → `user.0001@sanitized.local`) that preserve token boundaries so the model's tokenizer doesn't conflate distinct entries
+- **Bidirectional vault** — consistent pseudonyms across the session (same secret → same substitute) with automatic restoration in both natural-language responses and tool call arguments
+
+```bash
+./petsitter --model_url http://localhost:11434 --trick tricks/secrets_protector.py
+```
 
 ## Tricksets
 
@@ -279,44 +295,6 @@ def info(self, capabilities: dict) -> dict:
     return capabilities
 ```
 
-## Full Trick Examples
-
-### Always-on: Haiku Mode
-
-Here's a trick that makes any model respond in haiku:
-
-```python
-from src.trick import Trick
-
-class HaikuTrick(Trick):
-    """Force the model to respond only in haiku."""
-
-    def system_prompt(self, to_add: str) -> str:
-        return (
-            "You must respond only in haiku (5-7-5 syllables). "
-            "No explanations, no extra text. Just haiku."
-        )
-
-    def post_hook(self, context: list) -> list:
-        return context
-
-    def info(self, capabilities: dict) -> dict:
-        capabilities["haiku_mode"] = True
-        return capabilities
-```
-
-Use it:
-```bash
-./petsitter --model_url http://localhost:11434 --trick haiku.py
-```
-
-### Self-healing: Code Validator
-
-Validates model-generated code changes by asking the model to describe what it wrote, then comparing that description against the original user request. On mismatch it retries with feedback. See [`tricks/code_validator.py`](tricks/code_validator.py) for the implementation.
-
-```bash
-./petsitter --model_url http://localhost:11434 --trick tricks/code_validator.py
-```
 
 ### Keyword-activated
 

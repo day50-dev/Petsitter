@@ -3,11 +3,13 @@ import secrets
 
 from src.trick import Trick, callmodel_sync, get_model_config
 
+
 class KennelTrick(Trick):
     """Pipeline multiple specialized models: thinker -> tool-caller -> emitter.
 
-    The emitter is the main model at --model_url (or modelset "default").
-    The thinker and tool-caller models are read from the modelset.
+    Each step appends its output to the context so the next model sees
+    everything the previous one produced.
+
     Requires a modelset with keys: "default", "thinker", "toolcall".
     """
 
@@ -15,6 +17,7 @@ class KennelTrick(Trick):
 
     def __init__(self):
         self._tool_decision = None
+        self._tools_cache = None
 
     # -- hooks ----------------------------------------------------------------
 
@@ -24,32 +27,29 @@ class KennelTrick(Trick):
     def pre_hook(self, context: list, params: dict) -> list:
         thinking = self._call_thinker(context)
         if thinking:
-            context = self._inject_thinking(context, thinking)
+            context = self._append_thinking(context, thinking)
 
         tools = params.get("tools")
         if tools:
+            self._tools_cache = tools
             decision = self._call_tool_caller(context, tools)
             if decision:
                 self._tool_decision = decision
-                context = self._inject_tool_decision(context, decision)
+                context = self._append_tool_decision(context, decision)
 
         return context
 
     def post_hook(self, context: list) -> list:
-        if not self._tool_decision:
+        if self._tool_decision:
+            self._inject_tool_calls(context, self._tool_decision)
+            self._tool_decision = None
             return context
 
-        context[-1]["content"] = None
-        context[-1]["tool_calls"] = [
-            {
-                "id": f"call_{secrets.token_hex(8)}",
-                "type": "function",
-                "function": {
-                    "name": self._tool_decision["name"],
-                    "arguments": json.dumps(self._tool_decision["arguments"]),
-                },
-            }
-        ]
+        if self._tools_cache:
+            decision = self._call_tool_caller(context, self._tools_cache)
+            if decision:
+                self._inject_tool_calls(context, decision)
+
         return context
 
     def info(self, capabilities: dict) -> dict:
@@ -63,14 +63,8 @@ class KennelTrick(Trick):
             return None
 
         cfg = get_model_config("thinker")
-        ctx = self._with_system_instruction(
-            context,
-            "Think step by step about the user's request. Analyze what "
-            "information is needed and plan the best approach. Do NOT answer "
-            "the request — only provide your reasoning.",
-        )
         result = callmodel_sync(
-            ctx,
+            context,
             model_url=cfg["model_url"],
             model_name=cfg["model_name"],
         )
@@ -80,7 +74,7 @@ class KennelTrick(Trick):
         cfg = get_model_config("toolcall")
 
         instruction = (
-            "Based on the conversation and reasoning above, decide if a tool "
+            "Based on the conversation above, decide if a tool "
             "should be called.\n\n"
             f"Available tools:\n{json.dumps(tools, indent=2)}\n\n"
             "If a tool is needed respond with ONLY this JSON:\n"
@@ -108,6 +102,20 @@ class KennelTrick(Trick):
 
         return None
 
+    @staticmethod
+    def _inject_tool_calls(context: list, decision: dict) -> None:
+        context[-1]["content"] = None
+        context[-1]["tool_calls"] = [
+            {
+                "id": f"call_{secrets.token_hex(8)}",
+                "type": "function",
+                "function": {
+                    "name": decision["name"],
+                    "arguments": json.dumps(decision["arguments"]),
+                },
+            }
+        ]
+
     # -- context helpers -----------------------------------------------------
 
     @staticmethod
@@ -120,7 +128,7 @@ class KennelTrick(Trick):
         return ctx
 
     @staticmethod
-    def _inject_thinking(context: list, thinking: str) -> list:
+    def _append_thinking(context: list, thinking: str) -> list:
         block = f"<thinking>\n{thinking}\n</thinking>"
         if context and context[0].get("role") == "system":
             context[0]["content"] += f"\n\n{block}"
@@ -129,7 +137,7 @@ class KennelTrick(Trick):
         return context
 
     @staticmethod
-    def _inject_tool_decision(context: list, decision: dict) -> list:
+    def _append_tool_decision(context: list, decision: dict) -> list:
         text = f"\n[Tool selected: {decision.get('name', 'unknown')}]"
         if context and context[0].get("role") == "system":
             context[0]["content"] += text

@@ -3,7 +3,7 @@
 <a href=https://pypi.org/project/petsitter><img src=https://badge.fury.io/py/petsitter.svg/?1></a>
 </p>
 
-**Petsitter** is a framework for building model harnesses — "tricks" — that sit between your application and an LLM. It's part of the [DAY50](https://day50.dev) suite of open-source tools for on-prem local AI.
+**Petsitter** is an OpenAI-compatible proxy that layers smart harnesses on top of language models to give them capabilities they don't natively have. It also makes finicky behaviors reliable and dependable.
 
 You install it, point it at a model, load a few example tricks, and suddenly things that model couldn't do before — tool calling, structured JSON, multi-step reasoning — start working. Then you think: *"oh, I could make it do X"* — and you write your own trick.
 
@@ -19,6 +19,8 @@ Petsitter intercepts every request/response pair and runs it through a pipeline 
 4. **`info`** — Declare capabilities back to your application
 
 A trick can be as simple as appending a sentence to the system prompt, or as involved as routing subtasks to three different models in parallel. There's a GUI at `/` for loading/unloading tricks, editing trickset filters, browsing logs, and pointing at different models — all at runtime, no restart needed.
+
+*Petsitter* is part of the [DAY50](https://github.com/day50-dev/) suite of open-source tools for local AI workflows and constructing better agents.
 
 ## Why Use It?
 

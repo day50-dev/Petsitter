@@ -166,7 +166,8 @@ Tricksets live as JSON files in the `tricksets/` directory:
 
 ```json
 {
-  "schema": "0.3.0",
+  "schema": "0.5.0",
+  "name": "my-trickset",
   "filters": {
     "X-Title": "opencode*",
     "Model": "*"

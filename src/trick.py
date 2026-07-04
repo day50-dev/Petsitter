@@ -1,6 +1,7 @@
 """Base Trick class and callmodel utility for petsitter."""
 
 import json
+import urllib.parse
 from typing import Any
 
 import httpx
@@ -9,6 +10,7 @@ import httpx
 _model_url = ""
 _model_name = ""
 _api_key = ""
+_modelset: dict[str, dict[str, str]] = {}
 
 
 def configure(model_url: str, model_name: str = "", api_key: str = ""):
@@ -17,6 +19,55 @@ def configure(model_url: str, model_name: str = "", api_key: str = ""):
     _model_url = model_url
     _model_name = model_name
     _api_key = api_key
+
+
+def parse_mas_uri(mas_uri: str) -> tuple[str, str]:
+    """Parse a MAS URI into (base_url, model_name).
+
+    MAS format: https://host[:port][/path]#m=model-name
+    Follows MAS.md spec: extracts fragment, finds 'm' param, percent-decodes.
+    """
+    if "#" not in mas_uri:
+        return (mas_uri.rstrip("/"), "")
+    base_url, fragment = mas_uri.rsplit("#", 1)
+    params = {}
+    for param in fragment.split("&"):
+        if "=" in param:
+            key, _, value = param.partition("=")
+            params[key] = urllib.parse.unquote(value)
+    model_name = params.get("m", "")
+    return (base_url.rstrip("/"), model_name)
+
+
+def configure_modelset(modelset_raw: dict[str, str]) -> dict[str, dict[str, str]]:
+    """Parse and store a modelset dict (key → MAS URI).
+
+    Each value is a MAS URI like "http://host#m=model-name".
+    Returns the parsed dict for inspection.
+    """
+    global _modelset
+    parsed: dict[str, dict[str, str]] = {}
+    for key, uri in modelset_raw.items():
+        url, name = parse_mas_uri(uri)
+        parsed[key] = {"model_url": url, "model_name": name}
+    _modelset = parsed
+    return parsed
+
+
+def get_model_config(key: str = "default") -> dict[str, str]:
+    """Get model config (model_url, model_name) for a modelset key.
+
+    Falls back to the globally configured defaults if key is "default"
+    and no modelset entry exists.
+    """
+    if key in _modelset:
+        return dict(_modelset[key])
+    if key == "default":
+        return {"model_url": _model_url, "model_name": _model_name}
+    raise KeyError(
+        f"Model key {key!r} not found in modelset. "
+        f"Available keys: {list(_modelset.keys()) or '(none)'}"
+    )
 
 
 def callmodel_sync(
@@ -78,9 +129,15 @@ class Trick:
     When the user includes a keyword in their message, the trick is invoked
     and the keyword is stripped before sending to the model.
     Tricks with no keywords are always active (when their trickset matches).
+
+    Set `required_models` to declare what model keys the trick needs from
+    a modelset. Default is ["default"] — the single model configured via
+    --model_url/--model_name. Multi-model tricks (e.g. KennelTrick) should
+    override with additional keys like ["default", "thinker", "toolcall"].
     """
 
     keywords: list[str] = []
+    required_models: list[str] = ["default"]
 
     def system_prompt(self, to_add: str) -> str:
         """Add instructions to the system prompt.
@@ -126,6 +183,16 @@ class Trick:
             Modified capabilities dict.
         """
         return capabilities
+
+
+def build_modelset_example(required_keys: list[str]) -> str:
+    """Build a helpful example JSON string for a set of required model keys."""
+    lines = ["{"]
+    for i, key in enumerate(required_keys):
+        comma = "," if i < len(required_keys) - 1 else ""
+        lines.append(f'    "{key}": "http://localhost:11434#m=your-model-here"{comma}')
+    lines.append("}")
+    return "\n".join(lines)
 
 
 async def callmodel(

@@ -17,7 +17,7 @@ from starlette.staticfiles import StaticFiles
 
 from src.loader import load_tricks
 from src.proxy import ProxyHandler
-from src.trick import Trick
+from src.trick import Trick, build_modelset_example, configure_modelset, parse_mas_uri
 from src.trickset import Trickset
 
 
@@ -50,6 +50,7 @@ def create_app(
     api_key: str,
     trick_paths: list[str],
     trickset_paths: list[str] | None = None,
+    modelset_data: dict[str, str] | None = None,
 ) -> Starlette:
     tricksets: dict[str, Trickset] = {}
 
@@ -69,6 +70,12 @@ def create_app(
             tricksets["_default"] = default_ts
 
     handler = ProxyHandler(model_url, model_name, api_key, tricksets=tricksets)
+
+    # Validate modelset against all loaded tricks' requirements
+    all_tricks: list[Trick] = []
+    for ts in tricksets.values():
+        all_tricks.extend(ts.tricks)
+    _validate_modelset(all_tricks, modelset_data)
 
     global _log_capture
     _log_capture = LogCaptureHandler()
@@ -296,10 +303,44 @@ def create_app(
     return app
 
 
+def _validate_modelset(tricks: list[Trick], modelset_data: dict[str, str] | None) -> None:
+    """Check that all loaded tricks have their required models available."""
+    modelset_keys = set(modelset_data.keys()) if modelset_data else set()
+
+    for trick in tricks:
+        required = set(trick.required_models)
+        if modelset_data is not None:
+            missing = required - modelset_keys
+            if missing:
+                keys_str = ", ".join(f"{k!r}" for k in sorted(required))
+                missing_str = ", ".join(f"{k!r}" for k in sorted(missing))
+                example = build_modelset_example(list(required))
+                click.echo(
+                    f"Error: Trick {type(trick).__name__} requires model keys "
+                    f"[{keys_str}], but {missing_str} "
+                    f"{'is' if len(missing) == 1 else 'are'} missing from the modelset.\n"
+                    f"Expected a modelset like:\n{example}",
+                    err=True,
+                )
+                raise SystemExit(1)
+        else:
+            extras = [k for k in trick.required_models if k != "default"]
+            if extras:
+                keys_str = ", ".join(f"{k!r}" for k in trick.required_models)
+                example = build_modelset_example(trick.required_models)
+                click.echo(
+                    f"Error: Trick {type(trick).__name__} requires model keys "
+                    f"[{keys_str}], but --modelset was not provided.\n"
+                    f"Provide a modelset JSON file like:\n{example}",
+                    err=True,
+                )
+                raise SystemExit(1)
+
+
 @click.command()
 @click.option(
     "--model_url",
-    required=True,
+    default=None,
     help="Base URL of the upstream model (e.g., http://localhost:11434)",
 )
 @click.option(
@@ -325,16 +366,22 @@ def create_app(
     help="Path to a trickset JSON file (can be specified multiple times)",
 )
 @click.option(
+    "--modelset",
+    default=None,
+    help="Path to a modelset JSON file (MAS URIs for multi-model tricks)",
+)
+@click.option(
     "--listen_on",
     default="localhost:8080",
     help="Host:port to listen on (default: localhost:8080)",
 )
 def cli(
-    model_url: str,
+    model_url: str | None,
     model_name: str | None,
     api_key: str,
     tricks: tuple[str, ...],
     tricksets: tuple[str, ...],
+    modelset: str | None,
     listen_on: str,
 ) -> None:
     """Petsitter - OpenAI-compatible proxy with tricks.
@@ -345,10 +392,43 @@ def cli(
         petsitter --model_url http://localhost:11434 \\
                   --model_name llama3:8b \\
                   --trick tricks/tool_call.py \\
-                  --trick tricks/json_mode.py \\
                   --trickset tricksets/gemma4.json \\
                   --listen_on localhost:8080
+
+    \b
+        petsitter --modelset modelset-example.json \\
+                  --trick tricks/kennel.py \\
+                  --listen_on localhost:8080
     """
+    # Load modelset if provided
+    modelset_data: dict[str, str] | None = None
+    if modelset:
+        modelset_path = Path(modelset).resolve()
+        if not modelset_path.exists():
+            click.echo(f"Error: modelset file not found: {modelset}", err=True)
+            raise SystemExit(1)
+        try:
+            modelset_data = json.loads(modelset_path.read_text())
+        except json.JSONDecodeError as e:
+            click.echo(f"Error: invalid JSON in modelset file: {e}", err=True)
+            raise SystemExit(1)
+
+        # Pull default model from modelset if --model_url not given
+        if model_url is None and "default" in modelset_data:
+            model_url, inferred_name = parse_mas_uri(modelset_data["default"])
+            if model_name is None:
+                model_name = inferred_name
+
+        configure_modelset(modelset_data)
+
+    if not model_url:
+        click.echo(
+            "Error: --model_url is required when --modelset is not provided "
+            "(or the modelset must have a 'default' key)",
+            err=True,
+        )
+        raise SystemExit(1)
+
     if ":" in listen_on:
         host, port_str = listen_on.rsplit(":", 1)
         port = int(port_str)
@@ -360,6 +440,7 @@ def cli(
         model_url, model_name, api_key,
         trick_paths=list(tricks),
         trickset_paths=list(tricksets),
+        modelset_data=modelset_data,
     )
 
     click.echo(f"Starting petsitter on {host}:{port}")
@@ -370,6 +451,8 @@ def cli(
         click.echo(f"Tricks: {', '.join(tricks)}")
     if tricksets:
         click.echo(f"Tricksets: {', '.join(tricksets)}")
+    if modelset:
+        click.echo(f"Modelset: {modelset}")
 
     log_level = os.getenv("LOGLEVEL", "INFO").upper()
     logging.basicConfig(

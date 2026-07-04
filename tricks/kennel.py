@@ -1,31 +1,19 @@
 import json
-import os
 import secrets
-from pathlib import Path
 
-import httpx
-
-from src.trick import Trick, callmodel_sync
+from src.trick import Trick, callmodel_sync, get_model_config
 
 class KennelTrick(Trick):
     """Pipeline multiple specialized models: thinker -> tool-caller -> emitter.
 
-    The emitter is the main model at --model_url. The thinker and tool-caller
-    URLs/names are read from a kennel config file (default: kennels/default.json
-    or $KENNEL_CONFIG).
+    The emitter is the main model at --model_url (or modelset "default").
+    The thinker and tool-caller models are read from the modelset.
+    Requires a modelset with keys: "default", "thinker", "toolcall".
     """
 
+    required_models = ["default", "thinker", "toolcall"]
+
     def __init__(self):
-        self.config = {
-            "thinker": {
-                "model_url": "http://localhost:11434",
-                "model_name": "VibeThinker-3B",
-            },
-            "tool_caller": {
-                "model_url": "http://localhost:11434",
-                "model_name": "LFM2.5-230M",
-            },
-        }
         self._tool_decision = None
 
     # -- hooks ----------------------------------------------------------------
@@ -71,13 +59,10 @@ class KennelTrick(Trick):
     # -- internal pipeline helpers -------------------------------------------
 
     def _call_thinker(self, context: list) -> str | None:
-        cfg = self.config.get("thinker")
-        if not cfg:
-            return None
-
         if not self._last_user_message(context):
             return None
 
+        cfg = get_model_config("thinker")
         ctx = self._with_system_instruction(
             context,
             "Think step by step about the user's request. Analyze what "
@@ -86,15 +71,13 @@ class KennelTrick(Trick):
         )
         result = callmodel_sync(
             ctx,
-            model_url=cfg.get("model_url", "http://localhost:11434"),
-            model_name=cfg.get("model_name", ""),
+            model_url=cfg["model_url"],
+            model_name=cfg["model_name"],
         )
         return result[-1].get("content", "").strip() if result else None
 
     def _call_tool_caller(self, context: list, tools: list) -> dict | None:
-        cfg = self.config.get("tool_caller")
-        if not cfg:
-            return None
+        cfg = get_model_config("toolcall")
 
         instruction = (
             "Based on the conversation and reasoning above, decide if a tool "
@@ -108,8 +91,8 @@ class KennelTrick(Trick):
 
         result = callmodel_sync(
             ctx,
-            model_url=cfg.get("model_url", "http://localhost:11434"),
-            model_name=cfg.get("model_name", ""),
+            model_url=cfg["model_url"],
+            model_name=cfg["model_name"],
         )
         content = result[-1].get("content", "").strip() if result else ""
 

@@ -126,11 +126,11 @@ ollama pull LFM2.5-230M       # tool-calling (tiny, fast)
 ollama pull Qwen3.5-2B        # response generation
 
 # Each model sees a procedurally constructed context optimized for its role
-./petsitter -mc modelset-example.json \
+./petsitter -mc examples/modelset.json \
             -t tricks/kennel.py
 ```
 
-Example `modelset-example.json`:
+Example `modelset.json`:
 ```json
 {
     "default": "http://localhost:11434#m=Qwen3.5:8b",

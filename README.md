@@ -9,16 +9,16 @@ Smaller models can't do tool calling? Petsitter tricks them into it. Need struct
 
 But that's only the beginning. Cyclomatic complexity? Halstead metrics? Chidamber and Kemerer? Why not!
 
-## Who Is This For?
+## What Is This For?
 
-- **You run local models** (Ollama, llama.cpp, vllm, sglang) and want them to not be a lazy goofball
-- **You use small/cheap models** that lack tool calling or JSON mode
-- **You build agentic systems** that need consistent capabilities across different models
-- **You want to experiment** with prompt engineering tricks without changing your application code
+- **local models** (Ollama, llama.cpp, vllm, sglang) and want them to not be a lazy goofball
+- **small/cheap models** that lack tool calling or JSON mode
+- **agentic systems** that need consistent capabilities across different models
+- **experiments and evalutions** with prompt engineering tricks without changing your application code
 
 ## What Does It Do?
 
-Petsitter sits between your application and your model, intercepting requests and responses to apply "tricks" - pluggable transformations that add functionality through:
+Petsitter sits between your application and your model or one or more inference providers, intercepting requests and responses to apply "tricks" - pluggable transformations that add functionality through:
 
 1. **Prompt engineering** - Inject instructions and tool definitions
 2. **Context manipulation** - Modify messages before/after the model sees them
@@ -66,48 +66,78 @@ Now point your AI applications to `http://localhost:8080/v1`.
 
 ## Built-in Tricks
 
-#### JSON Mode (`tricks/json_mode.py`)
+### Output Control
 
-Enforces valid JSON output by:
-- Adding formatting instructions to the system prompt
-- Retrying with feedback if response isn't valid JSON
-- Stripping markdown code blocks
+ * [JSON Mode](#json-mode) — Enforce valid JSON output
+ * [Code Validator](#code-validator) — Self-healing validation through model self-description
+
+### Capability Injection
+
+ * [Tool Calling](#tool-calling) — Add tool calling to models without native support
+ * [List Files](#list-files) — Example tool that lists directory contents
+
+### Pipeline
+
+ * [Kennel](#kennel) — Route cognitive subtasks to specialized models
+
+### Security
+
+ * [Secrets Protector](#secrets-protector) — Detect and pseudonymize secrets/PII before they reach the model
+
+---
+
+### JSON Mode
+
+Enforces valid JSON output by adding formatting instructions to the system prompt, stripping markdown code blocks, and retrying with feedback if the response isn't valid JSON.
 
 ```bash
 ./petsitter --model_url http://localhost:11434 --trick tricks/json_mode.py
 ```
 
-#### Tool Calling (`tricks/tool_call.py`)
+### Code Validator
 
-Enables tool calling for models without native support:
-- Injects tool definitions into prompts
-- Parses JSONRPC-style tool call responses
-- Converts to OpenAI `tool_calls` format
+After the model proposes a code change, asks it to describe what the change does, compares the description against the original user request, and retries with feedback if they don't match.
+
+```bash
+./petsitter --model_url http://localhost:11434 --trick tricks/code_validator.py
+```
+
+### Tool Calling
+
+Enables tool calling for models without native support by injecting tool definitions into the prompt, parsing JSONRPC-style tool call responses, and converting them to OpenAI `tool_calls` format.
 
 ```bash
 ./petsitter --model_url http://localhost:11434 --trick tricks/tool_call.py
 ```
 
-#### Code Validator (`tricks/code_validator.py`)
+### List Files
 
-Validates code changes through self-description and comparison:
-- After the model proposes a change, asks it to describe what the change does
-- Compares the description against the original user request
-- If they don't match, retries with feedback ("You must do a new approach")
+Test trick that provides a `list_files` tool. Useful for testing tool calling functionality.
 
-```bash
-./petsitter --model_url http://localhost:11434 --trick tricks/code_validator.py
-```
+### Kennel
 
-### Self-healing: Code Validator
-
-Validates model-generated code changes by asking the model to describe what it wrote, then comparing that description against the original user request. On mismatch it retries with feedback. See [`tricks/code_validator.py`](tricks/code_validator.py) for the implementation.
+Routes different cognitive subtasks to specialized models running in parallel. The emitter is the model specified with `--model_url`; the thinker and tool-caller are configured in a kennel config file (`kennels/default.json` or `$KENNEL_CONFIG`).
 
 ```bash
-./petsitter --model_url http://localhost:11434 --trick tricks/code_validator.py
+# Pull three small models that together fit on modest hardware (< 6B total)
+ollama pull VibeThinker-3B    # reasoning / chain-of-thought
+ollama pull LFM2.5-230M       # tool-calling (tiny, fast)
+ollama pull Qwen3.5-2B        # response generation
+
+# Each model sees a procedurally constructed context optimized for its role
+./petsitter --model_url http://localhost:11434 \
+            --model_name Qwen3.5-2B \
+            --trick tricks/kennel.py
 ```
 
-#### Secrets Protector (`tricks/secrets_protector.py`)
+Pipeline:
+1. **Thinker** gets the conversation + "think step by step" → produces reasoning
+2. **Tool-caller** (if tools are present) gets context + reasoning + tool definitions → decides which tool to call
+3. **Emitter** receives the enriched context and generates the final response
+
+Configure model URLs in `kennels/default.json` or override with `KENNEL_CONFIG=my-config.json`.
+
+### Secrets Protector
 
 Detects and pseudonymizes sensitive information before it reaches the model, then restores original values in the response:
 

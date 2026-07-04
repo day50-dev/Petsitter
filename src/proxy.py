@@ -32,6 +32,7 @@ class ProxyHandler:
             ts = Trickset("_default", "0.3.0", {"X-Title": "*", "Model": "*"}, [])
             ts.tricks = list(tricks)
             self.tricksets["_default"] = ts
+        self._enabled: dict[str, bool] = {}
         configure(self.model_url, self.model_name or "", self.api_key)
 
     @property
@@ -48,7 +49,7 @@ class ProxyHandler:
             if ts.matches(x_title, model):
                 for t in ts.tricks:
                     cls_name = type(t).__name__
-                    if cls_name not in seen:
+                    if cls_name not in seen and self._enabled.get(cls_name, True):
                         tricks.append(t)
                         seen.add(cls_name)
         return tricks
@@ -130,7 +131,9 @@ class ProxyHandler:
             if not ts:
                 ts = Trickset("_default", "0.3.0", {"X-Title": "*", "Model": "*"}, [])
                 self.tricksets["_default"] = ts
-        return ts.add_trick(path)
+        trick = ts.add_trick(path)
+        self._enabled[type(trick).__name__] = True
+        return trick
 
     def remove_trick(self, class_name: str, ts_name: str | None = None) -> bool:
         if ts_name:
@@ -157,13 +160,28 @@ class ProxyHandler:
     def get_tricks_info(self) -> list[dict]:
         result = []
         for ts_name, ts in self.tricksets.items():
-            for t in ts.tricks:
+            for i, t in enumerate(ts.tricks):
+                name = type(t).__name__
+                path = ts.trick_paths[i] if i < len(ts.trick_paths) else ""
                 result.append({
-                    "name": type(t).__name__,
+                    "name": name,
                     "module": type(t).__module__,
                     "trickset": ts_name,
+                    "path": path,
+                    "enabled": self._enabled.get(name, True),
+                    "keywords": list(t.keywords),
+                    "required_models": list(t.required_models),
                 })
         return result
+
+    def toggle_trick(self, name: str, enabled: bool | None = None) -> bool:
+        for t in self.tricks:
+            if type(t).__name__ == name:
+                if enabled is None:
+                    enabled = not self._enabled.get(name, True)
+                self._enabled[name] = enabled
+                return True
+        return False
 
     async def chat_completions(self, payload: dict, x_title: str = "") -> dict:
         messages = payload.get("messages", [])

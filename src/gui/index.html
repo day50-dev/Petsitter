@@ -3,26 +3,77 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PetSitter Control Panel</title>
+<title>PetSitter Dashboard</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f0f1a;color:#c8d6e5;padding:20px;font-size:14px}
-h1{font-size:20px;font-weight:600;color:#fff}
+h1{font-size:18px;font-weight:600;color:#fff}
 h2{font-size:15px;font-weight:600;color:#a4b8d4;margin-bottom:10px}
 h3{font-size:13px;font-weight:600;color:#7a9ab5;margin-bottom:6px}
-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:12px;border-bottom:1px solid #1e2a3a}
-header .info{display:flex;gap:20px;font-size:13px;color:#6b8299}
+
+/* layout */
+header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-bottom:10px;border-bottom:1px solid #1e2a3a;gap:12px;flex-wrap:wrap}
+header .brand{display:flex;align-items:center;gap:10px}
+header .brand img{width:32px;height:32px;border-radius:4px}
+header .info{display:flex;gap:14px;font-size:12px;color:#6b8299;flex-wrap:wrap}
 header .info span{display:flex;align-items:center;gap:4px}
 header .info .label{color:#4a6572}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
-.card{background:#16162a;border-radius:8px;padding:16px;border:1px solid #1e2a3a}
-.trick-item,.avail-item{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;margin-bottom:4px;border-radius:4px;background:#1a1a33}
-.trick-item{cursor:grab}
-.trick-item.dragging{opacity:.4}
-.trick-item.drag-over{border-top:2px solid #5a8ab5}
+header .nav{display:flex;gap:6px}
+header .nav a{color:#5a8ab5;text-decoration:none;font-size:12px;padding:3px 8px;border-radius:3px}
+header .nav a:hover{background:#1a2a4d}
+
+.section{margin-bottom:20px}
+
+/* tabs */
+.tabs{display:flex;gap:4px;margin-bottom:12px}
+.tab{padding:6px 16px;border-radius:4px 4px 0 0;cursor:pointer;font-size:13px;font-weight:500;color:#5a7a95;background:#12122a;border:1px solid #1e2a3a;border-bottom:none}
+.tab.active{color:#8ab4ff;background:#16162a;border-color:#25254a}
+.tab-pane{display:none}
+.tab-pane.active{display:block}
+
+.card{background:#16162a;border-radius:8px;padding:16px;border:1px solid #1e2a3a;margin-bottom:14px}
+.card-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+
+/* tricks */
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.trick-item{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;margin-bottom:4px;border-radius:4px;background:#1a1a33}
+.trick-item .info{flex:1;min-width:0}
 .trick-item .name{font-weight:500;color:#e0e0e0;font-size:13px}
-.trick-item .module{font-size:11px;color:#5a7a95;margin-left:8px}
-.avail-item .name{font-size:13px;color:#c8d6e5}
+.trick-item .path{font-size:11px;color:#5a7a95;margin-left:8px}
+.trick-item .module{font-size:10px;color:#4a6572}
+.trick-meta{display:flex;gap:4px;margin-top:3px;flex-wrap:wrap}
+.badge{display:inline-block;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:500}
+.badge-kw{background:#1a2a3a;color:#8ab4ff}
+.badge-models{background:#2a1a3a;color:#b48aff}
+.badge-ts{background:#1a2a1a;color:#6bff8a;font-size:9px}
+.actions{display:flex;align-items:center;gap:6px}
+
+/* toggle */
+.toggle{width:36px;height:20px;border-radius:10px;border:none;cursor:pointer;position:relative;transition:background .15s;font-size:0}
+.toggle.on{background:#1a5a2a}
+.toggle.off{background:#3a1a1a}
+.toggle::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#c8d6e5;transition:transform .15s}
+.toggle.on::after{transform:translateX(16px);background:#6bff8a}
+.toggle.off::after{background:#5a3a3a}
+
+.avail-item{display:flex;justify-content:space-between;align-items:center;padding:6px 8px;border-radius:3px;background:#12122a;margin-bottom:3px}
+.avail-item .name{font-size:12px;color:#c8d6e5;font-family:monospace}
+
+.custom-path{display:flex;gap:8px;margin-top:10px}
+.custom-path input{flex:1;background:#0f0f1a;border:1px solid #1e2a3a;border-radius:4px;padding:7px 10px;color:#c8d6e5;font-size:13px;font-family:monospace}
+.custom-path input::placeholder{color:#3a4a5a}
+
+/* models */
+.models-grid{display:grid;gap:8px}
+.model-entry{display:grid;grid-template-columns:100px 1fr 1fr auto;gap:8px;align-items:center;padding:8px 10px;background:#1a1a33;border-radius:4px}
+.model-entry .key{font-weight:500;color:#e0e0e0;font-size:13px;font-family:monospace}
+.model-entry input{background:#0f0f1a;border:1px solid #1e2a3a;border-radius:3px;padding:5px 8px;color:#c8d6e5;font-size:12px;font-family:monospace}
+.model-entry .rm{color:#5a253a;cursor:pointer;font-size:16px;padding:2px 6px}
+.model-entry .rm:hover{color:#ff6b8a}
+.model-add{display:flex;gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap}
+.model-add input{background:#0f0f1a;border:1px solid #1e2a3a;border-radius:3px;padding:5px 8px;color:#c8d6e5;font-size:12px;font-family:monospace}
+
+/* buttons */
 .btn{display:inline-flex;align-items:center;gap:4px;padding:4px 12px;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:500;transition:background .15s}
 .btn-sm{padding:3px 10px;font-size:11px}
 .btn-danger{background:#3d1a2a;color:#ff6b8a}
@@ -33,9 +84,8 @@ header .info .label{color:#4a6572}
 .btn-primary:hover{background:#253a6a}
 .btn-secondary{background:#1e2a3a;color:#7a9ab5}
 .btn-secondary:hover{background:#2a3a4a}
-.loader{color:#5a7a95;font-size:13px;padding:10px 0}
-.empty{color:#4a6572;font-size:13px;font-style:italic;padding:10px 0}
-.log-section{margin-bottom:20px}
+
+/* logs */
 .log-controls{display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap}
 .log-controls label{display:flex;align-items:center;gap:4px;font-size:12px;color:#7a9ab5;cursor:pointer}
 .log-controls input[type=checkbox]{accent-color:#5a8ab5}
@@ -49,51 +99,41 @@ header .info .label{color:#4a6572}
 .log-entry.lvl-ERROR{color:#ff6b8a}
 .log-entry.lvl-CRITICAL{color:#ff3b5a;font-weight:700}
 .log-count{font-size:12px;color:#4a6572;margin-left:auto}
-.custom-path{display:flex;gap:8px;margin-top:12px}
-.custom-path input{flex:1;background:#0f0f1a;border:1px solid #1e2a3a;border-radius:4px;padding:8px 10px;color:#c8d6e5;font-size:13px;font-family:monospace}
-.custom-path input::placeholder{color:#3a4a5a}
+
+.loader{color:#5a7a95;font-size:13px;padding:10px 0}
+.empty{color:#4a6572;font-size:13px;font-style:italic;padding:10px 0}
 .toast{position:fixed;bottom:20px;right:20px;background:#1a3d2a;color:#6bff8a;padding:10px 20px;border-radius:6px;font-size:13px;z-index:100;animation:fadeIn .2s}
 .toast.error{background:#3d1a2a;color:#ff6b8a}
 @keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
-.nav{display:flex;gap:10px;margin-left:auto}
-.nav a{color:#5a8ab5;text-decoration:none;font-size:13px;padding:4px 10px;border-radius:4px}
-.nav a:hover{background:#1a2a4d}
-
-/* tricksets */
-.ts-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px}
-.ts-card{background:#1a1a33;border:1px solid #25254a;border-radius:6px;padding:14px}
-.ts-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
-.ts-name{font-weight:600;color:#e0e0e0;font-size:14px}
-.ts-schema{font-size:11px;color:#4a6572;margin-left:8px}
-.ts-filter{display:flex;gap:8px;margin-bottom:8px;align-items:center;flex-wrap:wrap}
-.ts-filter input{background:#0f0f1a;border:1px solid #1e2a3a;border-radius:3px;padding:4px 8px;color:#c8d6e5;font-size:12px;font-family:monospace;width:120px}
-.ts-filter .key{color:#5a7a95;font-size:11px;font-weight:500}
-.ts-filter .sep{color:#3a4a5a}
-.ts-tricks{margin-top:6px}
-.ts-trick-item{display:flex;justify-content:space-between;align-items:center;padding:4px 8px;border-radius:3px;background:#12122a;margin-bottom:2px;font-size:12px}
-.ts-trick-item .name{color:#c8d6e5}
-.ts-trick-item .remove{cursor:pointer;color:#5a253a;font-size:14px;line-height:1}
-.ts-trick-item .remove:hover{color:#ff6b8a}
-.ts-actions{display:flex;gap:6px;margin-top:8px}
-.ts-avail-item{display:flex;justify-content:space-between;align-items:center;padding:6px 8px;border-radius:3px;background:#12122a;margin-bottom:3px}
-.ts-avail-item .name{font-size:12px;color:#c8d6e5}
 </style>
 </head>
 <body>
+
 <header>
-<h1>PetSitter Control Panel</h1>
+<div class="brand">
+<img src="/static/petsitter-type.avif" alt="PetSitter">
+<h1>PetSitter Dashboard</h1>
+</div>
 <div class="nav">
-<a href="/docs">API Docs</a>
-<a href="/static/openapi.json">OpenAPI Spec</a>
+<a href="https://github.com/day50-dev/Petsitter" target="_blank">GitHub</a>
+<a href="/docs">API</a>
 </div>
 <div class="info">
-<span><span class="label">Server:</span><span id="info-listen">--</span></span>
-<span><span class="label">Upstream:</span><span id="info-upstream">--</span></span>
-<span><span class="label">Model:</span><span id="info-model">--</span></span>
+<span><span class="label">Listening</span><span id="info-listen">--</span></span>
+<span><span class="label">Upstream</span><span id="info-upstream">--</span></span>
+<span><span class="label">Model</span><span id="info-model">--</span></span>
 </div>
 </header>
 
-<div class="grid">
+<div class="tabs">
+<div class="tab active" data-tab="tricks" onclick="switchTab('tricks')">Tricks</div>
+<div class="tab" data-tab="models" onclick="switchTab('models')">Models</div>
+<div class="tab" data-tab="logs" onclick="switchTab('logs')">Logs</div>
+</div>
+
+<!-- === TRICKS TAB === -->
+<div class="tab-pane active" id="tab-tricks">
+<div class="two-col">
 <div class="card">
 <h2>Loaded Tricks</h2>
 <div id="loaded-tricks"><div class="loader">Loading...</div></div>
@@ -107,19 +147,35 @@ header .info .label{color:#4a6572}
 </div>
 </div>
 </div>
+</div>
 
-<div class="card" style="margin-bottom:20px">
-<h2>Tricksets</h2>
-<div id="loaded-tricksets"><div class="loader">Loading...</div></div>
-<div id="available-tricksets" style="margin-top:12px;border-top:1px solid #1e2a3a;padding-top:12px">
-<h3>Available Trickset Files</h3>
-<div id="ts-available-list"><div class="loader">Loading...</div></div>
+<!-- === MODELS TAB === -->
+<div class="tab-pane" id="tab-models">
+<div class="card">
+<h2>Default Model</h2>
+<div class="model-entry" style="grid-template-columns:1fr 1fr auto">
+<input type="text" id="model-url" placeholder="http://localhost:11434" style="font-size:13px">
+<input type="text" id="model-name" placeholder="Model name (optional)" style="font-size:13px">
+<button class="btn btn-primary btn-sm" onclick="updateDefaultModel()">Update</button>
 </div>
 </div>
 
-<div class="log-section">
+<div class="card">
+<div class="card-title"><h2>Configured Models</h2><span style="font-size:11px;color:#4a6572">MAS URIs for multi-model tricks</span></div>
+<div class="models-grid" id="model-list"><div class="loader">Loading...</div></div>
+<div class="model-add">
+<input type="text" id="new-model-key" placeholder="key (e.g. thinker)" style="width:100px">
+<input type="text" id="new-model-uri" placeholder="http://host#m=model-name" style="flex:1">
+<button class="btn btn-success btn-sm" onclick="addModelEntry()">Add</button>
+</div>
+</div>
+</div>
+
+<!-- === LOGS TAB === -->
+<div class="tab-pane" id="tab-logs">
+<div class="card">
 <div class="log-controls">
-<h2>Activity Log</h2>
+<h2 style="margin:0">Activity Log</h2>
 <label><input type="checkbox" id="autorefresh" checked> Auto-refresh</label>
 <select id="level-filter" onchange="fetchLogs()">
 <option value="">All levels</option>
@@ -128,14 +184,15 @@ header .info .label{color:#4a6572}
 <option value="WARNING">WARNING</option>
 <option value="ERROR">ERROR</option>
 </select>
-<button class="btn btn-secondary btn-sm" onclick="clearLogDisplay()">Clear display</button>
+<button class="btn btn-secondary btn-sm" onclick="clearLogDisplay()">Clear</button>
 <span class="log-count" id="log-count"></span>
 </div>
 <div class="log-viewer" id="log-viewer"><div class="loader">Loading logs...</div></div>
 </div>
+</div>
 
 <script>
-let lastLogCount = 0;
+// ---- utils ----
 function showToast(msg, isError) {
   const el = document.createElement('div');
   el.className = 'toast' + (isError ? ' error' : '');
@@ -148,6 +205,16 @@ async function fetchJSON(url, opts) {
   if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.error || r.statusText); }
   return r.json();
 }
+function escapeHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ---- tabs ----
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'tab-'+name));
+  if (name === 'logs') fetchLogs();
+}
+
+// ---- info ----
 async function fetchInfo() {
   try {
     const d = await fetchJSON('/api/info');
@@ -156,70 +223,49 @@ async function fetchInfo() {
     document.getElementById('info-model').textContent = d.model_name || '(default)';
   } catch(e) { console.error(e); }
 }
-let dragSrc = null;
+
+// ---- tricks ----
 async function fetchTricks() {
   try {
     const tricks = await fetchJSON('/api/tricks');
     const el = document.getElementById('loaded-tricks');
     if (!tricks.length) { el.innerHTML = '<div class="empty">No tricks loaded</div>'; return; }
-    el.innerHTML = tricks.map((t,i) => '<div class="trick-item" draggable="true" data-name="' + t.name + '" data-index="' + i + '"><div><span class="name">' + t.name + '</span><span class="module">' + t.module + (t.trickset ? ' <span style="color:#4a6572;font-size:10px">[' + t.trickset + ']</span>' : '') + '</span></div><button class="btn btn-danger btn-sm" onclick="unloadTrick(\'' + t.name + '\')">Remove</button></div>').join('');
-    el.querySelectorAll('.trick-item').forEach(item => {
-      item.addEventListener('dragstart', onDragStart);
-      item.addEventListener('dragend', onDragEnd);
-      item.addEventListener('dragover', onDragOver);
-      item.addEventListener('dragleave', onDragLeave);
-      item.addEventListener('drop', onDrop);
-    });
+    el.innerHTML = tricks.map(t => {
+      const on = t.enabled !== false;
+      const badges = [];
+      if (t.keywords && t.keywords.length) badges.push(...t.keywords.map(k => '<span class="badge badge-kw">' + escapeHtml(k) + '</span>'));
+      if (t.required_models && t.required_models.length) badges.push(...t.required_models.map(m => '<span class="badge badge-models">' + escapeHtml(m) + '</span>'));
+      if (t.trickset && t.trickset !== '_default') badges.push('<span class="badge badge-ts">' + escapeHtml(t.trickset) + '</span>');
+      return '<div class="trick-item"><div class="info"><div><span class="name">' + escapeHtml(t.name) + '</span><span class="path">' + escapeHtml(t.path || t.module) + '</span></div><div class="trick-meta">' + badges.join('') + '</div></div><div class="actions"><button class="toggle ' + (on ? 'on' : 'off') + '" onclick="toggleTrick(\'' + t.name + '\',' + (!on) + ')" title="' + (on ? 'Disable' : 'Enable') + '">' + (on ? 'ON' : 'OFF') + '</button><button class="btn btn-danger btn-sm" onclick="unloadTrick(\'' + t.name + '\')" title="Remove">\u2715</button></div></div>';
+    }).join('');
   } catch(e) { document.getElementById('loaded-tricks').innerHTML = '<div class="loader">Error loading tricks</div>'; }
 }
-function onDragStart(e) {
-  dragSrc = this;
-  this.classList.add('dragging');
-  e.dataTransfer.effectAllowed = 'move';
-  e.dataTransfer.setData('text/plain', this.dataset.name);
-}
-function onDragEnd(e) {
-  this.classList.remove('dragging');
-  document.querySelectorAll('.trick-item').forEach(i => i.classList.remove('drag-over'));
-  dragSrc = null;
-}
-function onDragOver(e) {
-  e.preventDefault();
-  e.dataTransfer.dropEffect = 'move';
-  this.classList.add('drag-over');
-}
-function onDragLeave(e) {
-  this.classList.remove('drag-over');
-}
-async function onDrop(e) {
-  e.preventDefault();
-  this.classList.remove('drag-over');
-  if (dragSrc === this) return;
-  const items = [...document.querySelectorAll('.trick-item')];
-  const srcIdx = items.indexOf(dragSrc);
-  const dstIdx = items.indexOf(this);
-  if (srcIdx === dstIdx) return;
+
+async function toggleTrick(name, enabled) {
   try {
-    await fetchJSON('/api/tricks/reorder', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name: dragSrc.dataset.name, new_index: dstIdx}) });
-    showToast('Reordered: ' + dragSrc.dataset.name);
+    const d = await fetchJSON('/api/tricks/' + encodeURIComponent(name) + '/toggle', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enabled}) });
+    showToast(name + ': ' + (d.enabled ? 'enabled' : 'disabled'));
     fetchTricks();
   } catch(e) { showToast(e.message, true); }
 }
+
 async function fetchAvailable() {
   try {
     const files = await fetchJSON('/api/tricks/available');
     const el = document.getElementById('available-tricks');
     if (!files.length) { el.innerHTML = '<div class="empty">No built-in tricks found</div>'; return; }
-    el.innerHTML = files.map(f => '<div class="avail-item"><span class="name">' + f + '</span><button class="btn btn-success btn-sm" onclick="loadTrick(\'' + f + '\')">Load</button></div>').join('');
+    el.innerHTML = files.map(f => '<div class="avail-item"><span class="name">' + escapeHtml(f) + '</span><button class="btn btn-success btn-sm" onclick="loadTrick(\'' + f + '\')">Load</button></div>').join('');
   } catch(e) { document.getElementById('available-tricks').innerHTML = '<div class="loader">Error loading</div>'; }
 }
+
 async function loadTrick(path) {
   try {
     const d = await fetchJSON('/api/tricks/load', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path}) });
     showToast('Loaded: ' + d.name);
-    fetchTricks(); fetchAvailable(); fetchTricksets();
+    fetchTricks(); fetchAvailable();
   } catch(e) { showToast(e.message, true); }
 }
+
 async function loadCustomTrick() {
   const inp = document.getElementById('custom-path');
   const path = inp.value.trim();
@@ -227,80 +273,71 @@ async function loadCustomTrick() {
   await loadTrick(path);
   inp.value = '';
 }
+
 async function unloadTrick(name) {
   try {
     await fetchJSON('/api/tricks/unload', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name}) });
     showToast('Removed: ' + name);
-    fetchTricks(); fetchAvailable(); fetchTricksets();
+    fetchTricks(); fetchAvailable();
   } catch(e) { showToast(e.message, true); }
 }
 
-// ----- Tricksets -----
-async function fetchTricksets() {
+// ---- models ----
+async function fetchModels() {
   try {
-    const sets = await fetchJSON('/api/tricksets');
-    const el = document.getElementById('loaded-tricksets');
-    if (!sets.length) { el.innerHTML = '<div class="empty">No tricksets loaded</div>'; return; }
-    el.innerHTML = '<div class="ts-grid">' + sets.map(ts => renderTricksetCard(ts)).join('') + '</div>';
-  } catch(e) { document.getElementById('loaded-tricksets').innerHTML = '<div class="loader">Error loading</div>'; }
+    const d = await fetchJSON('/api/models');
+    document.getElementById('model-url').value = d.model_url || '';
+    document.getElementById('model-name').value = d.model_name || '';
+
+    const keys = Object.keys(d.configured_models || {});
+    const el = document.getElementById('model-list');
+    if (!keys.length) { el.innerHTML = '<div class="empty">No models configured</div>'; return; }
+    el.innerHTML = keys.map(k => {
+      const m = d.configured_models[k];
+      return '<div class="model-entry"><span class="key">' + escapeHtml(k) + '</span><input type="text" value="' + escapeHtml(m.model_url) + '" onchange="updateModelKey(\'' + k + '\',\'url\',this.value)"><input type="text" value="' + escapeHtml(m.model_name) + '" onchange="updateModelKey(\'' + k + '\',\'name\',this.value)"><span class="rm" onclick="removeModelKey(\'' + k + '\')">&times;</span></div>';
+    }).join('');
+  } catch(e) { document.getElementById('model-list').innerHTML = '<div class="loader">Error loading models</div>'; }
 }
-function renderTricksetCard(ts) {
-  const filterKeys = Object.keys(ts.filters || {'X-Title':'*','Model':'*'});
-  const filtersHtml = filterKeys.map(k => '<span class="ts-filter"><span class="key">' + k + '</span><span class="sep">=</span><input type="text" value="' + escapeHtml(ts.filters[k]) + '" onchange="updateTricksetFilter(\'' + ts.name + '\',\'' + k + '\',this.value)" data-ts-name="' + ts.name + '" data-key="' + k + '"></span>').join('');
-  const tricksHtml = ts.trick_names && ts.trick_names.length
-    ? ts.trick_names.map(n => '<div class="ts-trick-item"><span class="name">' + n + '</span><span class="remove" onclick="removeTrickFromTrickset(\'' + ts.name + '\',\'' + n + '\')">\u00d7</span></div>').join('')
-    : '<div class="empty" style="padding:4px 0">No tricks</div>';
-  return '<div class="ts-card">'
-    + '<div class="ts-header"><span><span class="ts-name">' + ts.name + '</span><span class="ts-schema">schema: ' + ts.schema + '</span></span><button class="btn btn-danger btn-sm" onclick="unloadTrickset(\'' + ts.name + '\')">Unload</button></div>'
-    + '<div class="ts-filter">' + filtersHtml + '</div>'
-    + '<div class="ts-tricks">' + tricksHtml + '</div>'
-    + '<div class="ts-actions">'
-    + (ts.file_path ? '<button class="btn btn-primary btn-sm" onclick="saveTrickset(\'' + ts.name + '\')">Save to File</button>' : '')
-    + '</div>'
-    + '</div>';
-}
-function escapeHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-async function updateTricksetFilter(tsName, key, value) {
+
+async function updateDefaultModel() {
   try {
-    await fetchJSON('/api/tricksets/' + encodeURIComponent(tsName), { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({filters:{[key]:value}}) });
-    showToast('Filter updated');
+    await fetchJSON('/api/models', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+      model_url: document.getElementById('model-url').value,
+      model_name: document.getElementById('model-name').value,
+    })});
+    showToast('Default model updated');
+    fetchInfo();
   } catch(e) { showToast(e.message, true); }
 }
-async function removeTrickFromTrickset(tsName, trickName) {
+
+async function addModelEntry() {
+  const key = document.getElementById('new-model-key').value.trim();
+  const uri = document.getElementById('new-model-uri').value.trim();
+  if (!key || !uri) return;
   try {
-    await fetchJSON('/api/tricks/unload', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:trickName, trickset:tsName}) });
-    showToast('Removed: ' + trickName);
-    fetchTricks(); fetchTricksets();
+    const d = await fetchJSON('/api/models', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({add_model: {key, uri}})});
+    showToast('Added: ' + key);
+    document.getElementById('new-model-key').value = '';
+    document.getElementById('new-model-uri').value = '';
+    fetchModels();
   } catch(e) { showToast(e.message, true); }
 }
-async function saveTrickset(name) {
+
+async function updateModelKey(key, field, value) {
   try {
-    await fetchJSON('/api/tricksets/' + encodeURIComponent(name), { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({}) });
-    showToast('Saved: ' + name);
+    await fetchJSON('/api/models', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({update_model: {key, field, value}})});
   } catch(e) { showToast(e.message, true); }
 }
-async function fetchAvailableTricksets() {
+
+async function removeModelKey(key) {
   try {
-    const files = await fetchJSON('/api/tricksets/available');
-    const el = document.getElementById('ts-available-list');
-    if (!files.length) { el.innerHTML = '<div class="empty">No trickset files found in tricksets/</div>'; return; }
-    el.innerHTML = files.map(f => '<div class="ts-avail-item"><span class="name">' + f.path + '</span><button class="btn btn-success btn-sm" onclick="loadTricksetFile(\'' + f.path + '\')">Load</button></div>').join('');
-  } catch(e) { document.getElementById('ts-available-list').innerHTML = '<div class="loader">Error loading</div>'; }
-}
-async function loadTricksetFile(path) {
-  try {
-    const d = await fetchJSON('/api/tricksets/load', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path}) });
-    showToast('Loaded trickset: ' + d.name + ' (' + d.trick_count + ' tricks)');
-    fetchTricksets(); fetchAvailableTricksets(); fetchTricks();
+    await fetchJSON('/api/models', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({remove_model: key})});
+    showToast('Removed: ' + key);
+    fetchModels();
   } catch(e) { showToast(e.message, true); }
 }
-async function unloadTrickset(name) {
-  try {
-    await fetchJSON('/api/tricksets/unload', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name}) });
-    showToast('Unloaded trickset: ' + name);
-    fetchTricksets(); fetchAvailableTricksets(); fetchTricks();
-  } catch(e) { showToast(e.message, true); }
-}
+
+// ---- logs ----
 async function fetchLogs() {
   try {
     const level = document.getElementById('level-filter').value;
@@ -310,11 +347,12 @@ async function fetchLogs() {
     viewer.innerHTML = d.map(l => '<div class="log-entry lvl-' + l.level + '"><span class="time">' + l.time + '</span>' + escapeHtml(l.level) + ': ' + escapeHtml(l.message) + '</div>').join('');
     document.getElementById('log-count').textContent = d.length + ' entries';
     if (isAtBottom) viewer.scrollTop = viewer.scrollHeight;
-    lastLogCount = d.length;
   } catch(e) { console.error(e); }
 }
 function clearLogDisplay() { document.getElementById('log-viewer').innerHTML = ''; document.getElementById('log-count').textContent = '0 entries'; }
-fetchInfo(); fetchTricks(); fetchAvailable(); fetchTricksets(); fetchAvailableTricksets(); fetchLogs();
+
+// ---- init ----
+fetchInfo(); fetchTricks(); fetchAvailable(); fetchModels(); fetchLogs();
 setInterval(() => { if (document.getElementById('autorefresh').checked) fetchLogs(); }, 2000);
 </script>
 </body>

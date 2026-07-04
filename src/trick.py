@@ -54,6 +54,19 @@ def configure_modelset(modelset_raw: dict[str, str]) -> dict[str, dict[str, str]
     return parsed
 
 
+def update_model_config(key: str, model_url: str, model_name: str = "") -> dict[str, dict[str, str]]:
+    """Add or update a single model config entry by key."""
+    global _modelset
+    _modelset[key] = {"model_url": model_url, "model_name": model_name}
+    return _modelset
+
+
+def remove_model_config(key: str) -> bool:
+    """Remove a model config entry by key. Returns True if removed."""
+    global _modelset
+    return _modelset.pop(key, None) is not None
+
+
 def get_model_config(key: str = "default") -> dict[str, str]:
     """Get model config (model_url, model_name) for a modelset key.
 

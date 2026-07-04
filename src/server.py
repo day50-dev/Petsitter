@@ -15,11 +15,16 @@ import uvicorn
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
-from starlette.staticfiles import StaticFiles
 
+from src.gui_routes import register_gui_routes
 from src.loader import load_tricks
 from src.proxy import ProxyHandler
-from src.trick import Trick, build_modelset_example, configure_modelset, parse_mas_uri
+from src.trick import (
+    Trick,
+    build_modelset_example,
+    configure_modelset,
+    parse_mas_uri,
+)
 from src.trickset import Trickset
 
 
@@ -158,82 +163,7 @@ def create_app(
         return JSONResponse({"status": "ok"})
     app.add_route("/health", health, methods=["GET"])
 
-    gui_dir = Path(__file__).parent / "gui"
-    app.mount("/static", StaticFiles(directory=str(gui_dir)), name="static")
-
-    async def gui_page(request: Request) -> Response:
-        content = (gui_dir / "index.html").read_text()
-        return Response(content=content, media_type="text/html")
-    app.add_route("/gui", gui_page, methods=["GET"])
-    app.add_route("/", gui_page, methods=["GET"])
-
-    async def docs_page(request: Request) -> Response:
-        content = (gui_dir / "swagger.html").read_text()
-        return Response(content=content, media_type="text/html")
-    app.add_route("/docs", docs_page, methods=["GET"])
-
-    async def gui_info(request: Request) -> Response:
-        return JSONResponse({
-            "listen_on": f"{request.url.hostname}:{request.url.port}",
-            "model_url": model_url,
-            "model_name": model_name,
-        })
-    app.add_route("/api/info", gui_info, methods=["GET"])
-
-    async def gui_tricks(request: Request) -> Response:
-        return JSONResponse(handler.get_tricks_info())
-    app.add_route("/api/tricks", gui_tricks, methods=["GET"])
-
-    async def gui_tricks_available(request: Request) -> Response:
-        tricks_dir = Path("tricks")
-        files = []
-        if tricks_dir.exists():
-            for f in sorted(tricks_dir.glob("*.py")):
-                if f.name != "__init__.py":
-                    files.append(str(f))
-        return JSONResponse(files)
-    app.add_route("/api/tricks/available", gui_tricks_available, methods=["GET"])
-
-    async def gui_tricks_load(request: Request) -> Response:
-        data = await request.json()
-        path = data.get("path", "")
-        ts_name = data.get("trickset")
-        try:
-            trick = handler.add_trick(path, ts_name=ts_name)
-            return JSONResponse({"success": True, "name": type(trick).__name__})
-        except Exception as e:
-            return JSONResponse({"success": False, "error": str(e)}, status_code=400)
-    app.add_route("/api/tricks/load", gui_tricks_load, methods=["POST"])
-
-    async def gui_tricks_unload(request: Request) -> Response:
-        data = await request.json()
-        name = data.get("name", "")
-        ts_name = data.get("trickset")
-        if handler.remove_trick(name, ts_name=ts_name):
-            return JSONResponse({"success": True})
-        return JSONResponse({"success": False, "error": f"Trick '{name}' not found"}, status_code=404)
-    app.add_route("/api/tricks/unload", gui_tricks_unload, methods=["POST"])
-
-    async def gui_tricks_reorder(request: Request) -> Response:
-        data = await request.json()
-        name = data.get("name", "")
-        new_index = data.get("new_index", 0)
-        ts_name = data.get("trickset")
-        if handler.reorder_trick(name, new_index, ts_name=ts_name):
-            return JSONResponse({"success": True})
-        return JSONResponse({"success": False, "error": f"Trick '{name}' not found"}, status_code=404)
-    app.add_route("/api/tricks/reorder", gui_tricks_reorder, methods=["POST"])
-
-    async def gui_logs(request: Request) -> Response:
-        level = request.query_params.get("level")
-        limit_str = request.query_params.get("limit", "100")
-        try:
-            limit = max(1, min(500, int(limit_str)))
-        except (ValueError, TypeError):
-            limit = 100
-        logs = _log_capture.get_logs(level=level, limit=limit) if _log_capture else []
-        return JSONResponse(logs)
-    app.add_route("/api/logs", gui_logs, methods=["GET"])
+    register_gui_routes(app, handler, api_key)
 
     # ----- trickset API endpoints -----
     # Fixed-path routes must come before {name} param route

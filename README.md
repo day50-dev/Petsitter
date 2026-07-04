@@ -10,8 +10,7 @@ Smaller models can't do tool calling? Petsitter tricks them into it. Need struct
 But that's only the beginning. Cyclomatic complexity? Halstead metrics? Chidamber and Kemerer? Why not!
 
 There's even a GUI where you can modify things dynamically, look at logs, point to different models...
-<img alt="ps-gui" src="https://github.com/user-attachments/assets/a8de4543-9eb2-4198-92a9-0662a125e13f" />
-
+<img alt="2026-07-04_14-11" src="https://github.com/user-attachments/assets/cd36f113-b2cc-4cc1-990c-0ccde32fe475" />
 
 Petsitter sits between your application and your model or one or more inference providers, intercepting requests and responses to apply "tricks" - pluggable transformations. Some examples include:
 

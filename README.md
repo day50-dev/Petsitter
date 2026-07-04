@@ -72,6 +72,7 @@ Now point your AI applications to `http://localhost:8080/v1`.
 ### Capability Injection
 
  * [Tool Calling](#tool-calling) - Add tool calling to models without native support
+ * [Andybot Toolcall](#andybot-toolcall) - Conversational persona tool calling for small/older models (experimental)
 
 ### Pipeline
 
@@ -116,6 +117,25 @@ Enables tool calling for models without native support by injecting tool definit
 ```bash
 ./petsitter -u http://localhost:11434 -t tricks/tool_call.py
 ```
+
+### Andybot Toolcall
+
+[tricks/andybot_toolcall.py](tricks/andybot_toolcall.py) — **experimental**
+
+An alternative approach to tool calling that uses a conversational persona instead of structured JSON output. The model says `DEAR ANDYBOT, <FUNCTION>` and ANDYBOT collects each required parameter through dialogue:
+
+1. Model recognises it needs to call a tool and says `DEAR ANDYBOT, GET_WEATHER`
+2. ANDYBOT asks: *"Can you provide location?"*
+3. Model responds: `Paris`
+4. ANDYBOT builds the tool call and returns it to the application
+
+This works well with small models (3B and under) and older models that struggle with reliable JSON output or native `tool_calls`. The conversational flow lets them express intent naturally instead of wrestling with syntax.
+
+```bash
+petsitter -u http://localhost:11434 -t tricks/andybot_toolcall.py -t tricks/json_mode.py
+```
+
+For a more advanced version with inline-argument parsing, confusion recovery, and multi-turn state management, see [`tricks/conversational_tool.py`](tricks/conversational_tool.py).
 
 ### Multi-Model Orchestration
 

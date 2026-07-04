@@ -48,7 +48,7 @@ def _introspect_trick_file(path: Path) -> dict:
     """Extract display_name and brief from a trick module without instantiating."""
     import importlib.util
 
-    info = {"path": str(path), "display_name": None, "brief": None}
+    info = {"path": str(path), "display_name": None, "brief": None, "mtime": path.stat().st_mtime_ns}
     try:
         spec = importlib.util.spec_from_file_location(path.stem, str(path))
         if spec and spec.loader:

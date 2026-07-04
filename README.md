@@ -89,6 +89,8 @@ Now point your AI applications to `http://localhost:8080/v1`.
 
 ### JSON Mode
 
+[tricks/json_mode.py](tricks/json_mode.py)
+
 Enforces valid JSON output by adding formatting instructions to the system prompt, stripping markdown code blocks, and retrying with feedback if the response isn't valid JSON.
 
 ```bash
@@ -96,6 +98,8 @@ Enforces valid JSON output by adding formatting instructions to the system promp
 ```
 
 ### Code Validator
+
+[tricks/code_validator.py](tricks/code_validator.py)
 
 After the model proposes a code change, asks it to describe what the change does, compares the description against the original user request, and retries with feedback if they don't match.
 
@@ -105,6 +109,8 @@ After the model proposes a code change, asks it to describe what the change does
 
 ### Tool Calling
 
+[tricks/tool_call.py](tricks/tool_call.py)
+
 Enables tool calling for models without native support by injecting tool definitions into the prompt, parsing JSONRPC-style tool call responses, and converting them to OpenAI `tool_calls` format.
 
 ```bash
@@ -113,9 +119,13 @@ Enables tool calling for models without native support by injecting tool definit
 
 ### List Files
 
+[tricks/list_files.py](tricks/list_files.py)
+
 Test trick that provides a `list_files` tool. Useful for testing tool calling functionality.
 
 ### Kennel
+
+[tricks/kennel.py](tricks/kennel.py)
 
 Routes different cognitive subtasks to specialized models running in parallel. The emitter is the model specified with `-u`/`--url`; the thinker and tool-caller are read from a model config file (MAS format).
 
@@ -145,6 +155,8 @@ Pipeline:
 3. **Emitter** receives the enriched context and generates the final response
 
 ### Secrets Protector
+
+[tricks/secrets_protector.py](tricks/secrets_protector.py)
 
 Detects and pseudonymizes sensitive information before it reaches the model, then restores original values in the response:
 

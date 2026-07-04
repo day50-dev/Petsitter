@@ -198,7 +198,15 @@ class ProxyHandler:
             raise ValueError("No upstream model configured. Set a model URL via the dashboard.")
         messages = payload.get("messages", [])
         model = payload.get("model", "")
-        tricks = self._matching_tricks(x_title, model)
+        if model.startswith("trickset/"):
+            ts_name = model.split("/", 1)[1]
+            ts = self.tricksets.get(ts_name)
+            if ts:
+                tricks = list(ts.tricks)
+            else:
+                tricks = []
+        else:
+            tricks = self._matching_tricks(x_title, model)
 
         tricks, messages = self._filter_tricks_by_keywords(tricks, messages)
 
@@ -273,4 +281,12 @@ class ProxyHandler:
                 timeout=30.0,
             )
             response.raise_for_status()
-            return response.json()
+            result = response.json()
+        for name in self.tricksets:
+            result.setdefault("data", []).append({
+                "id": f"trickset/{name}",
+                "object": "model",
+                "created": 0,
+                "owned_by": "petsitter",
+            })
+        return result

@@ -179,7 +179,7 @@ Tricksets live as JSON files in the `tricksets/` directory:
 }
 ```
 
-The name is derived from the filename (`opencode.json` - `opencode`).
+Each loaded trickset is also exposed as a model named `trickset/<name>` (e.g., `trickset/gemma4`). Selecting this model in a client bypasses the filter matching and runs that trickset's tricks directly on every request.
 
 ### Using tricksets
 

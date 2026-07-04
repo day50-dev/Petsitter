@@ -107,16 +107,23 @@ header .nav a:hover{background:#1a2a4d}
 .log-entry.lvl-CRITICAL{color:#ff3b5a;font-weight:700}
 .log-count{font-size:12px;color:#4a6572;margin-left:auto}
 
-.ts-selector{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.ts-selector .ts-label{font-size:12px;color:#7a9ab5;font-weight:600}
-.ts-selector .ts-main{display:flex;align-items:center;gap:6px;flex:1}
-.ts-selector select{background:#0f0f1a;border:1px solid #1e2a3a;border-radius:4px;padding:5px 10px;color:#c8d6e5;font-size:13px;font-family:monospace;flex:1;max-width:260px}
-.ts-selector select:focus{outline:none;border-color:#3a5a7a}
-.ts-filter-row{display:flex;align-items:center;gap:6px;margin-bottom:4px}
-.ts-filter-label{font-size:12px;color:#7a9ab5;font-weight:600;min-width:50px}
-.ts-filter-input{background:#0f0f1a;border:1px solid #1e2a3a;border-radius:3px;padding:4px 8px;color:#c8d6e5;font-size:12px;font-family:monospace;flex:1;max-width:300px}
-.ts-filter-input:focus{outline:none;border-color:#3a5a7a}
-.ts-edit{padding:2px 8px;font-size:11px}
+/* trickset bar */
+.ts-bar{background:#16162a;padding:12px 16px;margin-bottom:14px}
+/* pillbox */
+.ts-pills{display:flex;gap:4px;margin-bottom:10px;flex-wrap:wrap}
+.pill{display:inline-block;padding:3px 12px;border-radius:12px;font-size:12px;cursor:pointer;background:#12122a;color:#5a7a95;border:1px solid #1e2a3a;transition:background .12s}
+.pill:hover{background:#1a1a3a}
+.pill.active{background:#1a2a4d;color:#8ab4ff;border-color:#2a4a6a}
+.pill-add{background:transparent;color:#4a7a5a;border:1px dashed #2a4a3a}
+.pill-add:hover{background:#1a2a1a}
+.ts-filters{display:flex;gap:16px;margin-bottom:10px;font-size:12px;color:#7a9ab5}
+.ts-filters span{display:flex;align-items:center;gap:4px;cursor:pointer}
+.ts-filters span:hover .val{text-decoration-color:#5a8ab5}
+.ts-filters .val{font-family:monospace;text-decoration:underline;text-decoration-color:#2a3a4a;text-underline-offset:3px}
+.ts-filters .val:hover{text-decoration-color:#5a8ab5}
+.ts-filters .val input{background:#0f0f1a;border:1px solid #2a3a4a;border-radius:3px;padding:2px 6px;color:#c8d6e5;font-family:monospace;font-size:12px;width:140px}
+.ts-filters .val input:focus{outline:none;border-color:#5a8ab5}
+.pill-unloaded{opacity:.6}
 
 .loader{color:#5a7a95;font-size:13px;padding:10px 0}
 .empty{color:#4a6572;font-size:13px;font-style:italic;padding:10px 0}
@@ -152,17 +159,11 @@ header .nav a:hover{background:#1a2a4d}
 
 <!-- === TRICKS TAB === -->
 <div class="tab-pane active" id="tab-tricks">
-<div class="card" style="margin-bottom:0">
-<div class="ts-selector">
-<label class="ts-label">Trickset</label>
-<div class="ts-main">
-<select id="ts-select" onchange="switchTrickset()"></select>
-<button class="btn btn-neutral btn-sm" onclick="addTrickset()">+ Add</button>
-</div>
-</div>
-<div id="ts-filters" style="display:none;margin-top:8px">
-<div class="ts-filter-row"><span class="ts-filter-label">X-Title:</span><input type="text" id="ts-filter-xtitle" class="ts-filter-input" onchange="saveTricksetFilter()"><button class="btn btn-sm btn-neutral ts-edit" onclick="document.getElementById('ts-filter-xtitle').focus()">&#9998;</button></div>
-<div class="ts-filter-row"><span class="ts-filter-label">Model:</span><input type="text" id="ts-filter-model" class="ts-filter-input" onchange="saveTricksetFilter()"><button class="btn btn-sm btn-neutral ts-edit" onclick="document.getElementById('ts-filter-model').focus()">&#9998;</button></div>
+<div class="ts-bar" id="ts-bar" style="display:none">
+<div class="ts-pills" id="ts-pills"></div>
+<div class="ts-filters">
+<span onclick="editFilter(this,'X-Title')">X-Title: <span class="val" id="ts-fx">*</span></span>
+<span onclick="editFilter(this,'Model')">Model: <span class="val" id="ts-fm">*</span></span>
 </div>
 </div>
 <div class="two-col">
@@ -291,9 +292,8 @@ async function fetchAvailable() {
 }
 
 async function loadTrick(path) {
-  const ts = document.getElementById('ts-select').value;
   try {
-    const d = await fetchJSON('/api/tricks/load', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path, trickset: ts}) });
+    const d = await fetchJSON('/api/tricks/load', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path, trickset: selectedTrickset}) });
     showToast('Loaded: ' + d.name);
     fetchTricks(); fetchAvailable();
   } catch(e) { showToast(e.message, true); }
@@ -316,41 +316,80 @@ async function unloadTrick(name) {
 }
 
 // ---- tricksets ----
+let selectedTrickset = '_default';
+let loadedTricksets = {};
+
 async function fetchTricksets() {
   try {
-    const list = await fetchJSON('/api/tricksets');
-    const sel = document.getElementById('ts-select');
-    sel.innerHTML = list.map(ts => '<option value="' + escapeHtml(ts.name) + '">' + escapeHtml(ts.name) + (ts.name === '_default' ? ' (default)' : '') + '</option>').join('');
-    if (sel.options.length) switchTrickset();
+    const [loaded, avail] = await Promise.all([
+      fetchJSON('/api/tricksets'),
+      fetchJSON('/api/tricksets/available'),
+    ]);
+    loadedTricksets = {};
+    loaded.forEach(ts => loadedTricksets[ts.name] = ts);
+    const names = [...new Set([...loaded.map(ts => ts.name), ...avail.map(ts => ts.name)])];
+    if (!names.includes(selectedTrickset) && names.length) selectedTrickset = names[0];
+    const el = document.getElementById('ts-pills');
+    el.innerHTML = names.map(n => {
+      const isLoaded = !!loadedTricksets[n];
+      return '<span class="pill' + (n === selectedTrickset ? ' active' : '') + (isLoaded ? '' : ' pill-unloaded') + '" data-name="' + n + '" onclick="switchTrickset(this.dataset.name)">' + escapeHtml(n) + '</span>';
+    }).join('') + '<span class="pill pill-add" onclick="addTrickset()">+ Add</span>';
+    if (names.length) switchTrickset(selectedTrickset);
   } catch(e) { console.error(e); }
 }
 
-async function switchTrickset() {
-  const name = document.getElementById('ts-select').value;
-  if (!name) { document.getElementById('ts-filters').style.display = 'none'; return; }
+async function switchTrickset(name) {
+  selectedTrickset = name;
+  document.querySelectorAll('#ts-pills .pill[data-name]').forEach(p => p.classList.toggle('active', p.dataset.name === name));
+  const isLoaded = !!loadedTricksets[name];
+  if (!isLoaded) {
+    try {
+      const avail = await fetchJSON('/api/tricksets/available');
+      const info = avail.find(a => a.name === name);
+      if (info) {
+        await fetchJSON('/api/tricksets/load', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path: info.path}) });
+        loadedTricksets[name] = (await fetchJSON('/api/tricksets/' + encodeURIComponent(name)));
+      }
+    } catch(e) { showToast(e.message, true); return fetchTricksets(); }
+  }
   try {
-    const ts = await fetchJSON('/api/tricksets/' + encodeURIComponent(name));
-    document.getElementById('ts-filters').style.display = '';
-    document.getElementById('ts-filter-xtitle').value = ts.filters['X-Title'] || '*';
-    document.getElementById('ts-filter-model').value = ts.filters['Model'] || '*';
+    const ts = loadedTricksets[name] || await fetchJSON('/api/tricksets/' + encodeURIComponent(name));
+    document.getElementById('ts-bar').style.display = '';
+    document.getElementById('ts-fx').textContent = ts.filters['X-Title'] || '*';
+    document.getElementById('ts-fm').textContent = ts.filters['Model'] || '*';
     fetchTricks();
+    fetchTricksets();
   } catch(e) { console.error(e); }
 }
 
-async function saveTricksetFilter() {
-  const name = document.getElementById('ts-select').value;
-  if (!name) return;
-  const filters = {
-    'X-Title': document.getElementById('ts-filter-xtitle').value || '*',
-    'Model': document.getElementById('ts-filter-model').value || '*',
-  };
+function editFilter(el, key) {
+  const valSpan = el.querySelector('.val') || el;
+  const orig = valSpan.textContent;
+  const inp = document.createElement('input');
+  inp.type = 'text';
+  inp.value = orig;
+  inp.onblur = function() { saveFilter(valSpan, key, inp.value, orig, el); };
+  inp.onkeydown = function(e) { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { valSpan.textContent = orig; } };
+  valSpan.textContent = '';
+  valSpan.appendChild(inp);
+  inp.focus();
+  inp.select();
+}
+
+async function saveFilter(valSpan, key, val, orig, parentEl) {
+  valSpan.textContent = val || '*';
   try {
-    await fetchJSON('/api/tricksets/' + encodeURIComponent(name), {
+    const filters = {
+      'X-Title': document.getElementById('ts-fx').textContent,
+      'Model': document.getElementById('ts-fm').textContent,
+      [key]: val || '*',
+    };
+    await fetchJSON('/api/tricksets/' + encodeURIComponent(selectedTrickset), {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({filters}),
     });
-  } catch(e) { showToast(e.message, true); }
+  } catch(e) { showToast(e.message, true); valSpan.textContent = orig; }
 }
 
 async function addTrickset() {
@@ -363,6 +402,7 @@ async function addTrickset() {
       body: JSON.stringify({name, filters: {'X-Title': '*', 'Model': '*'}}),
     });
     showToast('Created: ' + d.name);
+    selectedTrickset = name;
     fetchTricksets();
   } catch(e) { showToast(e.message, true); }
 }
@@ -428,7 +468,7 @@ let logEventSource = null;
 function startLogStream() {
   if (logEventSource) logEventSource.close();
   const level = document.getElementById('level-filter').value;
-  const url = '/api/logs/stream' + (level ? '?level=' + encodeURIComponent(level) : '');
+  const url = '/api/logs' + (level ? '?level=' + encodeURIComponent(level) : '');
   const viewer = document.getElementById('log-viewer');
   let pending = 0;
   logEventSource = new EventSource(url);
@@ -465,7 +505,7 @@ function clearLogDisplay() {
 }
 
 // ---- init ----
-fetchInfo(); fetchTricksets(); fetchTricks(); fetchAvailable(); fetchModels();
+fetchInfo(); fetchTricksets(); fetchAvailable(); fetchModels();
 startLogStream();
 </script>
 </body>

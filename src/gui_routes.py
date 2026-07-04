@@ -221,20 +221,11 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
         if not name:
             return JSONResponse({"success": False, "error": "name required"}, status_code=400)
         ts = Trickset(name, "0.5.0", filters, [])
+        ts.file_path = str(Path("tricksets") / f"{name}.json")
+        ts.save()
         handler.tricksets[name] = ts
         return JSONResponse({"success": True, "name": name})
     app.add_route("/api/tricksets/create", gui_trickset_create, methods=["POST"])
-
-    async def gui_logs(request: Request) -> Response:
-        level = request.query_params.get("level")
-        limit_str = request.query_params.get("limit", "100")
-        try:
-            limit = max(1, min(500, int(limit_str)))
-        except (ValueError, TypeError):
-            limit = 100
-        logs = _log_capture.get_logs(level=level, limit=limit) if _log_capture else []
-        return JSONResponse(logs)
-    app.add_route("/api/logs", gui_logs, methods=["GET"])
 
     async def gui_logs_sse(request: Request) -> StreamingResponse:
         level = request.query_params.get("level", "")
@@ -262,4 +253,4 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
                 _log_capture.remove_sse_client(q)
 
         return StreamingResponse(event_generator(), media_type="text/event-stream")
-    app.add_route("/api/logs/stream", gui_logs_sse, methods=["GET"])
+    app.add_route("/api/logs", gui_logs_sse, methods=["GET"])

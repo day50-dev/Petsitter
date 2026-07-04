@@ -134,9 +134,10 @@ async function fetchInfo() {
 // ---- tricks ----
 async function fetchTricks() {
   try {
-    const tricks = await fetchJSON('/api/tricks');
+    const all = await fetchJSON('/api/tricks');
+    const tricks = all.filter(t => t.trickset === selectedTrickset);
     const el = document.getElementById('loaded-tricks');
-    if (!tricks.length) { el.innerHTML = '<div class="empty">No tricks loaded</div>'; return; }
+    if (!tricks.length) { el.innerHTML = '<div class="empty">No tricks loaded for this trickset</div>'; return; }
     el.innerHTML = tricks.map(t => {
       const on = t.enabled !== false;
       const badges = [];

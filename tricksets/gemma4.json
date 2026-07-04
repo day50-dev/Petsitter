@@ -7,7 +7,6 @@
   },
   "tricks": [
     "tricks/json_mode.py",
-    "tricks/tool_call.py",
-    "tricks/list_files.py"
+    "tricks/tool_call.py"
   ]
 }

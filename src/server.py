@@ -1,5 +1,6 @@
 """HTTP server and CLI for petsitter."""
 
+import asyncio
 import json
 import logging
 import os
@@ -30,20 +31,33 @@ class LogCaptureHandler(logging.Handler):
     def __init__(self, maxlen: int = 500):
         super().__init__()
         self.logs = deque(maxlen=maxlen)
+        self._sse_clients: list[asyncio.Queue] = []
 
     def emit(self, record: logging.LogRecord) -> None:
-        self.logs.append({
+        entry = {
             "time": datetime.fromtimestamp(record.created).strftime("%H:%M:%S"),
             "level": record.levelname,
             "message": self.format(record),
             "name": record.name,
-        })
+        }
+        self.logs.append(entry)
+        for q in self._sse_clients:
+            q.put_nowait(entry)
 
     def get_logs(self, level: str | None = None, limit: int = 100) -> list[dict]:
         logs = list(self.logs)
         if level:
             logs = [l for l in logs if l["level"] == level.upper()]
         return logs[-limit:]
+
+    def add_sse_client(self) -> asyncio.Queue:
+        q: asyncio.Queue = asyncio.Queue()
+        self._sse_clients.append(q)
+        return q
+
+    def remove_sse_client(self, q: asyncio.Queue) -> None:
+        if q in self._sse_clients:
+            self._sse_clients.remove(q)
 
 
 _log_capture: LogCaptureHandler | None = None

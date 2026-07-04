@@ -45,13 +45,21 @@ class ProxyHandler:
     def _matching_tricks(self, x_title: str, model: str) -> list[Trick]:
         tricks: list[Trick] = []
         seen: set[str] = set()
+        default_ts = self.tricksets.get("_default")
         for name, ts in self.tricksets.items():
+            if name == "_default":
+                continue
             if ts.matches(x_title, model):
                 for t in ts.tricks:
                     cls_name = type(t).__name__
                     if cls_name not in seen and self._enabled.get(cls_name, True):
                         tricks.append(t)
                         seen.add(cls_name)
+        if not tricks and default_ts:
+            for t in default_ts.tricks:
+                cls_name = type(t).__name__
+                if self._enabled.get(cls_name, True):
+                    tricks.append(t)
         return tricks
 
     def _build_headers(self) -> dict[str, str]:

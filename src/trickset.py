@@ -11,7 +11,7 @@ from src.trick import Trick
 
 logger = logging.getLogger("petsitter")
 
-SCHEMA = "0.3.0"
+SCHEMA = "0.5.0"
 
 
 class Trickset:
@@ -56,6 +56,7 @@ class Trickset:
     def to_file_dict(self) -> dict:
         return {
             "schema": self.schema,
+            "name": self.name,
             "filters": dict(self.filters),
             "tricks": list(self.trick_paths),
         }
@@ -73,7 +74,7 @@ class Trickset:
         if not p.exists():
             raise FileNotFoundError(f"Trickset file not found: {path}")
         data = json.loads(p.read_text())
-        name = p.stem
+        name = data.get("name", p.stem)
         schema = data.get("schema", "unknown")
         filters = data.get("filters", {"X-Title": "*", "Model": "*"})
         trick_paths = data.get("tricks", [])

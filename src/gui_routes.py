@@ -1,13 +1,15 @@
 """GUI dashboard routes for petsitter."""
 
+import asyncio
 import json
 from pathlib import Path
 
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.staticfiles import StaticFiles
 
 from src.trick import Trick, get_model_config, parse_mas_uri, remove_model_config, update_model_config
+from src.trickset import Trickset
 
 _log_capture = None
 _config_path: str | None = None
@@ -212,6 +214,17 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
         return JSONResponse({"success": True})
     app.add_route("/api/models", gui_models_update, methods=["POST"])
 
+    async def gui_trickset_create(request: Request) -> Response:
+        data = await request.json()
+        name = data.get("name", "")
+        filters = data.get("filters", {"X-Title": "*", "Model": "*"})
+        if not name:
+            return JSONResponse({"success": False, "error": "name required"}, status_code=400)
+        ts = Trickset(name, "0.5.0", filters, [])
+        handler.tricksets[name] = ts
+        return JSONResponse({"success": True, "name": name})
+    app.add_route("/api/tricksets/create", gui_trickset_create, methods=["POST"])
+
     async def gui_logs(request: Request) -> Response:
         level = request.query_params.get("level")
         limit_str = request.query_params.get("limit", "100")
@@ -222,3 +235,31 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
         logs = _log_capture.get_logs(level=level, limit=limit) if _log_capture else []
         return JSONResponse(logs)
     app.add_route("/api/logs", gui_logs, methods=["GET"])
+
+    async def gui_logs_sse(request: Request) -> StreamingResponse:
+        level = request.query_params.get("level", "")
+
+        async def event_generator():
+            if not _log_capture:
+                return
+            q = _log_capture.add_sse_client()
+            try:
+                for entry in _log_capture.get_logs(level=level, limit=200):
+                    if level and entry["level"] != level.upper():
+                        continue
+                    yield f"data: {json.dumps(entry)}\n\n"
+                while True:
+                    try:
+                        entry = await asyncio.wait_for(q.get(), timeout=30)
+                        if level and entry["level"] != level.upper():
+                            continue
+                        yield f"data: {json.dumps(entry)}\n\n"
+                    except asyncio.TimeoutError:
+                        yield ": keepalive\n\n"
+            except asyncio.CancelledError:
+                pass
+            finally:
+                _log_capture.remove_sse_client(q)
+
+        return StreamingResponse(event_generator(), media_type="text/event-stream")
+    app.add_route("/api/logs/stream", gui_logs_sse, methods=["GET"])

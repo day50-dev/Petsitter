@@ -3,7 +3,7 @@
 <a href=https://pypi.org/project/petsitter><img src=https://badge.fury.io/py/petsitter.svg/?1></a>
 </p>
 
-**Petsitter**, part of the [DAY50](https://day50.dev) suite of open-source tools for on-prem local AI workflows, is an OpenAI-compatible proxy that layers smart harnesses on top of language models to give them capabilities they don't natively have. It also makes finicky behaviors reliable and dependable.
+**Petsitter** is an OpenAI-compatible proxy that layers smart harnesses on top of language models to give them capabilities they don't natively have. It also makes finicky behaviors reliable and dependable.
 
 Smaller models can't do tool calling? Petsitter tricks them into it. Need structured JSON output? Petsitter will loop until it gets it right.
 
@@ -20,6 +20,8 @@ Petsitter sits between your application and your model or one or more inference 
 4. **Response transformation** - Convert outputs to expected formats (e.g., OpenAI tool_calls)
 
 It can combine multiple local specialized models, filter for certain harnesses, do dynamic routing, and also, none of that stuff and just be easy and simple.
+
+*Petsitter* is part of the [DAY50](https://github.com/day50-dev/) suite of open-source tools for local AI workflows and constructing better agents.
 
 ## Why Use It?
 

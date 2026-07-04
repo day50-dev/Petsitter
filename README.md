@@ -75,7 +75,6 @@ Now point your AI applications to `http://localhost:8080/v1`.
 ### Capability Injection
 
  * [Tool Calling](#tool-calling) - Add tool calling to models without native support
- * [List Files](#list-files) - Example tool that lists directory contents
 
 ### Pipeline
 
@@ -116,12 +115,6 @@ Enables tool calling for models without native support by injecting tool definit
 ```bash
 ./petsitter -u http://localhost:11434 -t tricks/tool_call.py
 ```
-
-### List Files
-
-[tricks/list_files.py](tricks/list_files.py)
-
-Test trick that provides a `list_files` tool. Useful for testing tool calling functionality.
 
 ### Kennel
 
@@ -196,7 +189,7 @@ The name is derived from the filename (`opencode.json` - `opencode`).
 # Load a trickset at startup (can be combined with -t)
 petsitter -u http://localhost:11434 \
           -tc tricksets/opencode.json \
-          -t tricks/list_files.py
+          -t tricks/json_mode.py
 ```
 
 ### Managing tricksets at runtime
@@ -407,7 +400,7 @@ client = OpenAI(
 response = client.chat.completions.create(
     model="any-model-name",
     messages=[{"role": "user", "content": "List files in /tmp"}],
-    tools=[{"type": "function", "function": {"name": "list_files", ...}}]
+    tools=[{"type": "function", "function": {"name": "get_weather", "parameters": ...}}]
 )
 ```
 

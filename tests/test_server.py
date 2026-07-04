@@ -34,7 +34,7 @@ class TestCreateApp:
             model_url="http://localhost:11434",
             model_name="test-model",
             api_key="",
-            trick_paths=["tricks/list_files.py"],
+            trick_paths=["tricks/json_mode.py"],
         )
         assert app is not None
 

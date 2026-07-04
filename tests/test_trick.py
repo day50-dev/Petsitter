@@ -6,7 +6,6 @@ import pytest
 from src.trick import Trick, callmodel
 from tricks.json_mode import JsonModeTrick
 from tricks.tool_call import ToolCallTrick
-from tricks.list_files import ListFilesTrick
 
 
 class TestTrick:
@@ -123,27 +122,4 @@ class TestToolCallTrick:
         assert caps.get("tools_support") is True
 
 
-class TestListFilesTrick:
-    """Tests for ListFilesTrick."""
 
-    def test_system_prompt(self):
-        """ListFilesTrick adds list_files instructions."""
-        trick = ListFilesTrick()
-        result = trick.system_prompt("")
-        assert "list_files" in result
-
-    def test_pre_hook_adds_tool(self):
-        """ListFilesTrick adds list_files tool definition."""
-        trick = ListFilesTrick()
-        context = [{"role": "user", "content": "hello"}]
-        params = {}
-        result = trick.pre_hook(context, params)
-        # Tool should be added to params
-        assert "tools" in params
-
-    def test_info_declares_capabilities(self):
-        """ListFilesTrick declares custom tools."""
-        trick = ListFilesTrick()
-        caps = trick.info({})
-        assert caps.get("tools_support") is True
-        assert "list_files" in caps.get("custom_tools", [])

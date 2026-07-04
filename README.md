@@ -69,21 +69,21 @@ Now point your AI applications to `http://localhost:8080/v1`.
 
 ### Output Control
 
- * [JSON Mode](#json-mode) — Enforce valid JSON output
- * [Code Validator](#code-validator) — Self-healing validation through model self-description
+ * [JSON Mode](#json-mode) - Enforce valid JSON output
+ * [Code Validator](#code-validator) - Self-healing validation through model self-description
 
 ### Capability Injection
 
- * [Tool Calling](#tool-calling) — Add tool calling to models without native support
- * [List Files](#list-files) — Example tool that lists directory contents
+ * [Tool Calling](#tool-calling) - Add tool calling to models without native support
+ * [List Files](#list-files) - Example tool that lists directory contents
 
 ### Pipeline
 
- * [Kennel](#kennel) — Route cognitive subtasks to specialized models
+ * [Kennel](#kennel) - Route cognitive subtasks to specialized models
 
 ### Security
 
- * [Secrets Protector](#secrets-protector) — Detect and pseudonymize secrets/PII before they reach the model
+ * [Secrets Protector](#secrets-protector) - Detect and pseudonymize secrets/PII before they reach the model
 
 ---
 
@@ -160,9 +160,9 @@ Pipeline:
 
 Detects and pseudonymizes sensitive information before it reaches the model, then restores original values in the response:
 
-- **Detection** — regex patterns for API keys (OpenAI, Anthropic, AWS, Google, Stripe), tokens (JWT, GitHub, Slack, Bearer), credentials (database URLs, private keys), and PII (emails, phones, SSNs, credit cards, IPs)
-- **Format-preserving substitutes** — realistic replacements (e.g., `alice@example.com` → `user.0001@sanitized.local`) that preserve token boundaries so the model's tokenizer doesn't conflate distinct entries
-- **Bidirectional vault** — consistent pseudonyms across the session (same secret → same substitute) with automatic restoration in both natural-language responses and tool call arguments
+- **Detection** - regex patterns for API keys (OpenAI, Anthropic, AWS, Google, Stripe), tokens (JWT, GitHub, Slack, Bearer), credentials (database URLs, private keys), and PII (emails, phones, SSNs, credit cards, IPs)
+- **Format-preserving substitutes** - realistic replacements (e.g., `alice@example.com` → `user.0001@sanitized.local`) that preserve token boundaries so the model's tokenizer doesn't conflate distinct entries
+- **Bidirectional vault** - consistent pseudonyms across the session (same secret → same substitute) with automatic restoration in both natural-language responses and tool call arguments
 
 ```bash
 ./petsitter -u http://localhost:11434 -t tricks/secrets_protector.py
@@ -236,7 +236,7 @@ The `schema` field in a trickset JSON file records the petsitter version that wr
 
 ## Model Configs
 
-A model config JSON file lets you run multi-model tricks like [Kennel](#kennel) that need different models for different subtasks. Each key maps to a [MAS URI](https://day50.dev/mas.html) — a URL with a fragment (`#m=`) specifying the model name:
+A model config JSON file lets you run multi-model tricks like [Kennel](#kennel) that need different models for different subtasks. Each key maps to a [MAS URI](https://day50.dev/mas.html) - a URL with a fragment (`#m=`) specifying the model name:
 
 ```json
 {
@@ -246,7 +246,7 @@ A model config JSON file lets you run multi-model tricks like [Kennel](#kennel) 
 }
 ```
 
-The `"default"` key sets the primary model (equivalent to `-u`/`--url` + `-m`/`--model`). Tricks declare what keys they need — for example, KennelTrick requires `["default", "thinker", "toolcall"]`. If a key is missing, petsitter prints a helpful error with the expected format.
+The `"default"` key sets the primary model (equivalent to `-u`/`--url` + `-m`/`--model`). Tricks declare what keys they need - for example, KennelTrick requires `["default", "thinker", "toolcall"]`. If a key is missing, petsitter prints a helpful error with the expected format.
 
 ```bash
 # Use a model config instead of -u / -m
@@ -343,7 +343,7 @@ def info(self, capabilities: dict) -> dict:
 
 ### Keyword-activated
 
-Set `keywords` on your trick class to activate only when the user includes that word in their message — the keyword is stripped before the model sees it. See [`tricks/multiround.py`](tricks/multiround.py) for a working example.
+Set `keywords` on your trick class to activate only when the user includes that word in their message - the keyword is stripped before the model sees it. See [`tricks/multiround.py`](tricks/multiround.py) for a working example.
 
 ```bash
 # Trick fires when "multiround" is present

@@ -151,13 +151,10 @@ class TestCLI:
                 result = runner.invoke(
                     cli,
                     [
-                        "--model_url",
-                        "http://localhost:11434",
-                        "--listen_on",
-                        "0.0.0.0:9000",
+                        "-u", "http://localhost:11434",
+                        "-l", "0.0.0.0:9000",
                     ],
                 )
-                # Should call uvicorn.run with correct host/port
                 assert mock_run.called
                 call_args = mock_run.call_args
                 assert call_args[1]["host"] == "0.0.0.0"
@@ -175,10 +172,8 @@ class TestCLI:
                 result = runner.invoke(
                     cli,
                     [
-                        "--model_url",
-                        "http://localhost:11434",
-                        "--listen_on",
-                        "localhost",
+                        "-u", "http://localhost:11434",
+                        "-l", "localhost",
                     ],
                 )
                 assert mock_run.called
@@ -186,7 +181,7 @@ class TestCLI:
                 assert call_args[1]["port"] == 8080
 
     def test_cli_with_tricks(self):
-        """CLI accepts multiple --trick options."""
+        """CLI accepts multiple -t options."""
         from click.testing import CliRunner
 
         runner = CliRunner()
@@ -197,12 +192,9 @@ class TestCLI:
                 result = runner.invoke(
                     cli,
                     [
-                        "--model_url",
-                        "http://localhost:11434",
-                        "--trick",
-                        "tricks/json_mode.py",
-                        "--trick",
-                        "tricks/tool_call.py",
+                        "-u", "http://localhost:11434",
+                        "-t", "tricks/json_mode.py",
+                        "-t", "tricks/tool_call.py",
                     ],
                 )
                 assert mock_create.called

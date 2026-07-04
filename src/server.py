@@ -330,8 +330,8 @@ def _validate_modelset(tricks: list[Trick], modelset_data: dict[str, str] | None
                 example = build_modelset_example(trick.required_models)
                 click.echo(
                     f"Error: Trick {type(trick).__name__} requires model keys "
-                    f"[{keys_str}], but --modelset was not provided.\n"
-                    f"Provide a modelset JSON file like:\n{example}",
+                    f"[{keys_str}], but -mc/--model-config was not provided.\n"
+                    f"Provide a model config JSON file like:\n{example}",
                     err=True,
                 )
                 raise SystemExit(1)
@@ -339,39 +339,44 @@ def _validate_modelset(tricks: list[Trick], modelset_data: dict[str, str] | None
 
 @click.command()
 @click.option(
-    "--model_url",
+    "-u", "--url",
+    "model_url",
     default=None,
     help="Base URL of the upstream model (e.g., http://localhost:11434)",
 )
 @click.option(
-    "--model_name",
+    "-m", "--model",
+    "model_name",
     default=None,
     help="Model name to use (optional for some backends like vllm, sglang)",
 )
 @click.option(
-    "--api_key",
+    "-k", "--key",
+    "api_key",
     default="",
     help="API key for upstream (if required)",
 )
 @click.option(
-    "--trick",
+    "-t", "--trick",
     "tricks",
     multiple=True,
     help="Path to a trick module (can be specified multiple times)",
 )
 @click.option(
-    "--trickset",
+    "-tc", "--trick-config",
     "tricksets",
     multiple=True,
     help="Path to a trickset JSON file (can be specified multiple times)",
 )
 @click.option(
-    "--modelset",
+    "-mc", "--model-config",
+    "model_config",
     default=None,
-    help="Path to a modelset JSON file (MAS URIs for multi-model tricks)",
+    help="Path to a model config JSON file (MAS URIs for multi-model tricks)",
 )
 @click.option(
-    "--listen_on",
+    "-l", "--listen",
+    "listen_on",
     default="localhost:8080",
     help="Host:port to listen on (default: localhost:8080)",
 )
@@ -381,7 +386,7 @@ def cli(
     api_key: str,
     tricks: tuple[str, ...],
     tricksets: tuple[str, ...],
-    modelset: str | None,
+    model_config: str | None,
     listen_on: str,
 ) -> None:
     """Petsitter - OpenAI-compatible proxy with tricks.
@@ -389,31 +394,29 @@ def cli(
     Example:
 
     \b
-        petsitter --model_url http://localhost:11434 \\
-                  --model_name llama3:8b \\
-                  --trick tricks/tool_call.py \\
-                  --trickset tricksets/gemma4.json \\
-                  --listen_on localhost:8080
+        petsitter -u http://localhost:11434 \\
+                  -m llama3:8b \\
+                  -t tricks/tool_call.py \\
+                  -tc tricksets/gemma4.json \\
+                  -l localhost:8080
 
     \b
-        petsitter --modelset modelset-example.json \\
-                  --trick tricks/kennel.py \\
-                  --listen_on localhost:8080
+        petsitter -mc modelset-example.json \\
+                  -t tricks/kennel.py \\
+                  -l localhost:8080
     """
-    # Load modelset if provided
     modelset_data: dict[str, str] | None = None
-    if modelset:
-        modelset_path = Path(modelset).resolve()
-        if not modelset_path.exists():
-            click.echo(f"Error: modelset file not found: {modelset}", err=True)
+    if model_config:
+        mc_path = Path(model_config).resolve()
+        if not mc_path.exists():
+            click.echo(f"Error: model config file not found: {model_config}", err=True)
             raise SystemExit(1)
         try:
-            modelset_data = json.loads(modelset_path.read_text())
+            modelset_data = json.loads(mc_path.read_text())
         except json.JSONDecodeError as e:
-            click.echo(f"Error: invalid JSON in modelset file: {e}", err=True)
+            click.echo(f"Error: invalid JSON in model config file: {e}", err=True)
             raise SystemExit(1)
 
-        # Pull default model from modelset if --model_url not given
         if model_url is None and "default" in modelset_data:
             model_url, inferred_name = parse_mas_uri(modelset_data["default"])
             if model_name is None:
@@ -423,8 +426,8 @@ def cli(
 
     if not model_url:
         click.echo(
-            "Error: --model_url is required when --modelset is not provided "
-            "(or the modelset must have a 'default' key)",
+            "Error: -u/--url is required when -mc/--model-config is not provided "
+            "(or the model config must have a 'default' key)",
             err=True,
         )
         raise SystemExit(1)
@@ -450,9 +453,9 @@ def cli(
     if tricks:
         click.echo(f"Tricks: {', '.join(tricks)}")
     if tricksets:
-        click.echo(f"Tricksets: {', '.join(tricksets)}")
-    if modelset:
-        click.echo(f"Modelset: {modelset}")
+        click.echo(f"Trick configs: {', '.join(tricksets)}")
+    if model_config:
+        click.echo(f"Model config: {model_config}")
 
     log_level = os.getenv("LOGLEVEL", "INFO").upper()
     logging.basicConfig(

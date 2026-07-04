@@ -25,9 +25,11 @@ header .nav a:hover{background:#1a2a4d}
 .section{margin-bottom:20px}
 
 /* tabs */
-.tabs{display:flex;gap:4px;margin-bottom:12px}
-.tab{padding:6px 16px;border-radius:4px 4px 0 0;cursor:pointer;font-size:13px;font-weight:500;color:#5a7a95;background:#12122a;border:1px solid #1e2a3a;border-bottom:none}
-.tab.active{color:#8ab4ff;background:#16162a;border-color:#25254a}
+.tabs{display:flex;margin-bottom:12px;border-radius:6px;overflow:hidden;border:1px solid #1e2a3a;width:fit-content}
+.tab{padding:7px 20px;cursor:pointer;font-size:13px;font-weight:500;color:#5a7a95;background:#12122a;border:none;border-right:1px solid #1e2a3a;transition:background .12s}
+.tab:last-child{border-right:none}
+.tab:hover{background:#1a1a3a}
+.tab.active{color:#8ab4ff;background:#1a2a4d}
 .tab-pane{display:none}
 .tab-pane.active{display:block}
 
@@ -87,6 +89,8 @@ header .nav a:hover{background:#1a2a4d}
 .btn-primary:hover{background:#253a6a}
 .btn-secondary{background:#1e2a3a;color:#7a9ab5}
 .btn-secondary:hover{background:#2a3a4a}
+.btn-neutral{background:#1a3a5a;color:#8ab4ff}
+.btn-neutral:hover{background:#2a4a6a}
 
 /* logs */
 .log-controls{display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap}
@@ -125,6 +129,7 @@ header .nav a:hover{background:#1a2a4d}
 <span><span class="label">Listening</span><span id="info-listen">--</span></span>
 <span><span class="label">Upstream</span><span id="info-upstream">--</span></span>
 <span><span class="label">Model</span><span id="info-model">--</span></span>
+<span><span class="label">v</span><span id="info-version">--</span></span>
 </div>
 </header>
 
@@ -146,7 +151,7 @@ header .nav a:hover{background:#1a2a4d}
 <div id="available-tricks"><div class="loader">Loading...</div></div>
 <div class="custom-path">
 <input type="text" id="custom-path" placeholder="Path to trick .py file">
-<button class="btn btn-success" onclick="loadCustomTrick()">Add</button>
+<button class="btn btn-neutral" onclick="loadCustomTrick()">Add</button>
 </div>
 </div>
 </div>
@@ -219,13 +224,14 @@ function switchTab(name) {
 
 // ---- info ----
 async function fetchInfo() {
-  try {
-    const d = await fetchJSON('/api/info');
-    document.getElementById('info-listen').textContent = d.listen_on;
-    document.getElementById('info-upstream').textContent = d.model_url;
-    document.getElementById('info-model').textContent = d.model_name || '(default)';
-  } catch(e) { console.error(e); }
-}
+    try {
+      const d = await fetchJSON('/api/info');
+      document.getElementById('info-listen').textContent = d.listen_on;
+      document.getElementById('info-upstream').textContent = d.model_url;
+      document.getElementById('info-model').textContent = d.model_name || '(default)';
+      document.getElementById('info-version').textContent = d.version || '--';
+    } catch(e) { console.error(e); }
+  }
 
 // ---- tricks ----
 async function fetchTricks() {
@@ -257,7 +263,7 @@ async function fetchAvailable() {
     const files = await fetchJSON('/api/tricks/available');
     const el = document.getElementById('available-tricks');
     if (!files.length) { el.innerHTML = '<div class="empty">No built-in tricks found</div>'; return; }
-    el.innerHTML = files.map(f => '<div class="avail-item"><div><span class="name">' + escapeHtml(f.display_name || f.path) + '</span><span class="path">' + escapeHtml(f.path) + '</span>' + (f.brief ? '<div class="brief">' + escapeHtml(f.brief) + '</div>' : '') + '</div><button class="btn btn-success btn-sm" onclick="loadTrick(\'' + f.path.replace(/'/g, "\\'") + '\')">Load</button></div>').join('');
+    el.innerHTML = files.map(f => '<div class="avail-item"><div><span class="name">' + escapeHtml(f.display_name || f.path) + '</span><span class="path">' + escapeHtml(f.path) + '</span>' + (f.brief ? '<div class="brief">' + escapeHtml(f.brief) + '</div>' : '') + '</div><button class="btn btn-neutral btn-sm" onclick="loadTrick(\'' + f.path.replace(/'/g, "\\'") + '\')">Load</button></div>').join('');
   } catch(e) { document.getElementById('available-tricks').innerHTML = '<div class="loader">Error loading</div>'; }
 }
 

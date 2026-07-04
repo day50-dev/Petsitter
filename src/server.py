@@ -259,7 +259,42 @@ def _get_version() -> str:
         return "0.0.0"
 
 
-@click.command()
+class _PetSitterCLI(click.Command):
+    """Custom CLI that intercepts --trick/-t with no value to list tricks."""
+
+    def parse_args(self, ctx, args):
+        for i, arg in enumerate(args):
+            if arg in ("-t", "--trick"):
+                if i + 1 >= len(args) or args[i + 1].startswith("-"):
+                    _print_trick_table()
+                    ctx.exit(0)
+        return super().parse_args(ctx, args)
+
+
+def _print_trick_table():
+    """Print a table of available tricks:  Name | File | Description."""
+    from src.gui_routes import _introspect_trick_file
+
+    tricks_dir = Path("tricks")
+    if not tricks_dir.exists():
+        click.echo("No tricks directory found.")
+        return
+
+    rows = []
+    for f in sorted(tricks_dir.glob("*.py")):
+        if f.name == "__init__.py":
+            continue
+        info = _introspect_trick_file(f)
+        rows.append((info["display_name"] or f.stem, str(f), info["brief"] or ""))
+
+    if rows:
+        name_w = max(len(r[0]) for r in rows) + 2
+        path_w = max(len(r[1]) for r in rows) + 2
+        for name, path, brief in rows:
+            click.echo(f"{name:<{name_w}}| {path:<{path_w}}| {brief}")
+
+
+@click.command(cls=_PetSitterCLI)
 @click.version_option(
     _get_version(),
     "-v", "--version",
@@ -287,7 +322,7 @@ def _get_version() -> str:
     "-t", "--trick",
     "tricks",
     multiple=True,
-    help="Path to a trick module (can be specified multiple times)",
+    help="Path to a trick module, or --trick alone to list available tricks",
 )
 @click.option(
     "-tc", "--trick-config",
@@ -317,6 +352,8 @@ def cli(
     listen_on: str,
 ) -> None:
     """Petsitter - OpenAI-compatible proxy with tricks.
+
+    Use --trick (alone, no value) to list available tricks.
 
     https://github.com/day50-dev/Petsitter
 

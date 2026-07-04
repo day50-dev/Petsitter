@@ -42,6 +42,27 @@ def _save_full_config(handler, api_key):
     Path(_config_path).write_text(json.dumps(config, indent=2) + "\n")
 
 
+def _introspect_trick_file(path: Path) -> dict:
+    """Extract display_name and brief from a trick module without instantiating."""
+    import importlib.util
+
+    info = {"path": str(path), "display_name": None, "brief": None}
+    try:
+        spec = importlib.util.spec_from_file_location(path.stem, str(path))
+        if spec and spec.loader:
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            for name in dir(mod):
+                obj = getattr(mod, name)
+                if isinstance(obj, type) and issubclass(obj, Trick) and obj is not Trick:
+                    info["display_name"] = getattr(obj, "__display_name__", None) or name
+                    info["brief"] = getattr(obj, "__brief__", "")
+                    break
+    except Exception:
+        pass
+    return info
+
+
 def register_gui_routes(app, handler, api_key, config_path: str | None = None):
     global _log_capture, _config_path
     from src.server import _log_capture as server_log_capture
@@ -63,10 +84,12 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
     app.add_route("/docs", docs_page, methods=["GET"])
 
     async def gui_info(request: Request) -> Response:
+        from src.server import _get_version
         return JSONResponse({
             "listen_on": f"{request.url.hostname}:{request.url.port}",
             "model_url": handler.model_url,
             "model_name": handler.model_name,
+            "version": _get_version(),
         })
     app.add_route("/api/info", gui_info, methods=["GET"])
 
@@ -75,28 +98,13 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
     app.add_route("/api/tricks", gui_tricks, methods=["GET"])
 
     async def gui_tricks_available(request: Request) -> Response:
-        import importlib.util
         tricks_dir = Path("tricks")
         result = []
         if tricks_dir.exists():
             for f in sorted(tricks_dir.glob("*.py")):
                 if f.name == "__init__.py":
                     continue
-                info = {"path": str(f), "display_name": None, "brief": None}
-                try:
-                    spec = importlib.util.spec_from_file_location(f.stem, str(f))
-                    if spec and spec.loader:
-                        mod = importlib.util.module_from_spec(spec)
-                        spec.loader.exec_module(mod)
-                        for name in dir(mod):
-                            obj = getattr(mod, name)
-                            if isinstance(obj, type) and issubclass(obj, Trick) and obj is not Trick:
-                                info["display_name"] = getattr(obj, "__display_name__", None) or name
-                                info["brief"] = getattr(obj, "__brief__", "")
-                                break
-                except Exception:
-                    pass
-                result.append(info)
+                result.append(_introspect_trick_file(f))
         return JSONResponse(result)
     app.add_route("/api/tricks/available", gui_tricks_available, methods=["GET"])
 

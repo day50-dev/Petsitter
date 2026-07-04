@@ -55,17 +55,15 @@ Now point your AI applications to `http://localhost:8080/v1`.
 
 ## CLI Options
 
-| Option | Short | Required | Description |
-|--------|-------|----------|-------------|
-| `--url` | `-u` | See note | Base URL of upstream model (e.g., `http://localhost:11434`) |
-| `--model` | `-m` | No | Model name (optional for vllm, sglang, llama.cpp) |
-| `--key` | `-k` | No | API key for upstream (if required) |
-| `--trick` | `-t` | No | Path to a trick module (can be repeated) |
-| `--trick-config` | `-tc` | No | Path to a trickset JSON file (can be repeated) |
-| `--model-config` | `-mc` | No | Path to a model config JSON file (MAS URIs for multi-model tricks) |
-| `--listen` | `-l` | No | Host:port to listen on (default: `localhost:8080`) |
-
-`-u`/`--url` is required unless `-mc`/`--model-config` is provided with a `"default"` key.
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--url` | `-u` | Base URL of upstream model (e.g., `http://localhost:11434`) |
+| `--model` | `-m` | Model name (optional for vllm, sglang, llama.cpp) |
+| `--key` | `-k` | API key for upstream (if required) |
+| `--trick` | `-t` | Path to a trick module (can be repeated) |
+| `--trick-config` | `-tc` | Path to a trickset JSON file (can be repeated) |
+| `--model-config` | `-mc` |  Path to a model config JSON file (MAS URIs for multi-model tricks) |
+| `--listen` | `-l` | Host:port to listen on (default: `localhost:8080`) |
 
 ## Built-in Tricks
 

@@ -73,7 +73,7 @@ class MyTrick(Trick):
 
 ## Dynamic loading without restart
 
-Once written, load your trick at startup:
+Load your trick at startup:
 
 ```
 petsitter --model_url http://localhost:11434 --trick tricks/my_trick.py
@@ -84,6 +84,8 @@ Or load it at runtime via the API:
 ```
 POST /api/tricks/load {"path": "tricks/my_trick.py"}
 ```
+
+Tricks can be loaded even without their required models configured. Model validation only happens at request time — a trick that needs a model key that isn't available will produce a runtime error when activated.
 
 ## Template
 

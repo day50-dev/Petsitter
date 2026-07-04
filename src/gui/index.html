@@ -58,7 +58,9 @@ header .nav a:hover{background:#1a2a4d}
 .toggle.off::after{background:#5a3a3a}
 
 .avail-item{display:flex;justify-content:space-between;align-items:center;padding:6px 8px;border-radius:3px;background:#12122a;margin-bottom:3px}
-.avail-item .name{font-size:12px;color:#c8d6e5;font-family:monospace}
+.avail-item .name{font-size:12px;color:#c8d6e5}
+.avail-item .path{font-size:11px;color:#4a6572;margin-left:6px}
+.avail-item .brief{font-size:11px;color:#6b8299;margin-top:1px;line-height:1.3}
 
 .custom-path{display:flex;gap:8px;margin-top:10px}
 .custom-path input{flex:1;background:#0f0f1a;border:1px solid #1e2a3a;border-radius:4px;padding:7px 10px;color:#c8d6e5;font-size:13px;font-family:monospace}
@@ -144,7 +146,7 @@ header .nav a:hover{background:#1a2a4d}
 <div id="available-tricks"><div class="loader">Loading...</div></div>
 <div class="custom-path">
 <input type="text" id="custom-path" placeholder="Path to trick .py file">
-<button class="btn btn-success" onclick="loadCustomTrick()">Load</button>
+<button class="btn btn-success" onclick="loadCustomTrick()">Add</button>
 </div>
 </div>
 </div>
@@ -255,7 +257,7 @@ async function fetchAvailable() {
     const files = await fetchJSON('/api/tricks/available');
     const el = document.getElementById('available-tricks');
     if (!files.length) { el.innerHTML = '<div class="empty">No built-in tricks found</div>'; return; }
-    el.innerHTML = files.map(f => '<div class="avail-item"><span class="name">' + escapeHtml(f) + '</span><button class="btn btn-success btn-sm" onclick="loadTrick(\'' + f + '\')">Load</button></div>').join('');
+    el.innerHTML = files.map(f => '<div class="avail-item"><div><span class="name">' + escapeHtml(f.display_name || f.path) + '</span><span class="path">' + escapeHtml(f.path) + '</span>' + (f.brief ? '<div class="brief">' + escapeHtml(f.brief) + '</div>' : '') + '</div><button class="btn btn-success btn-sm" onclick="loadTrick(\'' + f.path.replace(/'/g, "\\'") + '\')">Load</button></div>').join('');
   } catch(e) { document.getElementById('available-tricks').innerHTML = '<div class="loader">Error loading</div>'; }
 }
 

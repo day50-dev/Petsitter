@@ -7,7 +7,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.staticfiles import StaticFiles
 
-from src.trick import get_model_config, parse_mas_uri, remove_model_config, update_model_config
+from src.trick import Trick, get_model_config, parse_mas_uri, remove_model_config, update_model_config
 
 _log_capture = None
 _config_path: str | None = None
@@ -75,13 +75,29 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
     app.add_route("/api/tricks", gui_tricks, methods=["GET"])
 
     async def gui_tricks_available(request: Request) -> Response:
+        import importlib.util
         tricks_dir = Path("tricks")
-        files = []
+        result = []
         if tricks_dir.exists():
             for f in sorted(tricks_dir.glob("*.py")):
-                if f.name != "__init__.py":
-                    files.append(str(f))
-        return JSONResponse(files)
+                if f.name == "__init__.py":
+                    continue
+                info = {"path": str(f), "display_name": None, "brief": None}
+                try:
+                    spec = importlib.util.spec_from_file_location(f.stem, str(f))
+                    if spec and spec.loader:
+                        mod = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(mod)
+                        for name in dir(mod):
+                            obj = getattr(mod, name)
+                            if isinstance(obj, type) and issubclass(obj, Trick) and obj is not Trick:
+                                info["display_name"] = getattr(obj, "__display_name__", None) or name
+                                info["brief"] = getattr(obj, "__brief__", "")
+                                break
+                except Exception:
+                    pass
+                result.append(info)
+        return JSONResponse(result)
     app.add_route("/api/tricks/available", gui_tricks_available, methods=["GET"])
 
     async def gui_tricks_load(request: Request) -> Response:

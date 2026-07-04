@@ -20,8 +20,6 @@ from src.gui_routes import register_gui_routes
 from src.loader import load_tricks
 from src.proxy import ProxyHandler
 from src.trick import (
-    Trick,
-    build_modelset_example,
     configure_modelset,
     parse_mas_uri,
 )
@@ -95,13 +93,6 @@ def create_app(
             tricksets["_default"] = default_ts
 
     handler = ProxyHandler(model_url, model_name, api_key, tricksets=tricksets)
-
-    # Validate modelset — skip when no upstream is configured (dashboard-only mode)
-    if model_url:
-        all_tricks: list[Trick] = []
-        for ts in tricksets.values():
-            all_tricks.extend(ts.tricks)
-        _validate_modelset(all_tricks, modelset_data)
 
     global _log_capture
     _log_capture = LogCaptureHandler()
@@ -266,40 +257,6 @@ def _get_version() -> str:
         ).stdout.strip()
     except Exception:
         return "0.0.0"
-
-
-def _validate_modelset(tricks: list[Trick], modelset_data: dict[str, str] | None) -> None:
-    """Check that all loaded tricks have their required models available."""
-    modelset_keys = set(modelset_data.keys()) if modelset_data else set()
-
-    for trick in tricks:
-        required = set(trick.required_models)
-        if modelset_data is not None:
-            missing = required - modelset_keys
-            if missing:
-                keys_str = ", ".join(f"{k!r}" for k in sorted(required))
-                missing_str = ", ".join(f"{k!r}" for k in sorted(missing))
-                example = build_modelset_example(list(required))
-                click.echo(
-                    f"Error: Trick {type(trick).__name__} requires model keys "
-                    f"[{keys_str}], but {missing_str} "
-                    f"{'is' if len(missing) == 1 else 'are'} missing from the modelset.\n"
-                    f"Expected a modelset like:\n{example}",
-                    err=True,
-                )
-                raise SystemExit(1)
-        else:
-            extras = [k for k in trick.required_models if k != "default"]
-            if extras:
-                keys_str = ", ".join(f"{k!r}" for k in trick.required_models)
-                example = build_modelset_example(trick.required_models)
-                click.echo(
-                    f"Error: Trick {type(trick).__name__} requires model keys "
-                    f"[{keys_str}], but -mc/--model-config was not provided.\n"
-                    f"Provide a model config JSON file like:\n{example}",
-                    err=True,
-                )
-                raise SystemExit(1)
 
 
 @click.command()

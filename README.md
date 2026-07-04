@@ -9,7 +9,7 @@ Smaller models can't do tool calling? Petsitter tricks them into it. Need struct
 
 But that's only the beginning. Cyclomatic complexity? Halstead metrics? Chidamber and Kemerer? Why not!
 
-Look, there's even a gui where you can modify things dynamically, look at logs, point to different models...
+There's even a GUI where you can modify things dynamically, look at logs, point to different models...
 <img alt="ps-gui" src="https://github.com/user-attachments/assets/a8de4543-9eb2-4198-92a9-0662a125e13f" />
 
 

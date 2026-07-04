@@ -1,5 +1,6 @@
 """GUI dashboard routes for petsitter."""
 
+import json
 from pathlib import Path
 
 from starlette.requests import Request
@@ -7,15 +8,45 @@ from starlette.responses import JSONResponse, Response
 from starlette.staticfiles import StaticFiles
 
 from src.trick import get_model_config, parse_mas_uri, remove_model_config, update_model_config
-from src.trickset import Trickset
 
 _log_capture = None
+_config_path: str | None = None
 
 
-def register_gui_routes(app, handler, api_key):
-    global _log_capture
+def _collect_trick_paths(handler) -> list[str]:
+    paths = set()
+    for ts_name, ts in handler.tricksets.items():
+        if ts_name == "_default":
+            paths.update(ts.trick_paths)
+    return sorted(paths, key=lambda p: (p.count("/"), p))
+
+
+def _save_full_config(handler, api_key):
+    """Persist current dashboard model + trick settings to config file."""
+    if not _config_path:
+        return
+    modelset = {}
+    for key in ("default", "thinker", "toolcall", "think", "tool_caller"):
+        try:
+            cfg = get_model_config(key)
+            modelset[key] = f"{cfg['model_url']}#m={cfg['model_name']}"
+        except KeyError:
+            pass
+    config = {
+        "model_url": handler.model_url,
+        "model_name": handler.model_name or "",
+        "api_key": api_key,
+        "modelset": modelset,
+        "tricks": _collect_trick_paths(handler),
+    }
+    Path(_config_path).write_text(json.dumps(config, indent=2) + "\n")
+
+
+def register_gui_routes(app, handler, api_key, config_path: str | None = None):
+    global _log_capture, _config_path
     from src.server import _log_capture as server_log_capture
     _log_capture = server_log_capture
+    _config_path = config_path
 
     gui_dir = Path(__file__).parent / "gui"
     app.mount("/static", StaticFiles(directory=str(gui_dir)), name="static")
@@ -59,6 +90,7 @@ def register_gui_routes(app, handler, api_key):
         ts_name = data.get("trickset")
         try:
             trick = handler.add_trick(path, ts_name=ts_name)
+            _save_full_config(handler, api_key)
             return JSONResponse({"success": True, "name": type(trick).__name__})
         except Exception as e:
             return JSONResponse({"success": False, "error": str(e)}, status_code=400)
@@ -69,6 +101,7 @@ def register_gui_routes(app, handler, api_key):
         name = data.get("name", "")
         ts_name = data.get("trickset")
         if handler.remove_trick(name, ts_name=ts_name):
+            _save_full_config(handler, api_key)
             return JSONResponse({"success": True})
         return JSONResponse({"success": False, "error": f"Trick '{name}' not found"}, status_code=404)
     app.add_route("/api/tricks/unload", gui_tricks_unload, methods=["POST"])
@@ -151,6 +184,7 @@ def register_gui_routes(app, handler, api_key):
                 update_model_config(key, existing["model_url"], existing["model_name"])
         if "remove_model" in data:
             remove_model_config(data["remove_model"])
+        _save_full_config(handler, api_key)
         return JSONResponse({"success": True})
     app.add_route("/api/models", gui_models_update, methods=["POST"])
 

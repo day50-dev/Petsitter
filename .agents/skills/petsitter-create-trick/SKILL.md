@@ -31,6 +31,20 @@ The execution order of hooks matches the list order in the ProxyHandler. Tricks 
 - Keep hooks free of `await` if the trick needs sync-only support - tricks that use `callmodel_sync` work in both contexts
 - Store per-trick state on `self` - each loaded trick is a fresh instance
 
+## Required metadata
+
+Every trick class **must** set these class attributes:
+
+| Attribute | Purpose | Example |
+|-----------|---------|---------|
+| `__doc__` | Module-level docstring explaining what the trick does | `"""Enforces valid JSON output with retry."""` |
+| `__brief__` | One-line summary shown in the dashboard | `"Enforces valid JSON output with automatic retry on failure"` |
+| `__display_name__` | Human-readable name for the GUI | `"JSON Mode"` |
+
+The class itself should also have a docstring. The file name convention is `snake_case.py` with the class name as `PascalCaseTrick`.
+
+See the [template](assets/trick-template.py) for the exact structure.
+
 ## Keyword activation (optional)
 
 Set `keywords` on your trick class to make it only activate when a keyword appears in the user's message. The keyword is stripped from the message before sending to the model. Tricks without `keywords` are always active (when their trickset matches).

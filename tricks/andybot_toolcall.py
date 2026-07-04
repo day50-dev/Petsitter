@@ -66,17 +66,10 @@ def gen_id() -> str:
 
 
 class AndybotToolcallTrick(Trick):
-    """Conversational tool calling via ANDYBOT pattern.
-    
-    Flow:
-    1. Assistant says: "DEAR ANDYBOT, LIST_MP3S"
-    2. Trick truncates message, loops to collect params:
-       - User: "ANDYBOT HAS A QUESTION: What path?"
-       - Assistant: "~/mp3"
-    3. Returns tool_calls to client
-    4. Client sends tool result
-    5. pre_hook converts tool result to user message
-    """
+    """Conversational tool calling via ANDYBOT pattern."""
+
+    __brief__ = "Conversational tool calling through the ANDYBOT dialogue pattern"
+    __display_name__ = "Andybot Toolcall"
 
     def __init__(self):
         self._tools = None

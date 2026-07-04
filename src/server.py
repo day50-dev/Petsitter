@@ -50,6 +50,23 @@ class LogCaptureHandler(logging.Handler):
 
 _log_capture: LogCaptureHandler | None = None
 
+CONFIG_DIR = Path.home() / ".config" / "petsitter"
+CONFIG_PATH = CONFIG_DIR / "config.json"
+
+
+def load_config() -> dict:
+    if CONFIG_PATH.exists():
+        try:
+            return json.loads(CONFIG_PATH.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def save_config(config: dict) -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIG_PATH.write_text(json.dumps(config, indent=2) + "\n")
+
 
 def create_app(
     model_url: str,
@@ -58,6 +75,7 @@ def create_app(
     trick_paths: list[str],
     trickset_paths: list[str] | None = None,
     modelset_data: dict[str, str] | None = None,
+    config_path: str | None = None,
 ) -> Starlette:
     tricksets: dict[str, Trickset] = {}
 
@@ -78,11 +96,12 @@ def create_app(
 
     handler = ProxyHandler(model_url, model_name, api_key, tricksets=tricksets)
 
-    # Validate modelset against all loaded tricks' requirements
-    all_tricks: list[Trick] = []
-    for ts in tricksets.values():
-        all_tricks.extend(ts.tricks)
-    _validate_modelset(all_tricks, modelset_data)
+    # Validate modelset — skip when no upstream is configured (dashboard-only mode)
+    if model_url:
+        all_tricks: list[Trick] = []
+        for ts in tricksets.values():
+            all_tricks.extend(ts.tricks)
+        _validate_modelset(all_tricks, modelset_data)
 
     global _log_capture
     _log_capture = LogCaptureHandler()
@@ -115,9 +134,8 @@ def create_app(
             yield "data: [DONE]\n\n"
         except Exception as e:
             import traceback
-            tb = traceback.format_exc()
             click.echo(f"ERROR in stream_chat_completions: {e}")
-            click.echo(tb)
+            click.echo(traceback.format_exc())
             yield f"data: {json.dumps({'error': {'message': str(e), 'type': 'proxy_error'}})}\n\n"
 
     async def chat_completions(request: Request) -> Response:
@@ -133,13 +151,16 @@ def create_app(
             else:
                 result = await handler.chat_completions(payload, x_title=x_title)
                 return JSONResponse(result)
+        except json.JSONDecodeError as e:
+            return JSONResponse({"error": "Invalid JSON", "type": "invalid_request"}, status_code=400)
+        except ValueError as e:
+            return JSONResponse({"error": str(e), "type": "setup_required"}, status_code=503)
         except Exception as e:
             import traceback
-            tb = traceback.format_exc()
             click.echo(f"ERROR in chat_completions: {e}")
-            click.echo(tb)
+            click.echo(traceback.format_exc())
             return JSONResponse(
-                {"error": {"message": str(e), "type": "proxy_error", "traceback": tb}},
+                {"error": str(e), "type": "proxy_error"},
                 status_code=500,
             )
     app.add_route("/v1/chat/completions", chat_completions, methods=["POST"])
@@ -148,22 +169,20 @@ def create_app(
         try:
             result = await handler.models()
             return JSONResponse(result)
+        except ValueError as e:
+            return JSONResponse({"error": str(e), "type": "setup_required"}, status_code=503)
         except Exception as e:
             import traceback
-            tb = traceback.format_exc()
             click.echo(f"ERROR in models: {e}")
-            click.echo(tb)
-            return JSONResponse(
-                {"error": {"message": str(e), "type": "proxy_error", "traceback": tb}},
-                status_code=500,
-            )
+            click.echo(traceback.format_exc())
+            return JSONResponse({"error": str(e), "type": "proxy_error"}, status_code=500)
     app.add_route("/v1/models", models, methods=["GET"])
 
     async def health(request: Request) -> Response:
         return JSONResponse({"status": "ok"})
     app.add_route("/health", health, methods=["GET"])
 
-    register_gui_routes(app, handler, api_key)
+    register_gui_routes(app, handler, api_key, config_path=config_path)
 
     # ----- trickset API endpoints -----
     # Fixed-path routes must come before {name} param route
@@ -358,7 +377,20 @@ def cli(
                   -t tricks/kennel.py \\
                   -l localhost:8080
     """
-    modelset_data: dict[str, str] | None = None
+    # Load persistent config
+    cfg = load_config()
+    cfg_tricks = list(cfg.get("tricks", []))
+    cfg_tricksets = list(cfg.get("tricksets", []))
+    cfg_modelset = cfg.get("modelset")
+
+    # CLI args override persistent config
+    if model_url is None:
+        model_url = cfg.get("model_url", "")
+    if model_name is None:
+        model_name = cfg.get("model_name", "")
+    if not api_key:
+        api_key = cfg.get("api_key", "")
+
     if model_config:
         mc_path = Path(model_config).resolve()
         if not mc_path.exists():
@@ -369,21 +401,18 @@ def cli(
         except json.JSONDecodeError as e:
             click.echo(f"Error: invalid JSON in model config file: {e}", err=True)
             raise SystemExit(1)
+    else:
+        modelset_data = cfg_modelset
 
-        if model_url is None and "default" in modelset_data:
+    if modelset_data:
+        if model_url == "" and "default" in modelset_data:
             model_url, inferred_name = parse_mas_uri(modelset_data["default"])
-            if model_name is None:
+            if not model_name:
                 model_name = inferred_name
-
         configure_modelset(modelset_data)
 
-    if not model_url:
-        click.echo(
-            "Error: -u/--url is required when -mc/--model-config is not provided "
-            "(or the model config must have a 'default' key)",
-            err=True,
-        )
-        raise SystemExit(1)
+    trick_list = list(tricks) if tricks else cfg_tricks
+    trickset_list = list(tricksets) if tricksets else cfg_tricksets
 
     if ":" in listen_on:
         host, port_str = listen_on.rsplit(":", 1)
@@ -394,19 +423,34 @@ def cli(
 
     app = create_app(
         model_url, model_name, api_key,
-        trick_paths=list(tricks),
-        trickset_paths=list(tricksets),
+        trick_paths=trick_list,
+        trickset_paths=trickset_list,
         modelset_data=modelset_data,
+        config_path=str(CONFIG_PATH),
     )
 
-    click.echo(f"Starting petsitter on {host}:{port}")
-    click.echo(f"Upstream: {model_url}")
+    # Save config for next run (merging CLI state into persistent config)
+    save_config({
+        "model_url": model_url,
+        "model_name": model_name or "",
+        "api_key": api_key,
+        "modelset": modelset_data or {},
+        "tricks": trick_list,
+        "tricksets": trickset_list,
+    })
+
+    if not model_url:
+        click.echo("Starting petsitter dashboard with no upstream model configured.")
+        click.echo("Configure a model via the dashboard at http://" + listen_on)
+    else:
+        click.echo(f"Starting petsitter on {host}:{port}")
+        click.echo(f"Upstream: {model_url}")
     if model_name:
         click.echo(f"Model: {model_name}")
-    if tricks:
-        click.echo(f"Tricks: {', '.join(tricks)}")
-    if tricksets:
-        click.echo(f"Trick configs: {', '.join(tricksets)}")
+    if trick_list:
+        click.echo(f"Tricks: {', '.join(trick_list)}")
+    if trickset_list:
+        click.echo(f"Trick configs: {', '.join(trickset_list)}")
     if model_config:
         click.echo(f"Model config: {model_config}")
 

@@ -16,6 +16,9 @@ from src.trick import Trick
 class ToolCallTrick(Trick):
     """Enable tool calling for models that don't support it natively."""
 
+    __brief__ = "Adds tool calling (JSON-RPC) for models without native support"
+    __display_name__ = "Tool Call"
+
     def __init__(self):
         self._tools_cache = None
         self._model_has_native_tools = False

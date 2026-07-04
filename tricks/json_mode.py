@@ -14,6 +14,9 @@ from src.trick import Trick
 class JsonModeTrick(Trick):
     """Enforce valid JSON output from the model."""
 
+    __brief__ = "Enforces valid JSON output with automatic retry on failure"
+    __display_name__ = "JSON Mode"
+
     def __init__(self, max_attempts: int = 3):
         self.max_attempts = max_attempts
 

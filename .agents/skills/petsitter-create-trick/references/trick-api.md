@@ -4,6 +4,11 @@
 
 ```python
 class Trick:
+    __brief__: str = ""
+    __display_name__: str = ""
+    keywords: list[str] = []
+    required_models: list[str] = ["default"]
+
     def system_prompt(self, to_add: str) -> str: ...
     def pre_hook(self, context: list, params: dict) -> list: ...
     def post_hook(self, context: list) -> list: ...
@@ -11,6 +16,15 @@ class Trick:
 ```
 
 All hooks default to returning their input unchanged. Override only the hooks you need.
+
+### Class attributes
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `__brief__` | `str` | One-line summary shown in the dashboard GUI. Every trick should set this. |
+| `__display_name__` | `str` | Human-readable name for the GUI. Falls back to the class name if empty. |
+| `keywords` | `list[str]` | If set, the trick only activates when at least one keyword appears in the user's message. Keywords are stripped from the message before sending to the model. |
+| `required_models` | `list[str]` | Model keys this trick needs from a modelset. Default is `["default"]`. Multi-model tricks override with additional keys like `["default", "thinker", "toolcall"]`. |
 
 ### `system_prompt(to_add: str) -> str`
 
@@ -118,9 +132,8 @@ tricks/
 ├── your_trick.py      # <-- your trick goes here
 ├── code_validator.py   # self-healing code validation via model self-description
 ├── tool_call.py        # built-in examples
-├── json_mode.py
-├── list_files.py
-├── xml_tool.py
+├── json_mode.py        # JSON output enforcement
+├── xml_tool.py         # XML-style tool calling
 └── ...
 ```
 

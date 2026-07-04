@@ -12,6 +12,9 @@ from src.trick import Trick, callmodel_sync
 class CodeValidatorTrick(Trick):
     """Validate code changes through self-description and comparison."""
 
+    __brief__ = "Validates code changes by comparing model description against user request"
+    __display_name__ = "Code Validator"
+
     def __init__(self, max_attempts: int = 3):
         self.max_attempts = max_attempts
 

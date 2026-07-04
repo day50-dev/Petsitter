@@ -16,6 +16,9 @@ from src.trick import Trick
 class ConversationalToolTrick(Trick):
     """Enable tool calling through iterative parameter collection."""
 
+    __brief__ = "Guided tool calling with one-by-one parameter collection"
+    __display_name__ = "Conversational Tool"
+
     def __init__(self):
         self._tools_cache = None
         self._model_has_native_tools = False

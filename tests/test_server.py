@@ -107,7 +107,7 @@ class TestServerEndpoints:
                 "/v1/chat/completions",
                 content="not valid json",
             )
-            assert response.status_code == 500
+            assert response.status_code == 400
             assert "error" in response.json()
 
     @pytest.mark.asyncio

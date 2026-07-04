@@ -62,15 +62,10 @@ _PATTERNS: list[tuple[re.Pattern, str, Callable[[int], str]]] = [
 
 
 class SecretsProtectorTrick(Trick):
-    """Protect secrets by pseudonymizing them before reaching the model.
+    """Protect secrets by pseudonymizing them before reaching the model."""
 
-    Detects common secret patterns (API keys, tokens, credentials, PII),
-    replaces them with format-preserving pseudonyms, and restores original
-    values in the model's response.
-
-    Uses an in-memory bidirectional vault to maintain consistent pseudonyms
-    throughout a conversation session.
-    """
+    __brief__ = "Pseudonymizes API keys, tokens, and PII before sending to the model"
+    __display_name__ = "Secrets Protector"
 
     def __init__(self, patterns: list | None = None):
         self._patterns = patterns if patterns is not None else _PATTERNS

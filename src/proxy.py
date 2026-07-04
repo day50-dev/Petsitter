@@ -24,8 +24,8 @@ class ProxyHandler:
         tricksets: dict[str, Trickset] | None = None,
         tricks: list[Trick] | None = None,
     ):
-        self.model_url = model_url.rstrip("/")
-        self.model_name = model_name
+        self.model_url = model_url.rstrip("/") if model_url else ""
+        self.model_name = model_name or ""
         self.api_key = api_key
         self.tricksets = tricksets or {}
         if tricks is not None and not self.tricksets:
@@ -165,6 +165,8 @@ class ProxyHandler:
                 path = ts.trick_paths[i] if i < len(ts.trick_paths) else ""
                 result.append({
                     "name": name,
+                    "display_name": getattr(t, "__display_name__", None) or name,
+                    "brief": getattr(t, "__brief__", ""),
                     "module": type(t).__module__,
                     "trickset": ts_name,
                     "path": path,
@@ -184,6 +186,8 @@ class ProxyHandler:
         return False
 
     async def chat_completions(self, payload: dict, x_title: str = "") -> dict:
+        if not self.model_url:
+            raise ValueError("No upstream model configured. Set a model URL via the dashboard.")
         messages = payload.get("messages", [])
         model = payload.get("model", "")
         tricks = self._matching_tricks(x_title, model)
@@ -252,6 +256,8 @@ class ProxyHandler:
         return result
 
     async def models(self) -> dict:
+        if not self.model_url:
+            raise ValueError("No upstream model configured. Set a model URL via the dashboard.")
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 f"{self.model_url}/v1/models",

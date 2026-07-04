@@ -147,10 +147,16 @@ class Trick:
     a modelset. Default is ["default"] — the single model configured via
     --model_url/--model_name. Multi-model tricks (e.g. KennelTrick) should
     override with additional keys like ["default", "thinker", "toolcall"].
+
+    Subclasses should set:
+        __brief__: Short one-line description shown in the dashboard.
+        __display_name__: Human-readable name (defaults to class name).
     """
 
     keywords: list[str] = []
     required_models: list[str] = ["default"]
+    __brief__: str = ""
+    __display_name__: str = ""
 
     def system_prompt(self, to_add: str) -> str:
         """Add instructions to the system prompt.

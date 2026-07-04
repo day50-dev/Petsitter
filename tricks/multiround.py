@@ -9,6 +9,8 @@ from src.trick import Trick, callmodel
 class MultiRoundTrick(Trick):
     """Only activates when user includes "multiround" in their message."""
 
+    __brief__ = "Step-by-step reasoning with self-critique and revision"
+    __display_name__ = "Multi-Round"
     keywords = ["multiround"]
 
     def system_prompt(self, to_add: str) -> str:

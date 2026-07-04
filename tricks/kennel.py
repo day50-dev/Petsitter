@@ -5,14 +5,10 @@ from src.trick import Trick, callmodel_sync, get_model_config
 
 
 class KennelTrick(Trick):
-    """Pipeline multiple specialized models: thinker -> tool-caller -> emitter.
+    """Pipeline multiple specialized models: thinker -> tool-caller -> emitter."""
 
-    Each step appends its output to the context so the next model sees
-    everything the previous one produced.
-
-    Requires a modelset with keys: "default", "thinker", "toolcall".
-    """
-
+    __brief__ = "Pipelines thinker, tool-caller, and emitter models"
+    __display_name__ = "Kennel"
     required_models = ["default", "thinker", "toolcall"]
 
     def __init__(self):

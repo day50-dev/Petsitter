@@ -16,6 +16,9 @@ from src.trick import Trick
 class XmlToolTrick(Trick):
     """Enable tool calling using XML-style syntax."""
 
+    __brief__ = "XML-style tool calling for small models"
+    __display_name__ = "XML Tool"
+
     def __init__(self):
         self._tools_cache = None
         self._model_has_native_tools = False

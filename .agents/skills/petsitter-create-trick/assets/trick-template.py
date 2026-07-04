@@ -1,4 +1,4 @@
-"""Trick: <name> - <brief description>.
+"""<brief description of what this trick does>.
 
 <Describe what this trick does: which hooks it uses and why.>
 """
@@ -7,13 +7,11 @@ from src.trick import Trick
 
 
 class <Name>Trick(Trick):
-    """<description>"""
+    """<class docstring describing the trick behavior>"""
 
+    __brief__ = "<one-line summary shown in the dashboard>"
+    __display_name__ = "<human-readable name>"
     keywords = ["<keyword>"]  # Optional: set to activate only when keyword is in user message
-
-    def __init__(self):
-        # Store per-instance state here
-        pass
 
     def system_prompt(self, to_add: str) -> str:
         """<what instructions this adds to the system prompt>"""

@@ -1,13 +1,15 @@
 # Hook Examples from Built-in Tricks
 
-## Example 1: Simple tool injection (`tricks/list_files.py`)
+## Example 1: Simple tool injection
 
-Demonstrates all 3 common hooks: inject system instructions, inject tool definitions, and declare capabilities.
+Demonstrates all 3 common hooks: inject system instructions, inject tool definitions, and declare capabilities. Includes `__brief__` and `__display_name__` metadata.
 
 ```python
 from src.trick import Trick
 
 class ListFilesTrick(Trick):
+    __brief__ = "List files in a directory via tool call"
+    __display_name__ = "List Files"
 
     def system_prompt(self, to_add: str) -> str:
         """Tell the model about the list_files tool."""
@@ -61,6 +63,8 @@ from src import callmodel
 from src.trick import Trick
 
 class JsonModeTrick(Trick):
+    __brief__ = "Enforces valid JSON output with automatic retry on failure"
+    __display_name__ = "JSON Mode"
 
     def __init__(self, max_attempts: int = 3):
         self.max_attempts = max_attempts
@@ -118,6 +122,8 @@ Demonstrates complex `post_hook` logic: detecting patterns in model output, tran
 
 ```python
 class ToolCallTrick(Trick):
+    __brief__ = "Adds tool calling (JSON-RPC) for models without native support"
+    __display_name__ = "Tool Call"
 
     def __init__(self):
         self._tools_cache = None
@@ -191,6 +197,8 @@ Demonstrates an alternative calling convention for smaller models.
 
 ```python
 class XmlToolTrick(Trick):
+    __brief__ = "XML-style tool calling for small models"
+    __display_name__ = "XML Tool"
 
     def system_prompt(self, to_add: str) -> str:
         return (

@@ -1,6 +1,6 @@
 [project]
 name = "petsitter"
-version = "0.4.1"
+version = "0.5.0"
 description = "OpenAI-compatible proxy that adds functionality to models through tricks"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -21,7 +21,8 @@ test = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+packages = ["src", "tricks"]
+include = ["tricksets/*.json", "format.md"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

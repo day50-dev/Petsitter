@@ -353,8 +353,6 @@ def cli(
 ) -> None:
     """Petsitter - OpenAI-compatible proxy with tricks.
 
-    Use --trick (alone, no value) to list available tricks.
-
     https://github.com/day50-dev/Petsitter
 
     Example:

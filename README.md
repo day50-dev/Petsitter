@@ -9,21 +9,18 @@ Smaller models can't do tool calling? Petsitter tricks them into it. Need struct
 
 But that's only the beginning. Cyclomatic complexity? Halstead metrics? Chidamber and Kemerer? Why not!
 
-## What Is This For?
+Look, there's even a gui where you can modify things dynamically, look at logs, point to different models...
+<img alt="ps-gui" src="https://github.com/user-attachments/assets/a8de4543-9eb2-4198-92a9-0662a125e13f" />
 
-- **local models** (Ollama, llama.cpp, vllm, sglang) and want them to not be a lazy goofball
-- **small/cheap models** that lack tool calling or JSON mode
-- **agentic systems** that need consistent capabilities across different models
-- **experiments and evalutions** with prompt engineering tricks without changing your application code
 
-## What Does It Do?
-
-Petsitter sits between your application and your model or one or more inference providers, intercepting requests and responses to apply "tricks" - pluggable transformations that add functionality through:
+Petsitter sits between your application and your model or one or more inference providers, intercepting requests and responses to apply "tricks" - pluggable transformations. Some examples include:
 
 1. **Prompt engineering** - Inject instructions and tool definitions
 2. **Context manipulation** - Modify messages before/after the model sees them
 3. **Retry loops** - Call the model again if output doesn't meet requirements
 4. **Response transformation** - Convert outputs to expected formats (e.g., OpenAI tool_calls)
+
+It can combine multiple local specialized models, filter for certain harnesses, do dynamic routing, and also, none of that stuff and just be easy and simple.
 
 ## Why Use It?
 

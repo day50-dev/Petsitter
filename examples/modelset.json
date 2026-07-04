@@ -1,0 +1,5 @@
+{
+    "default": "http://localhost:11434#m=Qwen3.5:8b",
+    "thinker": "http://localhost:11434#m=VibeThinker-3B-GGUF:q4_K_M",
+    "toolcall": "http://localhost:11434#m=lfm2.5:latest"
+}

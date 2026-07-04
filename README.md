@@ -66,7 +66,7 @@ Now point your AI applications to `http://localhost:8080/v1`.
 | `--model-config` | `-mc` |  Path to a model config JSON file (MAS URIs for multi-model tricks) |
 | `--listen` | `-l` | Host:port to listen on (default: `localhost:8080`) |
 
-## Built-in Tricks
+## Example Tricks
 
 ### Output Control
 

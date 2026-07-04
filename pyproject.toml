@@ -1,6 +1,6 @@
 [project]
 name = "petsitter"
-version = "0.4.0"
+version = "0.4.1"
 description = "OpenAI-compatible proxy that adds functionality to models through tricks"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -9,7 +9,6 @@ dependencies = [
     "starlette>=0.34.0",
     "uvicorn>=0.24.0",
     "click>=8.1.0",
-    "pydantic>=2.0.0",
 ]
 
 [project.scripts]

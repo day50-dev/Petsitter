@@ -5,7 +5,7 @@
 
 **Petsitter** is an OpenAI-compatible proxy that layers smart harnesses on top of language models to give them capabilities they don't natively have. It also makes finicky behaviors reliable and dependable.
 
-You install it, point it at a model, load a few example tricks, and suddenly things that model couldn't do before — tool calling, structured JSON, multi-step reasoning — start working. Then you think: *"oh, I could make it do X"* — and you write your own trick.
+You install it, point it at a model, load a few example tricks, and suddenly things that model couldn't do before - tool calling, structured JSON, multi-step reasoning - start working. Then you think: *"oh, I could make it do X"* - and you write your own trick.
 
 The built-in tricks are starting points. Tweak them, combine them, or use them as a reference to build something entirely different. Petsitter isn't a turnkey product; it's a kit.
 
@@ -13,12 +13,12 @@ The built-in tricks are starting points. Tweak them, combine them, or use them a
 
 Petsitter intercepts every request/response pair and runs it through a pipeline of hooks. Each trick picks which hooks it needs:
 
-1. **`system_prompt`** — Inject instructions before the model sees the conversation
-2. **`pre_hook`** — Modify messages or inject tool definitions before the API call
-3. **`post_hook`** — Validate, retry, or transform the model's response
-4. **`info`** — Declare capabilities back to your application
+1. **`system_prompt`** - Inject instructions before the model sees the conversation
+2. **`pre_hook`** - Modify messages or inject tool definitions before the API call
+3. **`post_hook`** - Validate, retry, or transform the model's response
+4. **`info`** - Declare capabilities back to your application
 
-A trick can be as simple as appending a sentence to the system prompt, or as involved as routing subtasks to three different models in parallel. There's a GUI at `/` for loading/unloading tricks, editing trickset filters, browsing logs, and pointing at different models — all at runtime, no restart needed.
+A trick can be as simple as appending a sentence to the system prompt, or as involved as routing subtasks to three different models in parallel. There's a GUI at `/` for loading/unloading tricks, editing trickset filters, browsing logs, and pointing at different models - all at runtime, no restart needed.
 
 You can also edit tricks, reorder them, disable, add new ones, and filter them through a built in dashboard:
 <img alt="2026-07-04_15-13" src="https://github.com/user-attachments/assets/c623f29a-8724-4fdb-bc6d-a76c3022183a" />
@@ -28,10 +28,10 @@ You can also edit tricks, reorder them, disable, add new ones, and filter them t
 
 ## Why Use It?
 
-- **No model changes required** — Works with any OpenAI-compatible endpoint
-- **Pluggable architecture** — Write your own tricks in Python
-- **Transparent to your app** — Point your existing code at petsitter instead of the model
-- **Mix and match** — Combine multiple tricks for compound effects
+- **No model changes required** - Works with any OpenAI-compatible endpoint
+- **Pluggable architecture** - Write your own tricks in Python
+- **Transparent to your app** - Point your existing code at petsitter instead of the model
+- **Mix and match** - Combine multiple tricks for compound effects
 
 ---
 
@@ -124,7 +124,7 @@ Enables tool calling for models without native support by injecting tool definit
 
 ### Andybot Toolcall
 
-[tricks/andybot_toolcall.py](tricks/andybot_toolcall.py) — **experimental**
+[tricks/andybot_toolcall.py](tricks/andybot_toolcall.py) - **experimental**
 
 An alternative approach to tool calling that uses a conversational persona instead of structured JSON output. The model says `DEAR ANDYBOT, <FUNCTION>` and ANDYBOT collects each required parameter through dialogue:
 
@@ -143,9 +143,9 @@ For a more advanced version with inline-argument parsing, confusion recovery, an
 
 ### Multi-Model Orchestration
 
-A trick has full control of the request lifecycle — it can call any number of models, not just the one the user pointed at. This lets you decompose a problem into subtasks and route each one to the model best suited for it.
+A trick has full control of the request lifecycle - it can call any number of models, not just the one the user pointed at. This lets you decompose a problem into subtasks and route each one to the model best suited for it.
 
-Petsitter supports this through **model configs** — JSON files that map role names to MAS URIs (`url#m=model_name`). Tricks declare what roles they need; if a key is missing, petsitter prints a helpful error.
+Petsitter supports this through **model configs** - JSON files that map role names to MAS URIs (`url#m=model_name`). Tricks declare what roles they need; if a key is missing, petsitter prints a helpful error.
 
 Example `modelset.json`:
 ```json
@@ -158,7 +158,7 @@ Example `modelset.json`:
 
 #### Kennel (example)
 
-[tricks/kennel.py](tricks/kennel.py) is a reference implementation of the pattern above. It routes cognitive subtasks to three specialized models running in parallel — a **thinker** for chain-of-thought, a **tool-caller** for deciding which tools to invoke, and an **emitter** for generating the final response.
+[tricks/kennel.py](tricks/kennel.py) is a reference implementation of the pattern above. It routes cognitive subtasks to three specialized models running in parallel - a **thinker** for chain-of-thought, a **tool-caller** for deciding which tools to invoke, and an **emitter** for generating the final response.
 
 ```bash
 # Pull three small models that together fit on modest hardware (< 6B total)
@@ -196,7 +196,7 @@ Detects and pseudonymizes sensitive information before it reaches the model, the
 
 [tricks/self_improver.py](tricks/self_improver.py)
 
-Watches for the prompt keyword `petsitter` in your messages. When it sees `(petsitter: <request>)`, it strips the tag and spawns an agent loop with the default model. The agent has tools to add, modify, and list trick files — it reads instructions from `.agents/skills/self-improver/SKILL.md` to understand the petsitter trick API and conventions.
+Watches for the prompt keyword `petsitter` in your messages. When it sees `(petsitter: <request>)`, it strips the tag and spawns an agent loop with the default model. The agent has tools to add, modify, and list trick files - it reads instructions from `.agents/skills/self-improver/SKILL.md` to understand the petsitter trick API and conventions.
 
 This is a reference implementation for the **prompt keywords** pattern (see below).
 
@@ -216,7 +216,7 @@ Model: Explains CAP theorem (tag stripped, petsitter handled separately)
 
 Prompt keywords let you inject commands to petsitter itself inline in your message using the format `(<keyword>: <request>)`. The framework scans for registered keywords, strips the matching pattern before the model sees it, and routes the request to the appropriate handler.
 
-This is separate from trick [keyword activation](#keyword-activated) — keywords activate or deactivate tricks for the current request, while **prompt keywords** are commands to petsitter that bypass the model entirely.
+This is separate from trick [keyword activation](#keyword-activated) - keywords activate or deactivate tricks for the current request, while **prompt keywords** are commands to petsitter that bypass the model entirely.
 
 ### How to register a prompt keyword
 
@@ -232,13 +232,13 @@ class MyCommandTrick(Trick):
 ```
 
 The method receives the text after `mycommand: ` and can return:
-- A message dict — injected as the model response (bypasses the upstream call)
-- `None` — the pattern is stripped but the normal pipeline continues
+- A message dict - injected as the model response (bypasses the upstream call)
+- `None` - the pattern is stripped but the normal pipeline continues
 
 ### Notes
 
 - Only one prompt keyword is handled per request (the first match found).
-- The pattern `(<keyword>: <request>)` uses the first closing paren — avoid nested parens in the request text.
+- The pattern `(<keyword>: <request>)` uses the first closing paren - avoid nested parens in the request text.
 - Keyword matching is case-insensitive.
 - If the handler raises, an error message is returned as the assistant response.
 
@@ -434,7 +434,7 @@ curl http://localhost:8080/v1/chat/completions \
 
 ### Trick retry loops are bounded
 
-Two tricks loop internally: **JSON Mode** and **Code Validator**. Both default to 3 attempts, configurable via `__init__`. After exhausting attempts they give the model's best-effort output back to the user — they don't hang or cascade.
+Two tricks loop internally: **JSON Mode** and **Code Validator**. Both default to 3 attempts, configurable via `__init__`. After exhausting attempts they give the model's best-effort output back to the user - they don't hang or cascade.
 
 ```python
 # Both accept max_attempts:
@@ -444,19 +444,19 @@ trick = CodeValidatorTrick(max_attempts=5)
 
 ### No global infinite-loop protection
 
-`post_hook` receives the full context and returns a (potentially modified) context. The framework calls post_hooks once per request — it does not loop them. However, if a trick calls `callmodel` inside its own loop (as JSON Mode and Code Validator do), that loop is the trick's responsibility. None of the built-in tricks have unbounded loops, and custom tricks should follow the same pattern.
+`post_hook` receives the full context and returns a (potentially modified) context. The framework calls post_hooks once per request - it does not loop them. However, if a trick calls `callmodel` inside its own loop (as JSON Mode and Code Validator do), that loop is the trick's responsibility. None of the built-in tricks have unbounded loops, and custom tricks should follow the same pattern.
 
 ### Network failures are not retried
 
-`callmodel` and `callmodel_sync` make a single HTTP request to the upstream — no retry, no backoff. If the upstream is down, the error propagates as a 502 to the client. Add retry at the client level or wrap `callmodel` in your own `try`/`except` inside the trick.
+`callmodel` and `callmodel_sync` make a single HTTP request to the upstream - no retry, no backoff. If the upstream is down, the error propagates as a 502 to the client. Add retry at the client level or wrap `callmodel` in your own `try`/`except` inside the trick.
 
 ### Tool calls are client-driven
 
-When a trick produces `tool_calls` in the response, petsitter returns them to your application. It does **not** execute the tool or re-invoke the model with the result — that's the client's job. If the client sends back a `tool` role message with the result, it enters the pipeline fresh on the next request.
+When a trick produces `tool_calls` in the response, petsitter returns them to your application. It does **not** execute the tool or re-invoke the model with the result - that's the client's job. If the client sends back a `tool` role message with the result, it enters the pipeline fresh on the next request.
 
 ### Kennel sub-model failures
 
-If a sub-model call in Kennel fails (e.g., the thinker model is unreachable), the exception propagates and the request fails. Kennel has no fallback — if you need resilience, wrap individual `callmodel_sync` calls in your own `try`/`except`.
+If a sub-model call in Kennel fails (e.g., the thinker model is unreachable), the exception propagates and the request fails. Kennel has no fallback - if you need resilience, wrap individual `callmodel_sync` calls in your own `try`/`except`.
 
 ## API Endpoints
 

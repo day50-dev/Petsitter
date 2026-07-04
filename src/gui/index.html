@@ -107,6 +107,17 @@ header .nav a:hover{background:#1a2a4d}
 .log-entry.lvl-CRITICAL{color:#ff3b5a;font-weight:700}
 .log-count{font-size:12px;color:#4a6572;margin-left:auto}
 
+.ts-selector{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.ts-selector .ts-label{font-size:12px;color:#7a9ab5;font-weight:600}
+.ts-selector .ts-main{display:flex;align-items:center;gap:6px;flex:1}
+.ts-selector select{background:#0f0f1a;border:1px solid #1e2a3a;border-radius:4px;padding:5px 10px;color:#c8d6e5;font-size:13px;font-family:monospace;flex:1;max-width:260px}
+.ts-selector select:focus{outline:none;border-color:#3a5a7a}
+.ts-filter-row{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+.ts-filter-label{font-size:12px;color:#7a9ab5;font-weight:600;min-width:50px}
+.ts-filter-input{background:#0f0f1a;border:1px solid #1e2a3a;border-radius:3px;padding:4px 8px;color:#c8d6e5;font-size:12px;font-family:monospace;flex:1;max-width:300px}
+.ts-filter-input:focus{outline:none;border-color:#3a5a7a}
+.ts-edit{padding:2px 8px;font-size:11px}
+
 .loader{color:#5a7a95;font-size:13px;padding:10px 0}
 .empty{color:#4a6572;font-size:13px;font-style:italic;padding:10px 0}
 .toast{position:fixed;bottom:20px;right:20px;background:#1a3d2a;color:#6bff8a;padding:10px 20px;border-radius:6px;font-size:13px;z-index:100;animation:fadeIn .2s}
@@ -141,6 +152,19 @@ header .nav a:hover{background:#1a2a4d}
 
 <!-- === TRICKS TAB === -->
 <div class="tab-pane active" id="tab-tricks">
+<div class="card" style="margin-bottom:0">
+<div class="ts-selector">
+<label class="ts-label">Trickset</label>
+<div class="ts-main">
+<select id="ts-select" onchange="switchTrickset()"></select>
+<button class="btn btn-neutral btn-sm" onclick="addTrickset()">+ Add</button>
+</div>
+</div>
+<div id="ts-filters" style="display:none;margin-top:8px">
+<div class="ts-filter-row"><span class="ts-filter-label">X-Title:</span><input type="text" id="ts-filter-xtitle" class="ts-filter-input" onchange="saveTricksetFilter()"><button class="btn btn-sm btn-neutral ts-edit" onclick="document.getElementById('ts-filter-xtitle').focus()">&#9998;</button></div>
+<div class="ts-filter-row"><span class="ts-filter-label">Model:</span><input type="text" id="ts-filter-model" class="ts-filter-input" onchange="saveTricksetFilter()"><button class="btn btn-sm btn-neutral ts-edit" onclick="document.getElementById('ts-filter-model').focus()">&#9998;</button></div>
+</div>
+</div>
 <div class="two-col">
 <div class="card">
 <h2>Loaded Tricks</h2>
@@ -184,8 +208,8 @@ header .nav a:hover{background:#1a2a4d}
 <div class="card">
 <div class="log-controls">
 <h2 style="margin:0">Activity Log</h2>
-<label><input type="checkbox" id="autorefresh" checked> Auto-refresh</label>
-<select id="level-filter" onchange="fetchLogs()">
+
+<select id="level-filter" onchange="changeLogLevel()">
 <option value="">All levels</option>
 <option value="INFO">INFO</option>
 <option value="DEBUG">DEBUG</option>
@@ -219,7 +243,6 @@ function escapeHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&l
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'tab-'+name));
-  if (name === 'logs') fetchLogs();
 }
 
 // ---- info ----
@@ -268,8 +291,9 @@ async function fetchAvailable() {
 }
 
 async function loadTrick(path) {
+  const ts = document.getElementById('ts-select').value;
   try {
-    const d = await fetchJSON('/api/tricks/load', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path}) });
+    const d = await fetchJSON('/api/tricks/load', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path, trickset: ts}) });
     showToast('Loaded: ' + d.name);
     fetchTricks(); fetchAvailable();
   } catch(e) { showToast(e.message, true); }
@@ -288,6 +312,58 @@ async function unloadTrick(name) {
     await fetchJSON('/api/tricks/unload', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name}) });
     showToast('Removed: ' + name);
     fetchTricks(); fetchAvailable();
+  } catch(e) { showToast(e.message, true); }
+}
+
+// ---- tricksets ----
+async function fetchTricksets() {
+  try {
+    const list = await fetchJSON('/api/tricksets');
+    const sel = document.getElementById('ts-select');
+    sel.innerHTML = list.map(ts => '<option value="' + escapeHtml(ts.name) + '">' + escapeHtml(ts.name) + (ts.name === '_default' ? ' (default)' : '') + '</option>').join('');
+    if (sel.options.length) switchTrickset();
+  } catch(e) { console.error(e); }
+}
+
+async function switchTrickset() {
+  const name = document.getElementById('ts-select').value;
+  if (!name) { document.getElementById('ts-filters').style.display = 'none'; return; }
+  try {
+    const ts = await fetchJSON('/api/tricksets/' + encodeURIComponent(name));
+    document.getElementById('ts-filters').style.display = '';
+    document.getElementById('ts-filter-xtitle').value = ts.filters['X-Title'] || '*';
+    document.getElementById('ts-filter-model').value = ts.filters['Model'] || '*';
+    fetchTricks();
+  } catch(e) { console.error(e); }
+}
+
+async function saveTricksetFilter() {
+  const name = document.getElementById('ts-select').value;
+  if (!name) return;
+  const filters = {
+    'X-Title': document.getElementById('ts-filter-xtitle').value || '*',
+    'Model': document.getElementById('ts-filter-model').value || '*',
+  };
+  try {
+    await fetchJSON('/api/tricksets/' + encodeURIComponent(name), {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({filters}),
+    });
+  } catch(e) { showToast(e.message, true); }
+}
+
+async function addTrickset() {
+  const name = prompt('Enter trickset name:');
+  if (!name) return;
+  try {
+    const d = await fetchJSON('/api/tricksets/create', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name, filters: {'X-Title': '*', 'Model': '*'}}),
+    });
+    showToast('Created: ' + d.name);
+    fetchTricksets();
   } catch(e) { showToast(e.message, true); }
 }
 
@@ -347,22 +423,50 @@ async function removeModelKey(key) {
 }
 
 // ---- logs ----
-async function fetchLogs() {
-  try {
-    const level = document.getElementById('level-filter').value;
-    const d = await fetchJSON('/api/logs?level=' + encodeURIComponent(level) + '&limit=200');
-    const viewer = document.getElementById('log-viewer');
-    const isAtBottom = viewer.scrollHeight - viewer.scrollTop - viewer.clientHeight < 40;
-    viewer.innerHTML = d.map(l => '<div class="log-entry lvl-' + l.level + '"><span class="time">' + l.time + '</span>' + escapeHtml(l.level) + ': ' + escapeHtml(l.message) + '</div>').join('');
-    document.getElementById('log-count').textContent = d.length + ' entries';
-    if (isAtBottom) viewer.scrollTop = viewer.scrollHeight;
-  } catch(e) { console.error(e); }
+let logEventSource = null;
+
+function startLogStream() {
+  if (logEventSource) logEventSource.close();
+  const level = document.getElementById('level-filter').value;
+  const url = '/api/logs/stream' + (level ? '?level=' + encodeURIComponent(level) : '');
+  const viewer = document.getElementById('log-viewer');
+  let pending = 0;
+  logEventSource = new EventSource(url);
+  logEventSource.onmessage = function(e) {
+    if (e.data && e.lastEventId === undefined && e.data.startsWith('{')) {
+      try {
+        const entry = JSON.parse(e.data);
+        const atBottom = viewer.scrollHeight - viewer.scrollTop - viewer.clientHeight < 40;
+        viewer.insertAdjacentHTML('beforeend', '<div class="log-entry lvl-' + entry.level + '"><span class="time">' + escapeHtml(entry.time) + '</span>' + escapeHtml(entry.level) + ': ' + escapeHtml(entry.message) + '</div>');
+        pending++;
+        document.getElementById('log-count').textContent = viewer.querySelectorAll('.log-entry').length + ' entries';
+        if (atBottom) viewer.scrollTop = viewer.scrollHeight;
+      } catch(_) {}
+    }
+  };
+  logEventSource.onerror = function() {
+    logEventSource.close();
+    setTimeout(startLogStream, 3000);
+  };
 }
-function clearLogDisplay() { document.getElementById('log-viewer').innerHTML = ''; document.getElementById('log-count').textContent = '0 entries'; }
+
+function changeLogLevel() {
+  const viewer = document.getElementById('log-viewer');
+  viewer.innerHTML = '';
+  document.getElementById('log-count').textContent = '0 entries';
+  startLogStream();
+}
+
+function clearLogDisplay() {
+  if (logEventSource) logEventSource.close();
+  document.getElementById('log-viewer').innerHTML = '';
+  document.getElementById('log-count').textContent = '0 entries';
+  setTimeout(startLogStream, 100);
+}
 
 // ---- init ----
-fetchInfo(); fetchTricks(); fetchAvailable(); fetchModels(); fetchLogs();
-setInterval(() => { if (document.getElementById('autorefresh').checked) fetchLogs(); }, 2000);
+fetchInfo(); fetchTricksets(); fetchTricks(); fetchAvailable(); fetchModels();
+startLogStream();
 </script>
 </body>
 </html>

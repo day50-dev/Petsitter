@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+import time
 from typing import Any
 
 import httpx
@@ -102,6 +103,46 @@ class ProxyHandler:
             capabilities = trick.info(capabilities)
         return capabilities
 
+    def _filter_prompt_keywords(self, messages: list) -> tuple[list, dict | None]:
+        registry: dict[str, Trick] = {}
+        for t in self.tricks:
+            kw = t.prompt_keyword
+            if kw:
+                registry[kw.lower()] = t
+
+        if not registry:
+            return messages, None
+
+        modified = list(messages)
+        for msg in reversed(modified):
+            if msg.get("role") == "user" and isinstance(msg.get("content"), str):
+                content = msg["content"]
+                for keyword, trick in registry.items():
+                    pattern = re.compile(
+                        r'\(' + re.escape(keyword) + r':\s*(.*?)\)',
+                        re.IGNORECASE | re.DOTALL,
+                    )
+                    match = pattern.search(content)
+                    if match:
+                        request_text = match.group(1).strip()
+                        content = pattern.sub("", content).strip()
+                        content = re.sub(r' +', " ", content).strip()
+                        msg["content"] = content
+                        try:
+                            response = trick.handle_prompt_keyword(request_text)
+                        except Exception as e:
+                            logger.exception(f"prompt_keyword handler failed: {e}")
+                            response = {
+                                "role": "assistant",
+                                "content": f"Error handling prompt keyword: {e}",
+                            }
+                        if isinstance(response, dict):
+                            return modified, response
+                        return modified, None
+                break
+
+        return messages, None
+
     def _filter_tricks_by_keywords(self, tricks: list[Trick], messages: list) -> tuple[list[Trick], list]:
         active: list[Trick] = []
         modified = list(messages)
@@ -197,6 +238,22 @@ class ProxyHandler:
         if not self.model_url:
             raise ValueError("No upstream model configured. Set a model URL via the dashboard.")
         messages = payload.get("messages", [])
+
+        messages, pk_response = self._filter_prompt_keywords(messages)
+        if pk_response:
+            return {
+                "id": "chatcmpl-pk-" + str(int(time.time())),
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": "petsitter",
+                "choices": [{
+                    "index": 0,
+                    "message": pk_response,
+                    "finish_reason": "stop",
+                }],
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            }
+
         model = payload.get("model", "")
         if model.startswith("trickset/"):
             ts_name = model.split("/", 1)[1]

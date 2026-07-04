@@ -154,9 +154,27 @@ class Trick:
     """
 
     keywords: list[str] = []
+    prompt_keyword: str = ""
     required_models: list[str] = ["default"]
     __brief__: str = ""
     __display_name__: str = ""
+
+    def handle_prompt_keyword(self, request: str) -> dict | None:
+        """Handle a prompt keyword detected in the user message.
+
+        When the framework finds `(<prompt_keyword>: <request>)` in a user
+        message, it strips the pattern from the message and calls this method
+        with the extracted request text.
+
+        Args:
+            request: The text after the keyword and colon, e.g. "add a thinking mode".
+
+        Returns:
+            An assistant message dict like ``{"role": "assistant", "content": "..."}``
+            to inject as the model response, or ``None`` to let the normal pipeline
+            continue after stripping.
+        """
+        return None
 
     def system_prompt(self, to_add: str) -> str:
         """Add instructions to the system prompt.

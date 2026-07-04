@@ -44,25 +44,28 @@ ollama serve
 source .venv/bin/activate
 
 # Run petsitter with tricks
-./petsitter --model_url http://localhost:11434 \
-            --model_name llama3:8b \
-            --trick tricks/json_mode.py \
-            --trick tricks/tool_call.py \
-            --listen_on localhost:8080
+./petsitter -u http://localhost:11434 \
+            -m llama3:8b \
+            -t tricks/json_mode.py \
+            -t tricks/tool_call.py \
+            -l localhost:8080
 ```
 
 Now point your AI applications to `http://localhost:8080/v1`.
 
 ## CLI Options
 
-| Option | Required | Description |
-|--------|----------|-------------|
-| `--model_url` | Yes | Base URL of upstream model (e.g., `http://localhost:11434`) |
-| `--model_name` | No | Model name (optional for vllm, sglang, llama.cpp) |
-| `--api_key` | No | API key for upstream (if required) |
-| `--trick` | No | Path to a trick module (can be repeated) |
-| `--trickset` | No | Path to a trickset JSON file (can be repeated) |
-| `--listen_on` | No | Host:port to listen on (default: `localhost:8080`) |
+| Option | Short | Required | Description |
+|--------|-------|----------|-------------|
+| `--url` | `-u` | See note | Base URL of upstream model (e.g., `http://localhost:11434`) |
+| `--model` | `-m` | No | Model name (optional for vllm, sglang, llama.cpp) |
+| `--key` | `-k` | No | API key for upstream (if required) |
+| `--trick` | `-t` | No | Path to a trick module (can be repeated) |
+| `--trick-config` | `-tc` | No | Path to a trickset JSON file (can be repeated) |
+| `--model-config` | `-mc` | No | Path to a model config JSON file (MAS URIs for multi-model tricks) |
+| `--listen` | `-l` | No | Host:port to listen on (default: `localhost:8080`) |
+
+`-u`/`--url` is required unless `-mc`/`--model-config` is provided with a `"default"` key.
 
 ## Built-in Tricks
 
@@ -91,7 +94,7 @@ Now point your AI applications to `http://localhost:8080/v1`.
 Enforces valid JSON output by adding formatting instructions to the system prompt, stripping markdown code blocks, and retrying with feedback if the response isn't valid JSON.
 
 ```bash
-./petsitter --model_url http://localhost:11434 --trick tricks/json_mode.py
+./petsitter -u http://localhost:11434 -t tricks/json_mode.py
 ```
 
 ### Code Validator
@@ -99,7 +102,7 @@ Enforces valid JSON output by adding formatting instructions to the system promp
 After the model proposes a code change, asks it to describe what the change does, compares the description against the original user request, and retries with feedback if they don't match.
 
 ```bash
-./petsitter --model_url http://localhost:11434 --trick tricks/code_validator.py
+./petsitter -u http://localhost:11434 -t tricks/code_validator.py
 ```
 
 ### Tool Calling
@@ -107,7 +110,7 @@ After the model proposes a code change, asks it to describe what the change does
 Enables tool calling for models without native support by injecting tool definitions into the prompt, parsing JSONRPC-style tool call responses, and converting them to OpenAI `tool_calls` format.
 
 ```bash
-./petsitter --model_url http://localhost:11434 --trick tricks/tool_call.py
+./petsitter -u http://localhost:11434 -t tricks/tool_call.py
 ```
 
 ### List Files
@@ -116,7 +119,7 @@ Test trick that provides a `list_files` tool. Useful for testing tool calling fu
 
 ### Kennel
 
-Routes different cognitive subtasks to specialized models running in parallel. The emitter is the model specified with `--model_url`; the thinker and tool-caller are configured in a kennel config file (`kennels/default.json` or `$KENNEL_CONFIG`).
+Routes different cognitive subtasks to specialized models running in parallel. The emitter is the model specified with `-u`/`--url`; the thinker and tool-caller are read from a model config file (MAS format).
 
 ```bash
 # Pull three small models that together fit on modest hardware (< 6B total)
@@ -125,17 +128,23 @@ ollama pull LFM2.5-230M       # tool-calling (tiny, fast)
 ollama pull Qwen3.5-2B        # response generation
 
 # Each model sees a procedurally constructed context optimized for its role
-./petsitter --model_url http://localhost:11434 \
-            --model_name Qwen3.5-2B \
-            --trick tricks/kennel.py
+./petsitter -mc modelset-example.json \
+            -t tricks/kennel.py
+```
+
+Example `modelset-example.json`:
+```json
+{
+    "default": "http://localhost:11434#m=Qwen3.5:8b",
+    "thinker": "http://localhost:11434#m=VibeThinker-3B-GGUF:q4_K_M",
+    "toolcall": "http://localhost:11434#m=lfm2.5:latest"
+}
 ```
 
 Pipeline:
 1. **Thinker** gets the conversation + "think step by step" → produces reasoning
 2. **Tool-caller** (if tools are present) gets context + reasoning + tool definitions → decides which tool to call
 3. **Emitter** receives the enriched context and generates the final response
-
-Configure model URLs in `kennels/default.json` or override with `KENNEL_CONFIG=my-config.json`.
 
 ### Secrets Protector
 
@@ -146,7 +155,7 @@ Detects and pseudonymizes sensitive information before it reaches the model, the
 - **Bidirectional vault** — consistent pseudonyms across the session (same secret → same substitute) with automatic restoration in both natural-language responses and tool call arguments
 
 ```bash
-./petsitter --model_url http://localhost:11434 --trick tricks/secrets_protector.py
+./petsitter -u http://localhost:11434 -t tricks/secrets_protector.py
 ```
 
 ## Tricksets
@@ -174,10 +183,10 @@ The name is derived from the filename (`opencode.json` - `opencode`).
 ### Using tricksets
 
 ```bash
-# Load a trickset at startup (can be combined with --trick)
-petsitter --model_url http://localhost:11434 \
-          --trickset tricksets/opencode.json \
-          --trick tricks/list_files.py
+# Load a trickset at startup (can be combined with -t)
+petsitter -u http://localhost:11434 \
+          -tc tricksets/opencode.json \
+          -t tricks/list_files.py
 ```
 
 ### Managing tricksets at runtime
@@ -214,6 +223,27 @@ curl -X POST http://localhost:8080/api/tricksets/unload \
 The default catch-all trickset matches `{"X-Title": "*", "Model": "*"}` so `--trick` trick works the same as before.
 
 The `schema` field in a trickset JSON file records the petsitter version that wrote it. This tells tools how to interpret the file without needing an external lookup table.
+
+## Model Configs
+
+A model config JSON file lets you run multi-model tricks like [Kennel](#kennel) that need different models for different subtasks. Each key maps to a [MAS URI](https://day50.dev/mas.html) — a URL with a fragment (`#m=`) specifying the model name:
+
+```json
+{
+    "default": "http://localhost:11434#m=Qwen3.5:8b",
+    "thinker": "http://localhost:11434#m=VibeThinker-3B-GGUF:q4_K_M",
+    "toolcall": "http://localhost:11434#m=lfm2.5:latest"
+}
+```
+
+The `"default"` key sets the primary model (equivalent to `-u`/`--url` + `-m`/`--model`). Tricks declare what keys they need — for example, KennelTrick requires `["default", "thinker", "toolcall"]`. If a key is missing, petsitter prints a helpful error with the expected format.
+
+```bash
+# Use a model config instead of -u / -m
+petsitter -mc modelset-example.json -t tricks/kennel.py -l localhost:8080
+```
+
+If `-u`/`--url` is also given, it overrides the `"default"` from the model config.
 
 
 ## Creating Custom Tricks

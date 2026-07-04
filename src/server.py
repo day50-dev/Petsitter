@@ -3,8 +3,10 @@
 import json
 import logging
 import os
+import subprocess
 from collections import deque
 from datetime import datetime
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
 from typing import Any
 
@@ -303,6 +305,20 @@ def create_app(
     return app
 
 
+def _get_version() -> str:
+    try:
+        return _pkg_version("petsitter")
+    except PackageNotFoundError:
+        pass
+    try:
+        return subprocess.run(
+            ["git", "describe", "--tags", "--dirty", "--always"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+    except Exception:
+        return "0.0.0"
+
+
 def _validate_modelset(tricks: list[Trick], modelset_data: dict[str, str] | None) -> None:
     """Check that all loaded tricks have their required models available."""
     modelset_keys = set(modelset_data.keys()) if modelset_data else set()
@@ -338,6 +354,11 @@ def _validate_modelset(tricks: list[Trick], modelset_data: dict[str, str] | None
 
 
 @click.command()
+@click.version_option(
+    _get_version(),
+    "-v", "--version",
+    prog_name="petsitter",
+)
 @click.option(
     "-u", "--url",
     "model_url",
@@ -390,6 +411,8 @@ def cli(
     listen_on: str,
 ) -> None:
     """Petsitter - OpenAI-compatible proxy with tricks.
+
+    https://github.com/day50-dev/Petsitter
 
     Example:
 

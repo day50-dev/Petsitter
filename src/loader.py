@@ -21,9 +21,13 @@ def load_trick_from_path(path: str) -> Type[Trick]:
         FileNotFoundError: If the path doesn't exist.
         ImportError: If no Trick subclass is found.
     """
-    trick_path = Path(path).resolve()
+    trick_path = Path(path)
     if not trick_path.exists():
-        raise FileNotFoundError(f"Trick file not found: {path}")
+        alt = Path(__file__).parent.parent / path
+        if alt.exists():
+            trick_path = alt
+        else:
+            raise FileNotFoundError(f"Trick file not found: {path}")
 
     module_name = trick_path.stem
     spec = importlib.util.spec_from_file_location(module_name, trick_path)

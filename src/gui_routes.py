@@ -104,6 +104,8 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
 
     async def gui_tricks_available(request: Request) -> Response:
         tricks_dir = Path("tricks")
+        if not tricks_dir.exists():
+            tricks_dir = Path(__file__).parent.parent / "tricks"
         result = []
         if tricks_dir.exists():
             for f in sorted(tricks_dir.glob("*.py")):

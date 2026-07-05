@@ -430,6 +430,8 @@ def cli(
 
     if ":" in listen_on:
         host, port_str = listen_on.rsplit(":", 1)
+        if not host:
+            host = "127.0.0.1"
         port = int(port_str)
     else:
         host = listen_on
@@ -474,7 +476,14 @@ def cli(
         format="%(levelname)s: %(message)s"
     )
 
-    uvicorn.run(app, host=host, port=port)
+    try:
+        uvicorn.run(app, host=host, port=port)
+    except (OSError, SystemExit) as e:
+        if "address" in str(e).lower() or "bind" in str(e).lower() or "in use" in str(e).lower() or "permission" in str(e).lower():
+            click.echo(f"Error: {e}", err=True)
+            click.echo("Use -l / --listen to specify a different address (e.g. -l :8081 for 127.0.0.1:8081)", err=True)
+            raise SystemExit(1)
+        raise
 
 
 if __name__ == "__main__":

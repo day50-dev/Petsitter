@@ -183,7 +183,7 @@ curl http://localhost:8080/v1/chat/completions \
   -d '{"messages":[{"role":"user","content":"explain the CAP theorem"}]}'
 ```
 
-## Example Tricks
+## Reference Templates
 
 ### Output Control
 

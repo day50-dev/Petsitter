@@ -224,7 +224,7 @@ The method receives the text after `mycommand: ` and can return:
 ### Capability Injection
 
  * [Tool Calling](#tool-calling) - Add tool calling to models without native support
- * [Andybot Toolcall](#andybot-toolcall) - Conversational persona tool calling for small/older models (experimental)
+ * [Andybot Toolcall](#andybot-toolcall) - Conversational persona tool calling for small/older models 
 
 ### Pipeline
 

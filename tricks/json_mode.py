@@ -7,8 +7,7 @@ Ensures the model returns valid JSON by:
 
 import json
 
-from src import callmodel
-from src.trick import Trick
+from src.trick import Trick, callmodel_sync
 
 
 class JsonModeTrick(Trick):
@@ -56,7 +55,7 @@ class JsonModeTrick(Trick):
                     break
                 
                 # Retry with feedback
-                context = callmodel(
+                context = callmodel_sync(
                     context,
                     "Your response was not valid JSON. Please respond with valid JSON only, "
                     "no markdown, no explanatory text.",

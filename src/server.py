@@ -417,11 +417,13 @@ def cli(
         modelset_data = cfg_modelset
 
     if modelset_data:
-        if model_url == "" and "default" in modelset_data:
-            model_url, inferred_name = parse_mas_uri(modelset_data["default"])
-            if not model_name:
-                model_name = inferred_name
         configure_modelset(modelset_data)
+        if "default" in modelset_data:
+            inferred_url, inferred_name = parse_mas_uri(modelset_data["default"])
+            if inferred_url:
+                model_url = inferred_url
+            if inferred_name:
+                model_name = inferred_name
 
     trick_list = list(tricks) if tricks else cfg_tricks
     trickset_list = list(tricksets) if tricksets else cfg_tricksets

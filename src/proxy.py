@@ -9,7 +9,7 @@ from typing import Any
 import httpx
 
 from src.context import append_to_system_prompt
-from src.trick import Trick, callmodel, configure
+from src.trick import Trick, callmodel, configure, get_model_config
 from src.trickset import Trickset
 
 logger = logging.getLogger("petsitter")
@@ -235,7 +235,9 @@ class ProxyHandler:
         return False
 
     async def chat_completions(self, payload: dict, x_title: str = "") -> dict:
-        if not self.model_url:
+        default_cfg = get_model_config("default")
+        upstream_url = default_cfg["model_url"]
+        if not upstream_url:
             raise ValueError("No upstream model configured. Set a model URL via the dashboard.")
         messages = payload.get("messages", [])
 
@@ -278,20 +280,21 @@ class ProxyHandler:
 
         messages = self._apply_pre_hooks(messages, payload, tricks)
 
+        upstream_model = default_cfg["model_name"] or "default"
         upstream_payload = {
-            "model": self.model_name or model or "default",
+            "model": upstream_model,
             "messages": messages,
         }
         for key in ["temperature", "max_tokens"]:
             if key in payload:
                 upstream_payload[key] = payload[key]
 
-        logger.info(f"Calling upstream model: {self.model_url}/v1/chat/completions")
+        logger.info(f"Calling upstream model: {upstream_url}/v1/chat/completions")
         logger.debug(f"Upstream payload: {json.dumps(upstream_payload, indent=2)}")
 
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                f"{self.model_url}/v1/chat/completions",
+                f"{upstream_url}/v1/chat/completions",
                 json=upstream_payload,
                 headers=self._build_headers(),
                 timeout=120.0,
@@ -329,11 +332,13 @@ class ProxyHandler:
         return result
 
     async def models(self) -> dict:
-        if not self.model_url:
+        default_cfg = get_model_config("default")
+        upstream_url = default_cfg["model_url"]
+        if not upstream_url:
             raise ValueError("No upstream model configured. Set a model URL via the dashboard.")
         async with httpx.AsyncClient() as client:
             response = await client.get(
-                f"{self.model_url}/v1/models",
+                f"{upstream_url}/v1/models",
                 headers=self._build_headers(),
                 timeout=30.0,
             )

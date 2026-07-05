@@ -21,7 +21,7 @@ Petsitter intercepts every request/response pair and runs it through a pipeline 
 3. **`post_hook`** - Validate, retry, or transform the model's response
 4. **`info`** - Declare capabilities back to your application
 
-A trick can be as simple as appending a sentence to the system prompt, or as involved as routing subtasks to three different models in parallel. There's a GUI at `/` for loading/unloading tricks, editing trickset filters, browsing logs, and pointing at different models - all at runtime, no restart needed.
+A trick can be as simple as appending a sentence to the system prompt, or as involved as routing subtasks to three different models in parallel. There's a GUI at `/` for loading/unloading tricks, editing trickset filters, browsing logs, and pointing at different models at runtime.
 
 You can also edit tricks, reorder them, disable, add new ones, and filter them through a built-in dashboard:
 <img alt="2026-07-04_15-13" src="https://github.com/user-attachments/assets/c623f29a-8724-4fdb-bc6d-a76c3022183a" />
@@ -30,7 +30,7 @@ You can also edit tricks, reorder them, disable, add new ones, and filter them t
 *Petsitter* is part of the [DAY50](https://github.com/day50-dev/) suite of open-source tools for local AI workflows and constructing better agents.
 
 - **No model changes required** - Works with any OpenAI-compatible endpoint
-- **Pluggable architecture** - Write your own tricks in Python
+- **Pluggable architecture** - Write your own tricks in Python. (Skills are included in `.agents`)
 - **Transparent to your app** - Point your existing code at petsitter instead of the model
 - **Mix and match** - Combine multiple tricks for compound effects
 

@@ -272,7 +272,7 @@ Enables tool calling for models without native support by injecting tool definit
 
 ### Andybot Toolcall
 
-[tricks/andybot_toolcall.py](tricks/andybot_toolcall.py) - **experimental**
+[tricks/andybot_toolcall.py](tricks/andybot_toolcall.py)
 
 An alternative approach to tool calling that uses a conversational persona instead of structured JSON output. The model says `DEAR ANDYBOT, <FUNCTION>` and ANDYBOT collects each required parameter through dialogue:
 

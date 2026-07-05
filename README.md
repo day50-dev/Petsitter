@@ -10,7 +10,9 @@ You install it, point it at a model, load a few example tricks, and suddenly thi
 The built-in tricks are starting points. Tweak them, combine them, or use them as a reference to build something entirely different. Petsitter isn't a turnkey product; it's a kit.
 
 ## How It Works
-<img alt="Petsitter_Intelligent_Proxy_-_Slide_2" src="https://github.com/user-attachments/assets/666ad974-d901-47ff-a47d-f91ed3a7931e" />
+
+<img alt="Petsitter_Intelligent_Proxy_-_Slide_2a" src="https://github.com/user-attachments/assets/b7a2a344-f438-4370-aee8-fd6f2dfe0756" />
+
 
 Petsitter intercepts every request/response pair and runs it through a pipeline of hooks. Each trick picks which hooks it needs:
 
@@ -68,7 +70,7 @@ Now point your AI applications to `http://localhost:8080/v1`.
 | `--listen` | `-l` | Host:port to listen on (default: `localhost:8080`) |
 
 ## Creating Custom Tricks
-<img alt="Petsitter_Intelligent_Proxy_-_Slide_4" src="https://github.com/user-attachments/assets/d7cbf498-b713-4bb8-8593-ed0918048a8f" />
+<img alt="Petsitter_Intelligent_Proxy_-_Slide_4" src="https://github.com/user-attachments/assets/28e21d4e-01a8-4b03-83ac-d04354c7cd3a" />
 
 The `Trick` class has four hooks you can implement. Each hook is optional - only implement what you need.
 

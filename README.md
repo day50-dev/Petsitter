@@ -38,22 +38,23 @@ You can also edit tricks, reorder them, disable, add new ones, and filter them t
 
 ## Quick Start
 
+The quickest way is a simple
+
 ```bash
-# Start your model backend (e.g., Ollama)
-ollama serve
-
-# Activate the virtual environment
-source .venv/bin/activate
-
-# Run petsitter with tricks
-./petsitter -u http://localhost:11434 \
-            -m llama3:8b \
-            -t tricks/json_mode.py \
-            -t tricks/tool_call.py \
-            -l localhost:8080
+$ uvx petsitter
 ```
 
-Now point your AI applications to `http://localhost:8080/v1`.
+Or you can do one off invocation:
+```bash
+# Run petsitter with tricks
+petsitter -u http://localhost:11434 \
+          -m llama3:8b \
+          -t tricks/json_mode.py \
+          -t tricks/tool_call.py \
+          -l localhost:8080
+```
+
+Either way, now you can point your AI applications to `http://localhost:8080/v1` and you're going through the petsitter middleware.
 
 ## CLI Options
 

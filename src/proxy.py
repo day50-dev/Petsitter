@@ -110,43 +110,64 @@ class ProxyHandler:
             if kw:
                 registry[kw.lower()] = t
 
-        if not registry:
-            return messages, None
+        all_pattern = re.compile(r'\(([\w][\w/-]*):\s*(.*?)\)', re.IGNORECASE | re.DOTALL)
 
         modified = list(messages)
         for msg in reversed(modified):
-            if msg.get("role") == "user" and isinstance(msg.get("content"), str):
-                content = msg["content"]
-                combined = "|".join(re.escape(k) for k in registry)
-                pattern = re.compile(
-                    r'\(' + r'(?:' + combined + r')' + r':\s*(.*?)\)',
-                    re.IGNORECASE | re.DOTALL,
-                )
-                matches = list(pattern.finditer(content))
-                if not matches:
-                    break
-                content = pattern.sub("", content).strip()
-                content = re.sub(r' +', " ", content).strip()
-                msg["content"] = content
-                for m in matches:
-                    keyword = m.group(0).split(":", 1)[0].lstrip("(").strip().lower()
-                    request_text = m.group(1).strip()
-                    trick = registry.get(keyword)
-                    if not trick:
-                        continue
-                    try:
-                        response = trick.handle_prompt_keyword(request_text)
-                    except Exception as e:
-                        logger.exception(f"prompt_keyword handler failed: {e}")
-                        response = {
-                            "role": "assistant",
-                            "content": f"Error handling prompt keyword: {e}",
-                        }
-                    if isinstance(response, dict):
-                        return modified, response
+            if msg.get("role") != "user" or not isinstance(msg.get("content"), str):
+                continue
+            content = msg["content"]
+
+            # Find all (keyword: request) patterns, recognized or not
+            all_matches = list(all_pattern.finditer(content))
+            if not all_matches:
                 break
 
-        return messages, None
+            # Separate into recognized and unrecognized
+            recognized: list[tuple[re.Match, Trick]] = []
+            unrecognized: list[str] = []
+            for m in all_matches:
+                keyword = m.group(1).strip().lower()
+                trick = registry.get(keyword)
+                if trick:
+                    recognized.append((m, trick))
+                else:
+                    unrecognized.append(keyword)
+
+            # Strip all keyword patterns from content
+            content = all_pattern.sub("", content).strip()
+            content = re.sub(r' +', " ", content).strip()
+            msg["content"] = content
+
+            # Inject notices for unrecognized keywords
+            if unrecognized:
+                notes = "Note: unrecognized prompt keyword" + \
+                        ("s" if len(unrecognized) > 1 else "") + \
+                        " " + ", ".join(f'"{k}"' for k in unrecognized) + \
+                        " " + ("were" if len(unrecognized) > 1 else "was") + " ignored."
+                if modified and modified[0].get("role") == "system":
+                    modified[0]["content"] += "\n\n" + notes
+                else:
+                    modified.insert(0, {"role": "system", "content": notes})
+
+            # Process recognized keywords in text order
+            for m, trick in recognized:
+                request_text = m.group(2).strip()
+                keyword = m.group(1).strip().lower()
+                try:
+                    response = trick.handle_prompt_keyword(request_text)
+                except Exception as e:
+                    logger.exception(f"prompt_keyword handler for {keyword!r} failed: {e}")
+                    response = {
+                        "role": "assistant",
+                        "content": f"Error handling prompt keyword '{keyword}': {e}",
+                    }
+                if isinstance(response, dict):
+                    return modified, response
+
+            break
+
+        return modified, None
 
     def _filter_tricks_by_keywords(self, tricks: list[Trick], messages: list) -> tuple[list[Trick], list]:
         active: list[Trick] = []

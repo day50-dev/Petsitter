@@ -23,7 +23,7 @@ Petsitter intercepts every request/response pair and runs it through a pipeline 
 
 A trick can be as simple as appending a sentence to the system prompt, or as involved as routing subtasks to three different models in parallel. There's a GUI at `/` for loading/unloading tricks, editing trickset filters, browsing logs, and pointing at different models - all at runtime, no restart needed.
 
-You can also edit tricks, reorder them, disable, add new ones, and filter them through a built in dashboard:
+You can also edit tricks, reorder them, disable, add new ones, and filter them through a built-in dashboard:
 <img alt="2026-07-04_15-13" src="https://github.com/user-attachments/assets/c623f29a-8724-4fdb-bc6d-a76c3022183a" />
 
 
@@ -86,7 +86,7 @@ flowchart TD
   K -.-> Z
 ```
 
-The `Trick` class has four hooks you can implement. Each hook is optional - only implement what you need.
+The `Trick` class has four hooks you can implement. Each hook is optional.
 
 ### `system_prompt(to_add: str) -> str`
 
@@ -168,8 +168,9 @@ def info(self, capabilities: dict) -> dict:
     return capabilities
 ```
 
+## Keywords 
 
-### Keyword-activated
+### Activation
 
 Set `keywords` on your trick class to activate only when the user includes that word in their message - the keyword is stripped before the model sees it. See [`tricks/multiround.py`](tricks/multiround.py) for a working example.
 
@@ -182,6 +183,36 @@ curl http://localhost:8080/v1/chat/completions \
 curl http://localhost:8080/v1/chat/completions \
   -d '{"messages":[{"role":"user","content":"explain the CAP theorem"}]}'
 ```
+
+### Prompts
+
+Prompt keywords let you inject commands to petsitter itself inline in your message using the format `(<keyword>: <request>)`. The framework scans for registered keywords, strips the matching pattern before the model sees it, and routes the request to the appropriate handler.
+
+This is separate from trick [keyword activation](#keyword-activated) - keywords activate or deactivate tricks for the current request, while **prompt keywords** are commands to petsitter that bypass the model entirely.
+
+### How to register a prompt keyword
+
+Set `prompt_keyword` on your Trick subclass:
+
+```python
+class MyCommandTrick(Trick):
+    prompt_keyword = "mycommand"
+    __brief__ = "Handles (mycommand: ...) inline requests"
+
+    def handle_prompt_keyword(self, request: str) -> dict | None:
+        return {"role": "assistant", "content": f"You asked: {request}"}
+```
+
+The method receives the text after `mycommand: ` and can return:
+- A message dict - injected as the model response (bypasses the upstream call)
+- `None` - the pattern is stripped but the normal pipeline continues
+
+### Notes
+
+- Only one prompt keyword is handled per request (the first match found).
+- The pattern `(<keyword>: <request>)` uses the first closing paren - avoid nested parens in the request text.
+- Keyword matching is case-insensitive.
+- If the handler raises, an error message is returned as the assistant response.
 
 ## Reference Templates
 
@@ -329,35 +360,7 @@ User: explain the CAP theorem (petsitter: add a thinking mode)
 Model: Explains CAP theorem (tag stripped, petsitter handled separately)
 ```
 
-## Prompt Keywords
 
-Prompt keywords let you inject commands to petsitter itself inline in your message using the format `(<keyword>: <request>)`. The framework scans for registered keywords, strips the matching pattern before the model sees it, and routes the request to the appropriate handler.
-
-This is separate from trick [keyword activation](#keyword-activated) - keywords activate or deactivate tricks for the current request, while **prompt keywords** are commands to petsitter that bypass the model entirely.
-
-### How to register a prompt keyword
-
-Set `prompt_keyword` on your Trick subclass:
-
-```python
-class MyCommandTrick(Trick):
-    prompt_keyword = "mycommand"
-    __brief__ = "Handles (mycommand: ...) inline requests"
-
-    def handle_prompt_keyword(self, request: str) -> dict | None:
-        return {"role": "assistant", "content": f"You asked: {request}"}
-```
-
-The method receives the text after `mycommand: ` and can return:
-- A message dict - injected as the model response (bypasses the upstream call)
-- `None` - the pattern is stripped but the normal pipeline continues
-
-### Notes
-
-- Only one prompt keyword is handled per request (the first match found).
-- The pattern `(<keyword>: <request>)` uses the first closing paren - avoid nested parens in the request text.
-- Keyword matching is case-insensitive.
-- If the handler raises, an error message is returned as the assistant response.
 
 ## Tricksets
 

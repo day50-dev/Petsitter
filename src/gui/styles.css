@@ -287,10 +287,10 @@ header .nav a:hover { background: #1a2a4d; }
 
 .model-entry {
   display: grid;
-  grid-template-columns: 90px 1fr 160px;
-  gap: 6px;
+  grid-template-columns: 100px 1fr 1fr;
+  gap: 8px;
   align-items: center;
-  padding: 6px 8px;
+  padding: 8px 10px;
   background: #1a1a33;
   border-radius: 4px;
 }

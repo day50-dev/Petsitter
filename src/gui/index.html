@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PetSitter Dashboard</title>
+<link rel="icon" type="image/png" href="/static/favicon.png">
 <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
@@ -69,7 +70,7 @@
 <!-- === MODELS TAB === -->
 <div class="tab-pane" id="tab-models">
 <div class="card">
-<div class="card-title"><h2>Models</h2><span style="font-size:11px;color:#4a6572">Required by loaded tricks</span></div>
+<div class="card-title"><h2>Models</h2></div>
 <div class="models-list" id="model-list"><div class="loader">Loading...</div></div>
 </div>
 </div>
@@ -349,11 +350,10 @@ async function addTrickset() {
 async function fetchModels() {
   try {
     const d = await fetchJSON('/api/models');
-    const required = d.required_keys || [];
     const configured = d.configured_models || {};
-    let keys = ['default', ...required.filter(k => k !== 'default')];
+    const keys = Object.keys(configured).sort();
     const el = document.getElementById('model-list');
-    if (!keys.length) { el.innerHTML = '<div class="empty">No tricks loaded that need model keys</div>'; return; }
+    if (!keys.length) { el.innerHTML = '<div class="empty">No models configured</div>'; return; }
     el.innerHTML = keys.map(k => {
       const m = configured[k] || {};
       const urlId = 'mu-' + k.replace(/[^a-zA-Z0-9]/g, '_');

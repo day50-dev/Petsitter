@@ -166,11 +166,9 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
     # ----- model config API endpoints -----
 
     async def gui_models(request: Request) -> Response:
-        required_keys: set[str] = set()
-        for t in handler.tricks:
-            required_keys.update(t.required_models)
+        from src.trick import _modelset
+        all_keys = sorted(set(_modelset.keys()) | {"default"})
         configured: dict[str, dict[str, str]] = {}
-        all_keys = sorted(required_keys | {"default"})
         for k in all_keys:
             try:
                 configured[k] = get_model_config(k)
@@ -180,7 +178,6 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
             "model_url": handler.model_url,
             "model_name": handler.model_name or "",
             "api_key": bool(api_key),
-            "required_keys": sorted(required_keys),
             "configured_models": configured,
         })
     app.add_route("/api/models", gui_models, methods=["GET"])

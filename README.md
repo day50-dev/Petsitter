@@ -30,7 +30,7 @@ You can also edit tricks, reorder them, disable, add new ones, and filter them t
 *Petsitter* is part of the [DAY50](https://github.com/day50-dev/) suite of open-source tools for local AI workflows and constructing better agents.
 
 - **No model changes required** - Works with any OpenAI-compatible endpoint
-- **Pluggable architecture** - Write your own tricks in Python
+- **Pluggable architecture** - Write your own tricks in Python. (Skills are included in `.agents`)
 - **Transparent to your app** - Point your existing code at petsitter instead of the model
 - **Mix and match** - Combine multiple tricks for compound effects
 

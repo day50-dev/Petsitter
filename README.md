@@ -70,7 +70,21 @@ Now point your AI applications to `http://localhost:8080/v1`.
 | `--listen` | `-l` | Host:port to listen on (default: `localhost:8080`) |
 
 ## Creating Custom Tricks
-<img alt="Petsitter_Intelligent_Proxy_-_Slide_4" src="https://github.com/user-attachments/assets/28e21d4e-01a8-4b03-83ac-d04354c7cd3a" />
+```mermaid
+flowchart TD
+  A[Client POST] --> B
+  A -.-> K[Prompt keyword scan]
+  subgraph config[Reorderable via config]
+    B[Trickset match] --> C[Keyword activate]
+    C --> D[System prompt]
+    D --> E[Pre-hook]
+  end
+  E --> L[LLM call]
+  L --> F[Post-hook]
+  F --> G[Capabilities]
+  G --> Z[Client response]
+  K -.-> Z
+```
 
 The `Trick` class has four hooks you can implement. Each hook is optional - only implement what you need.
 
@@ -259,7 +273,7 @@ Example `modelset.json`:
 }
 ```
 
-#### Kennel (example)
+#### Kennel
 
 [tricks/kennel.py](tricks/kennel.py) is a reference implementation of the pattern above. It routes cognitive subtasks to three specialized models running in parallel - a **thinker** for chain-of-thought, a **tool-caller** for deciding which tools to invoke, and an **emitter** for generating the final response.
 

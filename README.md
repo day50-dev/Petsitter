@@ -38,7 +38,7 @@ You can also edit tricks, reorder them, disable, add new ones, and filter them t
 
 ## Quick Start
 
-The quickest way is a simple
+Quickest way:
 
 ```bash
 $ uvx petsitter

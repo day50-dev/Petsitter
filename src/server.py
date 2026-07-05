@@ -267,10 +267,12 @@ def _get_version() -> str:
     except Exception:
         pass
     try:
-        return subprocess.run(
+        r = subprocess.run(
             ["git", "describe", "--tags", "--dirty", "--always"],
             capture_output=True, text=True, timeout=5,
-        ).stdout.strip()
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.strip()
     except Exception:
         pass
     try:

@@ -23,7 +23,7 @@ Petsitter intercepts every request/response pair and runs it through a pipeline 
 
 A trick can be as simple as appending a sentence to the system prompt, or as involved as routing subtasks to three different models in parallel. There's a GUI at `/` for loading/unloading tricks, editing trickset filters, browsing logs, and pointing at different models at runtime.
 
-You can also edit tricks, reorder them, disable, add new ones, and filter them through a built-in dashboard:
+You can also edit tricks, reorder them, disable, add new ones, and filter them:
 <img alt="2026-07-04_15-13" src="https://github.com/user-attachments/assets/c623f29a-8724-4fdb-bc6d-a76c3022183a" />
 
 

@@ -10,6 +10,7 @@ You install it, point it at a model, load a few example tricks, and suddenly thi
 The built-in tricks are starting points. Tweak them, combine them, or use them as a reference to build something entirely different. Petsitter isn't a turnkey product; it's a kit.
 
 ## How It Works
+<img alt="Petsitter_Intelligent_Proxy_-_Slide_2" src="https://github.com/user-attachments/assets/666ad974-d901-47ff-a47d-f91ed3a7931e" />
 
 Petsitter intercepts every request/response pair and runs it through a pipeline of hooks. Each trick picks which hooks it needs:
 
@@ -65,6 +66,106 @@ Now point your AI applications to `http://localhost:8080/v1`.
 | `--trick-config` | `-tc` | Path to a trickset JSON file (can be repeated) |
 | `--model-config` | `-mc` |  Path to a model config JSON file (MAS URIs for multi-model tricks) |
 | `--listen` | `-l` | Host:port to listen on (default: `localhost:8080`) |
+
+## Creating Custom Tricks
+<img alt="Petsitter_Intelligent_Proxy_-_Slide_4" src="https://github.com/user-attachments/assets/d7cbf498-b713-4bb8-8593-ed0918048a8f" />
+
+The `Trick` class has four hooks you can implement. Each hook is optional - only implement what you need.
+
+### `system_prompt(to_add: str) -> str`
+
+**When:** Called once per request, before any messages are sent to the model.
+
+**Purpose:** Append instructions to the system prompt. This is how you "prime" the model to behave a certain way.
+
+**Example:**
+```python
+def system_prompt(self, to_add: str) -> str:
+    return "IMPORTANT: Respond only in valid JSON. No markdown, no explanations."
+```
+
+### `pre_hook(context: list, params: dict) -> list`
+
+**When:** Called after the system prompt is set, before the model receives the messages.
+
+**Purpose:** Modify the conversation context. You can inject tool definitions, add few-shot examples, or restructure messages.
+
+**Parameters:**
+- `context`: List of message dicts (`[{"role": "user", "content": "..."}]`)
+- `params`: Request parameters including `tools`, `temperature`, etc.
+
+**Example:**
+```python
+def pre_hook(self, context: list, params: dict) -> list:
+    if "tools" in params:
+        tools_json = json.dumps(params["tools"])
+        context[0]["content"] += f"\n\nAvailable tools: {tools_json}"
+    return context
+```
+
+### `post_hook(context: list) -> list`
+
+**When:** Called after the model responds, before the response goes back to your application.
+
+**Purpose:** Validate, transform, or retry. This is where you can:
+- Parse the response and convert it to a different format
+- Detect when the model failed and call it again with feedback
+- Extract tool calls from natural language
+
+**Example (JSON validation with retry):**
+```python
+def post_hook(self, context: list) -> list:
+    attempts = 3
+    while attempts > 0:
+        try:
+            json.loads(context[-1]["content"])
+            break
+        except json.JSONDecodeError:
+            attempts -= 1
+            if attempts == 0:
+                break
+            context = callmodel(context, "That wasn't valid JSON. Try again.")
+    return context
+```
+
+**Example (Tool call detection):**
+```python
+def post_hook(self, context: list) -> list:
+    content = context[-1]["content"]
+    if self._looks_like_tool_call(content):
+        context[-1]["tool_calls"] = [self._parse_tool_call(content)]
+        context[-1]["content"] = None
+    return context
+```
+
+### `info(capabilities: dict) -> dict`
+
+**When:** Called when building the response to your application.
+
+**Purpose:** Declare what capabilities this trick provides. Some frameworks check for capabilities before using certain features.
+
+**Example:**
+```python
+def info(self, capabilities: dict) -> dict:
+    capabilities["json_mode"] = True
+    capabilities["tools_support"] = True
+    return capabilities
+```
+
+
+### Keyword-activated
+
+Set `keywords` on your trick class to activate only when the user includes that word in their message - the keyword is stripped before the model sees it. See [`tricks/multiround.py`](tricks/multiround.py) for a working example.
+
+```bash
+# Trick fires when "multiround" is present
+curl http://localhost:8080/v1/chat/completions \
+  -d '{"messages":[{"role":"user","content":"multiround explain the CAP theorem"}]}'
+
+# Trick does nothing without the keyword
+curl http://localhost:8080/v1/chat/completions \
+  -d '{"messages":[{"role":"user","content":"explain the CAP theorem"}]}'
+```
 
 ## Example Tricks
 
@@ -331,104 +432,6 @@ petsitter -mc modelset-example.json -t tricks/kennel.py -l localhost:8080
 If `-u`/`--url` is also given, it overrides the `"default"` from the model config.
 
 
-## Creating Custom Tricks
-
-The `Trick` class has four hooks you can implement. Each hook is optional - only implement what you need.
-
-### `system_prompt(to_add: str) -> str`
-
-**When:** Called once per request, before any messages are sent to the model.
-
-**Purpose:** Append instructions to the system prompt. This is how you "prime" the model to behave a certain way.
-
-**Example:**
-```python
-def system_prompt(self, to_add: str) -> str:
-    return "IMPORTANT: Respond only in valid JSON. No markdown, no explanations."
-```
-
-### `pre_hook(context: list, params: dict) -> list`
-
-**When:** Called after the system prompt is set, before the model receives the messages.
-
-**Purpose:** Modify the conversation context. You can inject tool definitions, add few-shot examples, or restructure messages.
-
-**Parameters:**
-- `context`: List of message dicts (`[{"role": "user", "content": "..."}]`)
-- `params`: Request parameters including `tools`, `temperature`, etc.
-
-**Example:**
-```python
-def pre_hook(self, context: list, params: dict) -> list:
-    if "tools" in params:
-        tools_json = json.dumps(params["tools"])
-        context[0]["content"] += f"\n\nAvailable tools: {tools_json}"
-    return context
-```
-
-### `post_hook(context: list) -> list`
-
-**When:** Called after the model responds, before the response goes back to your application.
-
-**Purpose:** Validate, transform, or retry. This is where you can:
-- Parse the response and convert it to a different format
-- Detect when the model failed and call it again with feedback
-- Extract tool calls from natural language
-
-**Example (JSON validation with retry):**
-```python
-def post_hook(self, context: list) -> list:
-    attempts = 3
-    while attempts > 0:
-        try:
-            json.loads(context[-1]["content"])
-            break
-        except json.JSONDecodeError:
-            attempts -= 1
-            if attempts == 0:
-                break
-            context = callmodel(context, "That wasn't valid JSON. Try again.")
-    return context
-```
-
-**Example (Tool call detection):**
-```python
-def post_hook(self, context: list) -> list:
-    content = context[-1]["content"]
-    if self._looks_like_tool_call(content):
-        context[-1]["tool_calls"] = [self._parse_tool_call(content)]
-        context[-1]["content"] = None
-    return context
-```
-
-### `info(capabilities: dict) -> dict`
-
-**When:** Called when building the response to your application.
-
-**Purpose:** Declare what capabilities this trick provides. Some frameworks check for capabilities before using certain features.
-
-**Example:**
-```python
-def info(self, capabilities: dict) -> dict:
-    capabilities["json_mode"] = True
-    capabilities["tools_support"] = True
-    return capabilities
-```
-
-
-### Keyword-activated
-
-Set `keywords` on your trick class to activate only when the user includes that word in their message - the keyword is stripped before the model sees it. See [`tricks/multiround.py`](tricks/multiround.py) for a working example.
-
-```bash
-# Trick fires when "multiround" is present
-curl http://localhost:8080/v1/chat/completions \
-  -d '{"messages":[{"role":"user","content":"multiround explain the CAP theorem"}]}'
-
-# Trick does nothing without the keyword
-curl http://localhost:8080/v1/chat/completions \
-  -d '{"messages":[{"role":"user","content":"explain the CAP theorem"}]}'
-```
 
 ## Failure Modes
 

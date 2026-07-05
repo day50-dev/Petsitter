@@ -86,7 +86,7 @@ flowchart TD
   K -.-> Z
 ```
 
-The `Trick` class has four hooks you can implement. Each hook is optional.
+The `Trick` class has four optional hooks and optional keyword activation:
 
 ### `system_prompt(to_add: str) -> str`
 

@@ -117,28 +117,33 @@ class ProxyHandler:
         for msg in reversed(modified):
             if msg.get("role") == "user" and isinstance(msg.get("content"), str):
                 content = msg["content"]
-                for keyword, trick in registry.items():
-                    pattern = re.compile(
-                        r'\(' + re.escape(keyword) + r':\s*(.*?)\)',
-                        re.IGNORECASE | re.DOTALL,
-                    )
-                    match = pattern.search(content)
-                    if match:
-                        request_text = match.group(1).strip()
-                        content = pattern.sub("", content).strip()
-                        content = re.sub(r' +', " ", content).strip()
-                        msg["content"] = content
-                        try:
-                            response = trick.handle_prompt_keyword(request_text)
-                        except Exception as e:
-                            logger.exception(f"prompt_keyword handler failed: {e}")
-                            response = {
-                                "role": "assistant",
-                                "content": f"Error handling prompt keyword: {e}",
-                            }
-                        if isinstance(response, dict):
-                            return modified, response
-                        return modified, None
+                combined = "|".join(re.escape(k) for k in registry)
+                pattern = re.compile(
+                    r'\(' + r'(?:' + combined + r')' + r':\s*(.*?)\)',
+                    re.IGNORECASE | re.DOTALL,
+                )
+                matches = list(pattern.finditer(content))
+                if not matches:
+                    break
+                content = pattern.sub("", content).strip()
+                content = re.sub(r' +', " ", content).strip()
+                msg["content"] = content
+                for m in matches:
+                    keyword = m.group(0).split(":", 1)[0].lstrip("(").strip().lower()
+                    request_text = m.group(1).strip()
+                    trick = registry.get(keyword)
+                    if not trick:
+                        continue
+                    try:
+                        response = trick.handle_prompt_keyword(request_text)
+                    except Exception as e:
+                        logger.exception(f"prompt_keyword handler failed: {e}")
+                        response = {
+                            "role": "assistant",
+                            "content": f"Error handling prompt keyword: {e}",
+                        }
+                    if isinstance(response, dict):
+                        return modified, response
                 break
 
         return messages, None

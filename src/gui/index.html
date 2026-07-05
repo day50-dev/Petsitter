@@ -381,7 +381,7 @@ function startLogStream() {
   let pending = 0;
   logEventSource = new EventSource(url);
   logEventSource.onmessage = function(e) {
-    if (e.data && e.lastEventId === undefined && e.data.startsWith('{')) {
+    if (e.data && e.data.startsWith('{')) {
       try {
         const entry = JSON.parse(e.data);
         const atBottom = viewer.scrollHeight - viewer.scrollTop - viewer.clientHeight < 40;

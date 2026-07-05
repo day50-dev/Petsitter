@@ -367,6 +367,24 @@ header .nav a:hover { background: #1a2a4d; }
 }
 
 .log-controls input[type=checkbox] { accent-color: #5a8ab5; }
+.log-controls select {
+  background: #12122a;
+  color: #c8d6e5;
+  border: 1px solid #1e2a3a;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.log-controls select:focus {
+  outline: none;
+  border-color: #5a8ab5;
+}
+.log-controls select option {
+  background: #12122a;
+  color: #c8d6e5;
+}
 
 .log-viewer {
   background: #0a0a15;

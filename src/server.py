@@ -142,8 +142,7 @@ def create_app(
             yield "data: [DONE]\n\n"
         except Exception as e:
             import traceback
-            click.echo(f"ERROR in stream_chat_completions: {e}")
-            click.echo(traceback.format_exc())
+            logging.getLogger("petsitter").error(f"Error in stream_chat_completions: {e}\n{traceback.format_exc()}")
             yield f"data: {json.dumps({'error': {'message': str(e), 'type': 'proxy_error'}})}\n\n"
 
     async def chat_completions(request: Request) -> Response:
@@ -165,8 +164,7 @@ def create_app(
             return JSONResponse({"error": str(e), "type": "setup_required"}, status_code=503)
         except Exception as e:
             import traceback
-            click.echo(f"ERROR in chat_completions: {e}")
-            click.echo(traceback.format_exc())
+            logging.getLogger("petsitter").error(f"Error in chat_completions: {e}\n{traceback.format_exc()}")
             return JSONResponse(
                 {"error": str(e), "type": "proxy_error"},
                 status_code=500,
@@ -181,8 +179,7 @@ def create_app(
             return JSONResponse({"error": str(e), "type": "setup_required"}, status_code=503)
         except Exception as e:
             import traceback
-            click.echo(f"ERROR in models: {e}")
-            click.echo(traceback.format_exc())
+            logging.getLogger("petsitter").error(f"Error in models: {e}\n{traceback.format_exc()}")
             return JSONResponse({"error": str(e), "type": "proxy_error"}, status_code=500)
     app.add_route("/v1/models", models, methods=["GET"])
 

@@ -28,12 +28,15 @@ def _save_full_config(handler, api_key):
     if not _config_path:
         return
     modelset = {}
-    for key in ("default", "thinker", "toolcall", "think", "tool_caller"):
+    from src.trick import _modelset
+    for key in set(_modelset.keys()) | {"default"}:
         try:
             cfg = get_model_config(key)
             modelset[key] = f"{cfg['model_url']}#m={cfg['model_name']}"
         except KeyError:
             pass
+    if "default" not in modelset:
+        modelset["default"] = f"{handler.model_url}#m={handler.model_name or ''}"
     config = {
         "model_url": handler.model_url,
         "model_name": handler.model_name or "",
@@ -163,20 +166,23 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
     # ----- model config API endpoints -----
 
     async def gui_models(request: Request) -> Response:
-        model_url = handler.model_url
-        model_name = handler.model_name or ""
-        info = {
-            "model_url": model_url,
-            "model_name": model_name,
-            "api_key": bool(api_key),
-            "configured_models": {},
-        }
-        for key in ("default", "thinker", "toolcall", "think", "tool_caller"):
+        required_keys: set[str] = set()
+        for t in handler.tricks:
+            required_keys.update(t.required_models)
+        configured: dict[str, dict[str, str]] = {}
+        all_keys = sorted(required_keys | {"default"})
+        for k in all_keys:
             try:
-                info["configured_models"][key] = get_model_config(key)
+                configured[k] = get_model_config(k)
             except KeyError:
-                pass
-        return JSONResponse(info)
+                configured[k] = {"model_url": "", "model_name": ""}
+        return JSONResponse({
+            "model_url": handler.model_url,
+            "model_name": handler.model_name or "",
+            "api_key": bool(api_key),
+            "required_keys": sorted(required_keys),
+            "configured_models": configured,
+        })
     app.add_route("/api/models", gui_models, methods=["GET"])
 
     async def gui_models_update(request: Request) -> Response:
@@ -187,27 +193,15 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
             handler.model_name = data["model_name"]
         if "api_key" in data:
             handler.api_key = data["api_key"]
-        if "add_model" in data:
-            key = data["add_model"].get("key")
-            uri = data["add_model"].get("uri")
-            if key and uri:
-                url, name = parse_mas_uri(uri)
-                update_model_config(key, url, name)
-        if "update_model" in data:
-            um = data["update_model"]
-            key = um.get("key")
-            field = um.get("field")
-            value = um.get("value")
-            if key and field and value:
-                try:
-                    existing = get_model_config(key)
-                except KeyError:
-                    existing = {"model_url": "", "model_name": ""}
-                if field == "url":
-                    existing["model_url"] = value
-                elif field == "name":
-                    existing["model_name"] = value
-                update_model_config(key, existing["model_url"], existing["model_name"])
+        if "set_model" in data:
+            sm = data["set_model"]
+            key = sm.get("key", "")
+            url = sm.get("model_url", "").rstrip("/")
+            name = sm.get("model_name", "")
+            if key == "default":
+                handler.model_url = url
+                handler.model_name = name
+            update_model_config(key, url, name)
         if "remove_model" in data:
             remove_model_config(data["remove_model"])
         _save_full_config(handler, api_key)

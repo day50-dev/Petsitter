@@ -283,21 +283,21 @@ header .nav a:hover { background: #1a2a4d; }
 .custom-path input::placeholder { color: #3a4a5a; }
 
 /* models */
-.models-grid { display: grid; gap: 8px; }
+.models-list { display: grid; gap: 6px; }
 
 .model-entry {
   display: grid;
-  grid-template-columns: 100px 1fr 1fr auto;
-  gap: 8px;
+  grid-template-columns: 90px 1fr 160px;
+  gap: 6px;
   align-items: center;
-  padding: 8px 10px;
+  padding: 6px 8px;
   background: #1a1a33;
   border-radius: 4px;
 }
 
 .model-entry .key {
   font-weight: 500;
-  color: #e0e0e0;
+  color: #8ab4ff;
   font-size: 13px;
   font-family: monospace;
 }
@@ -306,34 +306,7 @@ header .nav a:hover { background: #1a2a4d; }
   background: #0f0f1a;
   border: 1px solid #1e2a3a;
   border-radius: 3px;
-  padding: 5px 8px;
-  color: #c8d6e5;
-  font-size: 12px;
-  font-family: monospace;
-}
-
-.model-entry .rm {
-  color: #5a253a;
-  cursor: pointer;
-  font-size: 16px;
-  padding: 2px 6px;
-}
-
-.model-entry .rm:hover { color: #ff6b8a; }
-
-.model-add {
-  display: flex;
-  gap: 6px;
-  margin-top: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.model-add input {
-  background: #0f0f1a;
-  border: 1px solid #1e2a3a;
-  border-radius: 3px;
-  padding: 5px 8px;
+  padding: 4px 7px;
   color: #c8d6e5;
   font-size: 12px;
   font-family: monospace;

@@ -69,22 +69,8 @@
 <!-- === MODELS TAB === -->
 <div class="tab-pane" id="tab-models">
 <div class="card">
-<h2>Default Model</h2>
-<div class="model-entry" style="grid-template-columns:1fr 1fr auto">
-<input type="text" id="model-url" placeholder="http://localhost:11434" style="font-size:13px">
-<input type="text" id="model-name" placeholder="Model name (optional)" style="font-size:13px">
-<button class="btn btn-primary btn-sm" onclick="updateDefaultModel()">Update</button>
-</div>
-</div>
-
-<div class="card">
-<div class="card-title"><h2>Configured Models</h2><span style="font-size:11px;color:#4a6572">MAS URIs for multi-model tricks</span></div>
-<div class="models-grid" id="model-list"><div class="loader">Loading...</div></div>
-<div class="model-add">
-<input type="text" id="new-model-key" placeholder="key (e.g. thinker)" style="width:100px">
-<input type="text" id="new-model-uri" placeholder="http://host#m=model-name" style="flex:1">
-<button class="btn btn-success btn-sm" onclick="addModelEntry()">Add</button>
-</div>
+<div class="card-title"><h2>Models</h2><span style="font-size:11px;color:#4a6572">Required by loaded tricks</span></div>
+<div class="models-list" id="model-list"><div class="loader">Loading...</div></div>
 </div>
 </div>
 
@@ -128,7 +114,13 @@ function escapeHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&l
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'tab-'+name));
+  location.hash = name;
 }
+
+window.addEventListener('hashchange', function() {
+  var tab = location.hash.replace('#','') || 'tricks';
+  if (document.querySelector('.tab[data-tab="' + tab + '"]')) switchTab(tab);
+});
 
 // ---- info ----
 async function fetchInfo() {
@@ -236,7 +228,7 @@ async function loadTrick(path) {
   try {
     const d = await fetchJSON('/api/tricks/load', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path, trickset: selectedTrickset}) });
     showToast('Loaded: ' + d.name);
-    fetchTricks(); fetchAvailable();
+    fetchTricks(); fetchAvailable(); fetchModels();
   } catch(e) { showToast(e.message, true); }
 }
 
@@ -357,54 +349,24 @@ async function addTrickset() {
 async function fetchModels() {
   try {
     const d = await fetchJSON('/api/models');
-    document.getElementById('model-url').value = d.model_url || '';
-    document.getElementById('model-name').value = d.model_name || '';
-
-    const keys = Object.keys(d.configured_models || {});
+    const required = d.required_keys || [];
+    const configured = d.configured_models || {};
+    let keys = ['default', ...required.filter(k => k !== 'default')];
     const el = document.getElementById('model-list');
-    if (!keys.length) { el.innerHTML = '<div class="empty">No models configured</div>'; return; }
+    if (!keys.length) { el.innerHTML = '<div class="empty">No tricks loaded that need model keys</div>'; return; }
     el.innerHTML = keys.map(k => {
-      const m = d.configured_models[k];
-      return '<div class="model-entry"><span class="key">' + escapeHtml(k) + '</span><input type="text" value="' + escapeHtml(m.model_url) + '" onchange="updateModelKey(\'' + k + '\',\'url\',this.value)"><input type="text" value="' + escapeHtml(m.model_name) + '" onchange="updateModelKey(\'' + k + '\',\'name\',this.value)"><span class="rm" onclick="removeModelKey(\'' + k + '\')">&times;</span></div>';
+      const m = configured[k] || {};
+      const urlId = 'mu-' + k.replace(/[^a-zA-Z0-9]/g, '_');
+      const nameId = 'mn-' + k.replace(/[^a-zA-Z0-9]/g, '_');
+      return '<div class="model-entry"><span class="key">' + escapeHtml(k) + '</span><input id="' + urlId + '" type="text" value="' + escapeHtml(m.model_url || '') + '" onchange="setModel(\'' + k + '\',this.value,document.getElementById(\'' + nameId + '\').value)" placeholder="http://..."><input id="' + nameId + '" type="text" value="' + escapeHtml(m.model_name || '') + '" onchange="setModel(\'' + k + '\',document.getElementById(\'' + urlId + '\').value,this.value)" placeholder="model-name"></div>';
     }).join('');
   } catch(e) { document.getElementById('model-list').innerHTML = '<div class="loader">Error loading models</div>'; }
 }
 
-async function updateDefaultModel() {
+async function setModel(key, model_url, model_name) {
   try {
-    await fetchJSON('/api/models', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
-      model_url: document.getElementById('model-url').value,
-      model_name: document.getElementById('model-name').value,
-    })});
-    showToast('Default model updated');
+    await fetchJSON('/api/models', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({set_model: {key, model_url, model_name}})});
     fetchInfo();
-  } catch(e) { showToast(e.message, true); }
-}
-
-async function addModelEntry() {
-  const key = document.getElementById('new-model-key').value.trim();
-  const uri = document.getElementById('new-model-uri').value.trim();
-  if (!key || !uri) return;
-  try {
-    const d = await fetchJSON('/api/models', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({add_model: {key, uri}})});
-    showToast('Added: ' + key);
-    document.getElementById('new-model-key').value = '';
-    document.getElementById('new-model-uri').value = '';
-    fetchModels();
-  } catch(e) { showToast(e.message, true); }
-}
-
-async function updateModelKey(key, field, value) {
-  try {
-    await fetchJSON('/api/models', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({update_model: {key, field, value}})});
-  } catch(e) { showToast(e.message, true); }
-}
-
-async function removeModelKey(key) {
-  try {
-    await fetchJSON('/api/models', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({remove_model: key})});
-    showToast('Removed: ' + key);
-    fetchModels();
   } catch(e) { showToast(e.message, true); }
 }
 
@@ -451,6 +413,8 @@ function clearLogDisplay() {
 }
 
 // ---- init ----
+var initialTab = location.hash.replace('#','') || 'tricks';
+if (document.querySelector('.tab[data-tab="' + initialTab + '"]')) switchTab(initialTab);
 fetchInfo(); fetchTricksets(); fetchAvailable(); fetchModels();
 startLogStream();
 </script>

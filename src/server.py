@@ -109,7 +109,10 @@ def create_app(
     handler = ProxyHandler(model_url, model_name, api_key, tricksets=tricksets)
 
     global _log_capture
+    log_level = getattr(logging, os.getenv("LOGLEVEL", "INFO").upper(), logging.INFO)
+    logging.getLogger().setLevel(log_level)
     _log_capture = LogCaptureHandler()
+    _log_capture.setLevel(log_level)
     _log_capture.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
     logging.getLogger().addHandler(_log_capture)
 
@@ -261,8 +264,10 @@ def create_app(
 
 def _get_version() -> str:
     try:
-        return _pkg_version("petsitter")
-    except PackageNotFoundError:
+        import tomllib
+        pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+        return tomllib.loads(pyproject.read_text()).get("project", {}).get("version", "0.0.0")
+    except Exception:
         pass
     try:
         return subprocess.run(
@@ -270,6 +275,10 @@ def _get_version() -> str:
             capture_output=True, text=True, timeout=5,
         ).stdout.strip()
     except Exception:
+        pass
+    try:
+        return _pkg_version("petsitter")
+    except PackageNotFoundError:
         return "0.0.0"
 
 

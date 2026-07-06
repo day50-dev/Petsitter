@@ -168,6 +168,51 @@ def info(self, capabilities: dict) -> dict:
     return capabilities
 ```
 
+## Lifecycle Hooks
+
+Every trick can implement up to 4 lifecycle hooks that the framework calls automatically:
+
+### `install()`
+
+Called once when the trick is first added to a trickset. Use for one-time setup — clone repos, download files, create resources:
+
+```python
+def install(self):
+    self.cache_dir = Path("/tmp/my-trick-cache")
+    self.cache_dir.mkdir(parents=True, exist_ok=True)
+    download_model(self.cache_dir)
+```
+
+### `startup()`
+
+Called when the first concurrent request starts using this trick (the internal run counter goes 0→1). Use for per-session initialization — open connections, preload models:
+
+```python
+def startup(self):
+    self.session = httpx.Client()
+```
+
+### `shutdown()`
+
+Called when the last concurrent request finishes using this trick (run counter goes 1→0), or during server shutdown for all active tricks. Use for per-session cleanup — close connections, release resources:
+
+```python
+def shutdown(self):
+    self.session.close()
+```
+
+### `uninstall()`
+
+Called when the trick is removed from a trickset. Undo anything done during `install()`:
+
+```python
+def uninstall(self):
+    import shutil
+    shutil.rmtree(self.cache_dir, ignore_errors=True)
+```
+
+The startup/shutdown hooks use a reference counter so multiple concurrent requests to the same trick won't trigger repeated startup/shutdown calls — `startup()` fires once for the first request, and `shutdown()` fires when the last one finishes.
+
 ## Keywords 
 
 ### Activation
@@ -370,7 +415,7 @@ Tricksets live as JSON files in the `tricksets/` directory:
 
 ```json
 {
-  "schema": "0.5.0",
+  "schema": "0.7.0",
   "name": "my-trickset",
   "filters": {
     "X-Title": "opencode*",
@@ -379,9 +424,13 @@ Tricksets live as JSON files in the `tricksets/` directory:
   "tricks": [
     "tricks/json_mode.py",
     "tricks/tool_call.py"
-  ]
+  ],
+  "parameters": {},
+  "models": {}
 }
 ```
+
+The `parameters` field stores user-defined variables that tricks within the trickset can reference at runtime. The `models` field lets you override model routing for this trickset — each key is a model role and the value is a [MAS URI](https://day50.dev/mas.html) (same format as the global model config), letting different tricksets use different models for the same role. Manage both via the dashboard or the API.
 
 Each loaded trickset is also exposed as a model named `trickset/<name>` (e.g., `trickset/gemma4`). Selecting this model in a client bypasses the filter matching and runs that trickset's tricks directly on every request.
 

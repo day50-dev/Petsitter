@@ -9,5 +9,6 @@
     "tricks/json_mode.py",
     "tricks/tool_call.py",
     "tricks/code_validator.py"
-  ]
+  ],
+  "parameters": {}
 }

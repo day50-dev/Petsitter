@@ -251,6 +251,8 @@ def create_app(
         if "tricks" in data:
             ts.trick_paths = list(data["tricks"])
             ts.load_tricks()
+        if "parameters" in data:
+            ts.parameters = dict(data["parameters"])
         if ts.file_path:
             ts.save()
         return JSONResponse({"success": True})

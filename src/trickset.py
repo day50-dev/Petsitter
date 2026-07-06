@@ -82,18 +82,20 @@ class Trickset:
         schema = data.get("schema", "unknown")
         filters = data.get("filters", {"X-Title": "*", "Model": "*"})
         trick_paths = data.get("tricks", [])
-        ts = Trickset(name, schema, filters, trick_paths, file_path=str(p))
+        parameters = data.get("parameters", {})
+        ts = Trickset(name, schema, filters, trick_paths, file_path=str(p), parameters=parameters)
         ts.load_tricks()
         logger.info("Loaded trickset: %s (%d tricks)", name, len(ts.tricks))
         return ts
 
     @staticmethod
-    def from_legacy_tricks(name: str, tricks: list[Trick], trick_paths: list[str]) -> "Trickset":
+    def from_legacy_tricks(name: str, tricks: list[Trick], trick_paths: list[str], parameters: dict[str, Any] | None = None) -> "Trickset":
         ts = Trickset(
             name=name,
             schema=SCHEMA,
             filters={"X-Title": "*", "Model": "*"},
             trick_paths=trick_paths,
+            parameters=parameters,
         )
         ts.tricks = list(tricks)
         return ts

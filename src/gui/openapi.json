@@ -461,7 +461,8 @@
                       "filters": { "type": "object", "additionalProperties": { "type": "string" } },
                       "tricks": { "type": "array", "items": { "type": "string" } },
                       "file_path": { "type": "string", "nullable": true },
-                      "trick_names": { "type": "array", "items": { "type": "string" } }
+                      "trick_names": { "type": "array", "items": { "type": "string" } },
+                      "parameters": { "type": "object", "description": "User-defined variables for this trickset" }
                     }
                   }
                 }
@@ -635,7 +636,8 @@
                     "filters": { "type": "object" },
                     "tricks": { "type": "array", "items": { "type": "string" } },
                     "file_path": { "type": "string", "nullable": true },
-                    "trick_names": { "type": "array", "items": { "type": "string" } }
+                    "trick_names": { "type": "array", "items": { "type": "string" } },
+                    "parameters": { "type": "object", "description": "User-defined variables for this trickset" }
                   }
                 }
               }
@@ -667,7 +669,8 @@
                 "type": "object",
                 "properties": {
                   "filters": { "type": "object", "additionalProperties": { "type": "string" } },
-                  "tricks": { "type": "array", "items": { "type": "string" } }
+                  "tricks": { "type": "array", "items": { "type": "string" } },
+                  "parameters": { "type": "object", "description": "User-defined variables for this trickset" }
                 }
               }
             }

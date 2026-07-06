@@ -96,8 +96,9 @@ header .nav a:hover { background: #1a2a4d; }
   margin-bottom: 10px;
 }
 
-/* trickset bar */
-.ts-bar {
+/* trickset / model scope bar */
+.ts-bar,
+.ms-bar {
   padding: 0px 6px;
   margin-bottom: 14px;
 }

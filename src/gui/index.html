@@ -69,6 +69,9 @@
 
 <!-- === MODELS TAB === -->
 <div class="tab-pane" id="tab-models">
+<div class="ms-bar">
+<div class="ts-pills" id="ms-pills"></div>
+</div>
 <div class="card">
 <div class="card-title"><h2>Models</h2></div>
 <div class="models-list" id="model-list"><div class="loader">Loading...</div></div>
@@ -347,26 +350,88 @@ async function addTrickset() {
 }
 
 // ---- models ----
+let selectedModelScope = '_default';
+let _tsModels = {};
+
+function parseMasUri(uri) {
+  const hashIdx = uri.indexOf('#');
+  if (hashIdx === -1) return {url: uri, name: ''};
+  const url = uri.substring(0, hashIdx);
+  const frag = uri.substring(hashIdx + 1);
+  const params = {};
+  frag.split('&').forEach(p => { const eq = p.indexOf('='); if (eq > -1) params[p.substring(0, eq)] = decodeURIComponent(p.substring(eq + 1)); });
+  return {url, name: params.m || ''};
+}
+
+function buildMasUri(url, name) {
+  if (!name) return url;
+  return url + '#m=' + encodeURIComponent(name);
+}
+
 async function fetchModels() {
   try {
-    const d = await fetchJSON('/api/models');
-    const configured = d.configured_models || {};
-    const keys = Object.keys(configured).sort();
-    const el = document.getElementById('model-list');
-    if (!keys.length) { el.innerHTML = '<div class="empty">No models configured</div>'; return; }
-    el.innerHTML = keys.map(k => {
-      const m = configured[k] || {};
-      const urlId = 'mu-' + k.replace(/[^a-zA-Z0-9]/g, '_');
-      const nameId = 'mn-' + k.replace(/[^a-zA-Z0-9]/g, '_');
-      return '<div class="model-entry"><span class="key">' + escapeHtml(k) + '</span><input id="' + urlId + '" type="text" value="' + escapeHtml(m.model_url || '') + '" onchange="setModel(\'' + k + '\',this.value,document.getElementById(\'' + nameId + '\').value)" placeholder="http://..."><input id="' + nameId + '" type="text" value="' + escapeHtml(m.model_name || '') + '" onchange="setModel(\'' + k + '\',document.getElementById(\'' + urlId + '\').value,this.value)" placeholder="model-name"></div>';
-    }).join('');
+    const [modelsData, tricksets] = await Promise.all([
+      fetchJSON('/api/models'),
+      fetchJSON('/api/tricksets'),
+    ]);
+    const configured = modelsData.configured_models || {};
+    _tsModels = {};
+    tricksets.forEach(ts => _tsModels[ts.name] = ts.models || {});
+    const tsNames = tricksets.map(ts => ts.name);
+    const allScopes = ['_default', ...tsNames];
+    const pillsEl = document.getElementById('ms-pills');
+    pillsEl.innerHTML = allScopes.map(n =>
+      '<span class="pill' + (n === selectedModelScope ? ' active' : '') + '" data-name="' + escapeHtml(n) + '" onclick="switchModelScope(this.dataset.name)">' + escapeHtml(n) + '</span>'
+    ).join('');
+    renderModels(selectedModelScope, configured);
   } catch(e) { document.getElementById('model-list').innerHTML = '<div class="loader">Error loading models</div>'; }
 }
 
-async function setModel(key, model_url, model_name) {
+function renderModels(scope, globalConfigured) {
+  const el = document.getElementById('model-list');
+  let models, prefix;
+  if (scope === '_default') {
+    models = globalConfigured;
+    prefix = '';
+  } else {
+    models = _tsModels[scope] || {};
+    prefix = scope;
+  }
+  const keys = Object.keys(models).sort();
+  if (!keys.length) {
+    el.innerHTML = '<div class="empty">No models configured' + (prefix ? ' for <strong>' + escapeHtml(scope) + '</strong>' : '') + '.</div>';
+    return;
+  }
+  el.innerHTML = keys.map(k => {
+    const raw = models[k];
+    const m = typeof raw === 'string' ? parseMasUri(raw) : (raw || {});
+    const safe = scope.replace(/[^a-zA-Z0-9]/g, '_') + '-' + k.replace(/[^a-zA-Z0-9]/g, '_');
+    const urlId = 'mu-' + safe;
+    const nameId = 'mn-' + safe;
+    return '<div class="model-entry"><span class="key">' + escapeHtml(k) + '</span><input id="' + urlId + '" type="text" value="' + escapeHtml(m.url || '') + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',this.value,document.getElementById(\'' + nameId + '\').value)" placeholder="http://..."><input id="' + nameId + '" type="text" value="' + escapeHtml(m.name || '') + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',document.getElementById(\'' + urlId + '\').value,this.value)" placeholder="model-name"></div>';
+  }).join('');
+}
+
+function switchModelScope(name) {
+  selectedModelScope = name;
+  fetchModels();
+}
+
+async function setModelForScope(scope, key, model_url, model_name) {
   try {
-    await fetchJSON('/api/models', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({set_model: {key, model_url, model_name}})});
-    fetchInfo();
+    if (scope === '_default') {
+      await fetchJSON('/api/models', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({set_model: {key, model_url, model_name}})});
+      fetchInfo();
+    } else {
+      const ts = _tsModels[scope] || {};
+      const updated = {...ts, [key]: buildMasUri(model_url, model_name)};
+      await fetchJSON('/api/tricksets/' + encodeURIComponent(scope), {
+        method:'PUT',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({models: updated})
+      });
+      _tsModels[scope] = updated;
+    }
   } catch(e) { showToast(e.message, true); }
 }
 

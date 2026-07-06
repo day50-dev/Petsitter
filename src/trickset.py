@@ -22,12 +22,14 @@ class Trickset:
         filters: dict[str, str],
         trick_paths: list[str],
         file_path: str | None = None,
+        parameters: dict[str, Any] | None = None,
     ):
         self.name = name
         self.schema = schema
         self.filters = filters
         self.trick_paths = list(trick_paths)
         self.file_path = file_path
+        self.parameters: dict[str, Any] = parameters or {}
         self.tricks: list[Trick] = []
 
     def matches(self, x_title: str, model: str) -> bool:
@@ -51,6 +53,7 @@ class Trickset:
             "filters": dict(self.filters),
             "tricks": list(self.trick_paths),
             "file_path": self.file_path,
+            "parameters": dict(self.parameters),
         }
 
     def to_file_dict(self) -> dict:
@@ -59,6 +62,7 @@ class Trickset:
             "name": self.name,
             "filters": dict(self.filters),
             "tricks": list(self.trick_paths),
+            "parameters": dict(self.parameters),
         }
 
     def save(self) -> None:

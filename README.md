@@ -210,7 +210,7 @@ The method receives the text after `mycommand: ` and can return:
 ### Notes
 
 - Execution goes in order of the prompt reference. Unrecognized prompt keywords are passed through and surface as a non-critical error in the response along with the rest of the response
-- The pattern `(<keyword>: <request>)` uses the first closing paren - avoid nested parens in the request text.
+- The pattern `(<keyword>: <request>)` properly handles nested parentheses by tracking a depth counter.
 - Keyword matching is case-insensitive.
 - If the handler raises, an error message is returned as the assistant response.
 

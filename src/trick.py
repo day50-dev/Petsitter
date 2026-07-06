@@ -151,6 +151,12 @@ class Trick:
     Subclasses should set:
         __brief__: Short one-line description shown in the dashboard.
         __display_name__: Human-readable name (defaults to class name).
+
+    Lifecycle hooks (called automatically by the framework):
+        install()    — when the trick is first added to a trickset
+        startup()    — when the first concurrent request uses this trick (0→1)
+        shutdown()   — when the last concurrent request finishes (1→0)
+        uninstall()  — when the trick is removed from a trickset
     """
 
     keywords: list[str] = []
@@ -158,6 +164,28 @@ class Trick:
     required_models: list[str] = ["default"]
     __brief__: str = ""
     __display_name__: str = ""
+
+    def install(self) -> None:
+        """Called when the trick is first added to a trickset.
+        Use for one-time setup: clone repos, download files, create resources.
+        """
+
+    def startup(self) -> None:
+        """Called when the first concurrent request starts using this trick
+        (run counter goes 0→1). Use for per-session initialization like
+        opening connections or preloading models.
+        """
+
+    def shutdown(self) -> None:
+        """Called when the last concurrent request finishes using this trick
+        (run counter goes 1→0). Use for per-session cleanup like closing
+        connections. Also called during server shutdown for all active tricks.
+        """
+
+    def uninstall(self) -> None:
+        """Called when the trick is removed from a trickset.
+        Undo anything done during install().
+        """
 
     def handle_prompt_keyword(self, request: str) -> dict | None:
         """Handle a prompt keyword detected in the user message.

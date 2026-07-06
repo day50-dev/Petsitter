@@ -34,6 +34,7 @@ class ProxyHandler:
             ts.tricks = list(tricks)
             self.tricksets["_default"] = ts
         self._enabled: dict[str, bool] = {}
+        self._run_counts: dict[str, int] = {}
         configure(self.model_url, self.model_name or "", self.api_key)
 
     @property
@@ -252,9 +253,34 @@ class ProxyHandler:
                 self.tricksets["_default"] = ts
         trick = ts.add_trick(path)
         self._enabled[type(trick).__name__] = True
+        try:
+            trick.install()
+        except Exception:
+            logger.exception("Trick %s install failed", type(trick).__name__)
         return trick
 
     def remove_trick(self, class_name: str, ts_name: str | None = None) -> bool:
+        def _find_trick() -> Trick | None:
+            if ts_name:
+                ts = self.tricksets.get(ts_name)
+                if not ts:
+                    return None
+                for t in ts.tricks:
+                    if type(t).__name__ == class_name:
+                        return t
+                return None
+            for t in self.tricks:
+                if type(t).__name__ == class_name:
+                    return t
+            return None
+
+        trick = _find_trick()
+        if trick is not None:
+            try:
+                trick.uninstall()
+            except Exception:
+                logger.exception("Trick %s uninstall failed", class_name)
+
         if ts_name:
             ts = self.tricksets.get(ts_name)
             if not ts:
@@ -304,6 +330,44 @@ class ProxyHandler:
                 return True
         return False
 
+    # --- lifecycle management ---
+
+    def _start_tricks(self, tricks: list[Trick]) -> None:
+        for t in tricks:
+            name = type(t).__name__
+            cnt = self._run_counts.get(name, 0)
+            if cnt == 0:
+                try:
+                    t.startup()
+                except Exception:
+                    logger.exception("Trick %s startup failed", name)
+            self._run_counts[name] = cnt + 1
+
+    def _stop_tricks(self, tricks: list[Trick]) -> None:
+        for t in tricks:
+            name = type(t).__name__
+            cnt = self._run_counts.get(name, 0)
+            if cnt <= 0:
+                continue
+            if cnt == 1:
+                try:
+                    t.shutdown()
+                except Exception:
+                    logger.exception("Trick %s shutdown failed", name)
+            self._run_counts[name] = cnt - 1
+
+    def shutdown_all(self) -> None:
+        for name, cnt in list(self._run_counts.items()):
+            if cnt > 0:
+                for t in self.tricks:
+                    if type(t).__name__ == name:
+                        try:
+                            t.shutdown()
+                        except Exception:
+                            logger.exception("Trick %s shutdown failed", name)
+                        break
+                self._run_counts[name] = 0
+
     async def chat_completions(self, payload: dict, x_title: str = "") -> dict:
         default_cfg = get_model_config("default")
         upstream_url = default_cfg["model_url"]
@@ -338,68 +402,72 @@ class ProxyHandler:
             tricks = self._matching_tricks(x_title, model)
 
         tricks, messages = self._filter_tricks_by_keywords(tricks, messages)
+        self._start_tricks(tricks)
 
-        system_prompt = ""
-        if messages and messages[0].get("role") == "system":
-            system_prompt = messages[0].get("content", "")
-            messages = messages[1:]
+        try:
+            system_prompt = ""
+            if messages and messages[0].get("role") == "system":
+                system_prompt = messages[0].get("content", "")
+                messages = messages[1:]
 
-        new_system_prompt = self._apply_system_prompt_tricks(system_prompt, tricks)
-        if new_system_prompt:
-            messages = [{"role": "system", "content": new_system_prompt}] + messages
+            new_system_prompt = self._apply_system_prompt_tricks(system_prompt, tricks)
+            if new_system_prompt:
+                messages = [{"role": "system", "content": new_system_prompt}] + messages
 
-        messages = self._apply_pre_hooks(messages, payload, tricks)
+            messages = self._apply_pre_hooks(messages, payload, tricks)
 
-        upstream_model = default_cfg["model_name"] or "default"
-        upstream_payload = {
-            "model": upstream_model,
-            "messages": messages,
-        }
-        for key in ["temperature", "max_tokens"]:
-            if key in payload:
-                upstream_payload[key] = payload[key]
+            upstream_model = default_cfg["model_name"] or "default"
+            upstream_payload = {
+                "model": upstream_model,
+                "messages": messages,
+            }
+            for key in ["temperature", "max_tokens"]:
+                if key in payload:
+                    upstream_payload[key] = payload[key]
 
-        logger.info(f"Calling upstream model: {upstream_url}/v1/chat/completions")
-        logger.debug(f"Upstream payload: {json.dumps(upstream_payload, indent=2)}")
+            logger.info(f"Calling upstream model: {upstream_url}/v1/chat/completions")
+            logger.debug(f"Upstream payload: {json.dumps(upstream_payload, indent=2)}")
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{upstream_url}/v1/chat/completions",
-                json=upstream_payload,
-                headers=self._build_headers(),
-                timeout=120.0,
-            )
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{upstream_url}/v1/chat/completions",
+                    json=upstream_payload,
+                    headers=self._build_headers(),
+                    timeout=120.0,
+                )
 
-            logger.info(f"Upstream response status: {response.status_code}")
-            logger.debug(f"Upstream response headers: {dict(response.headers)}")
-            logger.debug(f"Upstream response body: {response.text[:500] if response.text else '(empty)'}")
+                logger.info(f"Upstream response status: {response.status_code}")
+                logger.debug(f"Upstream response headers: {dict(response.headers)}")
+                logger.debug(f"Upstream response body: {response.text[:500] if response.text else '(empty)'}")
 
-            response.raise_for_status()
+                response.raise_for_status()
 
-            if not response.content:
-                logger.error(f"Empty response from upstream. Status: {response.status_code}")
-                logger.error(f"Response headers: {dict(response.headers)}")
-                raise ValueError(f"Upstream returned empty response (status {response.status_code})")
+                if not response.content:
+                    logger.error(f"Empty response from upstream. Status: {response.status_code}")
+                    logger.error(f"Response headers: {dict(response.headers)}")
+                    raise ValueError(f"Upstream returned empty response (status {response.status_code})")
 
-            result = response.json()
+                result = response.json()
 
-        logger.debug(f"Upstream response: {json.dumps(result, indent=2)}")
+            logger.debug(f"Upstream response: {json.dumps(result, indent=2)}")
 
-        assistant_message = result["choices"][0]["message"]
-        context = messages + [assistant_message]
+            assistant_message = result["choices"][0]["message"]
+            context = messages + [assistant_message]
 
-        logger.debug(f"Context before post-hooks: {json.dumps(context, indent=2)}")
+            logger.debug(f"Context before post-hooks: {json.dumps(context, indent=2)}")
 
-        context = self._apply_post_hooks(context, tricks)
-        logger.debug(f"Context after post-hooks: {json.dumps(context, indent=2)}")
+            context = self._apply_post_hooks(context, tricks)
+            logger.debug(f"Context after post-hooks: {json.dumps(context, indent=2)}")
 
-        result["choices"][0]["message"] = context[-1]
+            result["choices"][0]["message"] = context[-1]
 
-        capabilities = self._merge_capabilities(tricks)
-        if capabilities:
-            result["capabilities"] = capabilities
+            capabilities = self._merge_capabilities(tricks)
+            if capabilities:
+                result["capabilities"] = capabilities
 
-        return result
+            return result
+        finally:
+            self._stop_tricks(tricks)
 
     async def models(self) -> dict:
         default_cfg = get_model_config("default")

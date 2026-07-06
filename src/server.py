@@ -1,6 +1,7 @@
 """HTTP server and CLI for petsitter."""
 
 import asyncio
+import atexit
 import json
 import logging
 import os
@@ -259,6 +260,8 @@ def create_app(
             ts.save()
         return JSONResponse({"success": True})
     app.add_route("/api/tricksets/{name}", update_trickset, methods=["PUT"])
+
+    atexit.register(handler.shutdown_all)
 
     return app
 

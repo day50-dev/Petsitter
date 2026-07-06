@@ -23,12 +23,13 @@ Petsitter intercepts every request/response pair and runs it through a pipeline 
 
 A trick can be as simple as appending a sentence to the system prompt, or as involved as routing subtasks to three different models in parallel. There's a GUI at `/` for loading/unloading tricks, editing trickset filters, browsing logs, and pointing at different models at runtime.
 
-You can also edit tricks, reorder them, disable, add new ones, and filter them through a built-in dashboard:
+You can also edit tricks, reorder them, disable, add new ones, and filter them:
 <img alt="2026-07-04_15-13" src="https://github.com/user-attachments/assets/c623f29a-8724-4fdb-bc6d-a76c3022183a" />
 
 
 *Petsitter* is part of the [DAY50](https://github.com/day50-dev/) suite of open-source tools for local AI workflows and constructing better agents.
 
+The core goals of Petsitter are:
 - **No model changes required** - Works with any OpenAI-compatible endpoint
 - **Pluggable architecture** - Write your own tricks in Python. (Skills are included in `.agents`)
 - **Transparent to your app** - Point your existing code at petsitter instead of the model
@@ -85,7 +86,7 @@ flowchart TD
   K -.-> Z
 ```
 
-The `Trick` class has four hooks you can implement. Each hook is optional.
+The `Trick` class has four optional hooks and optional keyword activation:
 
 ### `system_prompt(to_add: str) -> str`
 
@@ -209,7 +210,7 @@ The method receives the text after `mycommand: ` and can return:
 ### Notes
 
 - Execution goes in order of the prompt reference. Unrecognized prompt keywords are passed through and surface as a non-critical error in the response along with the rest of the response
-- The pattern `(<keyword>: <request>)` uses the first closing paren - avoid nested parens in the request text.
+- The pattern `(<keyword>: <request>)` properly handles nested parentheses by tracking a depth counter.
 - Keyword matching is case-insensitive.
 - If the handler raises, an error message is returned as the assistant response.
 
@@ -223,7 +224,7 @@ The method receives the text after `mycommand: ` and can return:
 ### Capability Injection
 
  * [Tool Calling](#tool-calling) - Add tool calling to models without native support
- * [Andybot Toolcall](#andybot-toolcall) - Conversational persona tool calling for small/older models (experimental)
+ * [Andybot Toolcall](#andybot-toolcall) - Conversational persona tool calling for small/older models 
 
 ### Pipeline
 
@@ -271,7 +272,7 @@ Enables tool calling for models without native support by injecting tool definit
 
 ### Andybot Toolcall
 
-[tricks/andybot_toolcall.py](tricks/andybot_toolcall.py) - **experimental**
+[tricks/andybot_toolcall.py](tricks/andybot_toolcall.py)
 
 An alternative approach to tool calling that uses a conversational persona instead of structured JSON output. The model says `DEAR ANDYBOT, <FUNCTION>` and ANDYBOT collects each required parameter through dialogue:
 

@@ -103,6 +103,51 @@ class ProxyHandler:
             capabilities = trick.info(capabilities)
         return capabilities
 
+    def _find_prompt_keyword_patterns(self, text: str) -> list[dict]:
+        results: list[dict] = []
+        i = 0
+        while i < len(text):
+            if text[i] != '(':
+                i += 1
+                continue
+            j = i + 1
+            if j >= len(text) or not (text[j].isalnum() or text[j] == '_'):
+                i += 1
+                continue
+            while j < len(text) and (text[j].isalnum() or text[j] in ('_', '/')):
+                j += 1
+            if j >= len(text) or text[j] != ':':
+                i += 1
+                continue
+            j += 1
+            if j >= len(text) or not text[j].isspace():
+                i += 1
+                continue
+            while j < len(text) and text[j].isspace():
+                j += 1
+            depth = 1
+            k = j
+            while k < len(text) and depth > 0:
+                if text[k] == '(':
+                    depth += 1
+                elif text[k] == ')':
+                    depth -= 1
+                k += 1
+            if depth == 0:
+                kw_end = text.index(':', i + 1)
+                keyword = text[i + 1:kw_end].strip()
+                request = text[j:k - 1].strip()
+                results.append({
+                    "start": i,
+                    "end": k,
+                    "keyword": keyword,
+                    "request": request,
+                })
+                i = k
+            else:
+                i += 1
+        return results
+
     def _filter_prompt_keywords(self, messages: list) -> tuple[list, dict | None]:
         registry: dict[str, Trick] = {}
         for t in self.tricks:
@@ -110,32 +155,30 @@ class ProxyHandler:
             if kw:
                 registry[kw.lower()] = t
 
-        all_pattern = re.compile(r'\(([\w][\w/-]*):\s*(.*?)\)', re.IGNORECASE | re.DOTALL)
-
         modified = list(messages)
         for msg in reversed(modified):
             if msg.get("role") != "user" or not isinstance(msg.get("content"), str):
                 continue
             content = msg["content"]
 
-            # Find all (keyword: request) patterns, recognized or not
-            all_matches = list(all_pattern.finditer(content))
-            if not all_matches:
+            patterns = self._find_prompt_keyword_patterns(content)
+            if not patterns:
                 break
 
-            # Separate into recognized and unrecognized
-            recognized: list[tuple[re.Match, Trick]] = []
+            recognized: list[dict] = []
             unrecognized: list[str] = []
-            for m in all_matches:
-                keyword = m.group(1).strip().lower()
+            for p in patterns:
+                keyword = p["keyword"].lower()
                 trick = registry.get(keyword)
                 if trick:
-                    recognized.append((m, trick))
+                    recognized.append(p | {"trick": trick})
                 else:
                     unrecognized.append(keyword)
 
             # Strip all keyword patterns from content
-            content = all_pattern.sub("", content).strip()
+            for p in reversed(patterns):
+                content = content[:p["start"]] + content[p["end"]:]
+            content = content.strip()
             content = re.sub(r' +', " ", content).strip()
             msg["content"] = content
 
@@ -151,9 +194,10 @@ class ProxyHandler:
                     modified.insert(0, {"role": "system", "content": notes})
 
             # Process recognized keywords in text order
-            for m, trick in recognized:
-                request_text = m.group(2).strip()
-                keyword = m.group(1).strip().lower()
+            for p in recognized:
+                request_text = p["request"]
+                keyword = p["keyword"].lower()
+                trick = p["trick"]
                 try:
                     response = trick.handle_prompt_keyword(request_text)
                 except Exception as e:

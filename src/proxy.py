@@ -9,7 +9,14 @@ from typing import Any
 import httpx
 
 from src.context import append_to_system_prompt
-from src.trick import Trick, callmodel, configure, get_model_config
+from src.trick import (
+    Trick,
+    build_upstream_headers,
+    build_upstream_payload,
+    callmodel,
+    configure,
+    get_model_config,
+)
 from src.trickset import Trickset
 
 logger = logging.getLogger("petsitter")
@@ -64,7 +71,9 @@ class ProxyHandler:
                     tricks.append(t)
         return tricks
 
-    def _build_headers(self) -> dict[str, str]:
+    def _build_headers(self, model_cfg: dict | None = None) -> dict[str, str]:
+        if model_cfg is not None:
+            return build_upstream_headers(model_cfg)
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -370,7 +379,7 @@ class ProxyHandler:
 
     async def chat_completions(self, payload: dict, x_title: str = "") -> dict:
         default_cfg = get_model_config("default")
-        upstream_url = default_cfg["model_url"]
+        upstream_url = default_cfg["url"]
         if not upstream_url:
             raise ValueError("No upstream model configured. Set a model URL via the dashboard.")
         messages = payload.get("messages", [])
@@ -416,14 +425,8 @@ class ProxyHandler:
 
             messages = self._apply_pre_hooks(messages, payload, tricks)
 
-            upstream_model = default_cfg["model_name"] or "default"
-            upstream_payload = {
-                "model": upstream_model,
-                "messages": messages,
-            }
-            for key in ["temperature", "max_tokens"]:
-                if key in payload:
-                    upstream_payload[key] = payload[key]
+            upstream_payload = build_upstream_payload(default_cfg, messages, payload)
+            upstream_headers = self._build_headers(default_cfg)
 
             logger.info(f"Calling upstream model: {upstream_url}/v1/chat/completions")
             logger.debug(f"Upstream payload: {json.dumps(upstream_payload, indent=2)}")
@@ -432,7 +435,7 @@ class ProxyHandler:
                 response = await client.post(
                     f"{upstream_url}/v1/chat/completions",
                     json=upstream_payload,
-                    headers=self._build_headers(),
+                    headers=upstream_headers,
                     timeout=120.0,
                 )
 
@@ -471,13 +474,13 @@ class ProxyHandler:
 
     async def models(self) -> dict:
         default_cfg = get_model_config("default")
-        upstream_url = default_cfg["model_url"]
+        upstream_url = default_cfg["url"]
         if not upstream_url:
             raise ValueError("No upstream model configured. Set a model URL via the dashboard.")
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 f"{upstream_url}/v1/models",
-                headers=self._build_headers(),
+                headers=self._build_headers(default_cfg),
                 timeout=30.0,
             )
             response.raise_for_status()

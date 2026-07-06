@@ -23,7 +23,6 @@ from src.loader import load_tricks
 from src.proxy import ProxyHandler
 from src.trick import (
     configure_modelset,
-    parse_mas_uri,
 )
 from src.trickset import Trickset
 
@@ -428,11 +427,14 @@ def cli(
     if modelset_data:
         configure_modelset(modelset_data)
         if "default" in modelset_data:
-            inferred_url, inferred_name = parse_mas_uri(modelset_data["default"])
-            if inferred_url:
-                model_url = inferred_url
-            if inferred_name:
-                model_name = inferred_name
+            dflt = modelset_data["default"]
+            if isinstance(dflt, dict):
+                inferred_url = dflt.get("url", "")
+                if inferred_url:
+                    model_url = inferred_url
+                inferred_model = dflt.get("model")
+                if isinstance(inferred_model, str) and inferred_model:
+                    model_name = inferred_model
 
     trick_list = list(tricks) if tricks else cfg_tricks
     trickset_list = list(tricksets) if tricksets else cfg_tricksets

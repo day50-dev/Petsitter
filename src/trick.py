@@ -1,7 +1,6 @@
 """Base Trick class and callmodel utility for petsitter."""
 
 import json
-import urllib.parse
 from typing import Any
 
 import httpx
@@ -10,7 +9,7 @@ import httpx
 _model_url = ""
 _model_name = ""
 _api_key = ""
-_modelset: dict[str, dict[str, str]] = {}
+_modelset: dict[str, dict[str, Any]] = {}
 
 
 def configure(model_url: str, model_name: str = "", api_key: str = ""):
@@ -21,43 +20,36 @@ def configure(model_url: str, model_name: str = "", api_key: str = ""):
     _api_key = api_key
 
 
-def parse_mas_uri(mas_uri: str) -> tuple[str, str]:
-    """Parse a MAS URI into (base_url, model_name).
+def configure_modelset(modelset_raw: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Store a modelset dict (key → {url, model, key}).
 
-    MAS format: https://host[:port][/path]#m=model-name
-    Follows MAS.md spec: extracts fragment, finds 'm' param, percent-decodes.
-    """
-    if "#" not in mas_uri:
-        return (mas_uri.rstrip("/"), "")
-    base_url, fragment = mas_uri.rsplit("#", 1)
-    params = {}
-    for param in fragment.split("&"):
-        if "=" in param:
-            key, _, value = param.partition("=")
-            params[key] = urllib.parse.unquote(value)
-    model_name = params.get("m", "")
-    return (base_url.rstrip("/"), model_name)
-
-
-def configure_modelset(modelset_raw: dict[str, str]) -> dict[str, dict[str, str]]:
-    """Parse and store a modelset dict (key → MAS URI).
-
-    Each value is a MAS URI like "http://host#m=model-name".
-    Returns the parsed dict for inspection.
+    Each value should be a dict with optional keys ``url``, ``model``, ``key``.
+    ``model`` and ``key`` may be boolean ``false`` to indicate passthrough.
+    Returns the stored dict for inspection.
     """
     global _modelset
-    parsed: dict[str, dict[str, str]] = {}
-    for key, uri in modelset_raw.items():
-        url, name = parse_mas_uri(uri)
-        parsed[key] = {"model_url": url, "model_name": name}
+    parsed: dict[str, dict[str, Any]] = {}
+    for key, cfg in modelset_raw.items():
+        if isinstance(cfg, dict):
+            parsed[key] = {
+                "url": cfg.get("url", "").rstrip("/"),
+                "model": cfg.get("model"),
+                "key": cfg.get("key"),
+            }
+        else:
+            parsed[key] = {"url": str(cfg).rstrip("/"), "model": "", "key": ""}
     _modelset = parsed
     return parsed
 
 
-def update_model_config(key: str, model_url: str, model_name: str = "") -> dict[str, dict[str, str]]:
-    """Add or update a single model config entry by key."""
+def update_model_config(key: str, model_url: str, model_name: Any = "", api_key: Any = "") -> dict[str, dict[str, Any]]:
+    """Add or update a single model config entry by key.
+
+    ``model_name`` and ``api_key`` may be boolean ``false`` for passthrough,
+    or a string value.
+    """
     global _modelset
-    _modelset[key] = {"model_url": model_url, "model_name": model_name}
+    _modelset[key] = {"url": model_url.rstrip("/"), "model": model_name, "key": api_key}
     return _modelset
 
 
@@ -67,20 +59,53 @@ def remove_model_config(key: str) -> bool:
     return _modelset.pop(key, None) is not None
 
 
-def get_model_config(key: str = "default") -> dict[str, str]:
-    """Get model config (model_url, model_name) for a modelset key.
+def get_model_config(key: str = "default") -> dict[str, Any]:
+    """Get model config (url, model, key) for a modelset key.
 
     Falls back to the globally configured defaults if key is "default"
     and no modelset entry exists.
+    ``model`` and ``key`` may be boolean ``false`` (passthrough).
     """
     if key in _modelset:
         return dict(_modelset[key])
     if key == "default":
-        return {"model_url": _model_url, "model_name": _model_name}
+        return {"url": _model_url, "model": _model_name, "key": _api_key}
     raise KeyError(
         f"Model key {key!r} not found in modelset. "
         f"Available keys: {list(_modelset.keys()) or '(none)'}"
     )
+
+
+def build_upstream_payload(model_cfg: dict[str, Any], messages: list, extra: dict | None = None) -> dict:
+    """Build the upstream request payload from a model config.
+
+    If ``model_cfg["model"]`` is boolean ``false``, the ``model`` field is
+    omitted from the payload (passthrough).  ``""`` or missing means the
+    upstream default.
+    """
+    payload: dict[str, Any] = {"messages": messages}
+    model_val = model_cfg.get("model")
+    if model_val is not False:
+        payload["model"] = (model_val if model_val else "default")
+    if extra:
+        for k in ("temperature", "max_tokens", "tools", "tool_choice"):
+            if k in extra:
+                payload[k] = extra[k]
+    return payload
+
+
+def build_upstream_headers(model_cfg: dict[str, Any], extra_headers: dict | None = None) -> dict[str, str]:
+    """Build headers for an upstream request from a model config.
+
+    If ``model_cfg["key"]`` is boolean ``false``, no Authorization header is
+    set (passthrough).  ``""`` or missing also means no header.
+    """
+    headers = dict(extra_headers) if extra_headers else {}
+    headers.setdefault("Content-Type", "application/json")
+    api_key = model_cfg.get("key")
+    if api_key is not False and api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    return headers
 
 
 def callmodel_sync(
@@ -91,7 +116,7 @@ def callmodel_sync(
     api_key: str = "",
 ) -> list:
     """Synchronously call the model and get a response.
-    
+
     Simple helper for tricks that need to loop back to the model.
     Appends the user_message and calls the model, returning updated context.
     Can target a different model by passing model_url/model_name.
@@ -105,20 +130,20 @@ def callmodel_sync(
 
     if not model_url:
         raise ValueError("Model URL not configured")
-    
+
     messages = context.copy()
     if user_message:
         messages.append({"role": "user", "content": user_message})
-    
+
     payload = {
         "model": model_name or "default",
         "messages": messages,
     }
-    
+
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    
+
     with httpx.Client() as client:
         response = client.post(
             f"{model_url}/v1/chat/completions",
@@ -128,7 +153,7 @@ def callmodel_sync(
         )
         response.raise_for_status()
         result = response.json()
-    
+
     assistant_message = result["choices"][0]["message"]
     return messages + [assistant_message]
 
@@ -138,14 +163,14 @@ class Trick:
 
     Subclass this and implement any of the hooks to add functionality.
 
-    Set `keywords` to a list of strings to make this trick keyword-activated.
+    Set ``keywords`` to a list of strings to make this trick keyword-activated.
     When the user includes a keyword in their message, the trick is invoked
     and the keyword is stripped before sending to the model.
     Tricks with no keywords are always active (when their trickset matches).
 
-    Set `required_models` to declare what model keys the trick needs from
+    Set ``required_models`` to declare what model keys the trick needs from
     a modelset. Default is ["default"] — the single model configured via
-    --model_url/--model_name. Multi-model tricks (e.g. KennelTrick) should
+    --url/--model/--key. Multi-model tricks (e.g. KennelTrick) should
     override with additional keys like ["default", "thinker", "toolcall"].
 
     Subclasses should set:
@@ -190,7 +215,7 @@ class Trick:
     def handle_prompt_keyword(self, request: str) -> dict | None:
         """Handle a prompt keyword detected in the user message.
 
-        When the framework finds `(<prompt_keyword>: <request>)` in a user
+        When the framework finds ``(<prompt_keyword>: <request>)`` in a user
         message, it strips the pattern from the message and calls this method
         with the extracted request text.
 
@@ -255,7 +280,10 @@ def build_modelset_example(required_keys: list[str]) -> str:
     lines = ["{"]
     for i, key in enumerate(required_keys):
         comma = "," if i < len(required_keys) - 1 else ""
-        lines.append(f'    "{key}": "http://localhost:11434#m=your-model-here"{comma}')
+        lines.append(f'    "{key}": {{')
+        lines.append(f'      "url": "http://localhost:11434",')
+        lines.append(f'      "model": "your-model-here"{comma}')
+        lines.append(f'    }}{comma}')
     lines.append("}")
     return "\n".join(lines)
 
@@ -286,7 +314,6 @@ async def callmodel(
 
     messages = context.copy()
     if instruction:
-        # Add instruction as system message or append to existing
         if messages and messages[0].get("role") == "system":
             messages[0]["content"] += f"\n{instruction}"
         else:
@@ -311,6 +338,5 @@ async def callmodel(
         response.raise_for_status()
         result = response.json()
 
-    # Extract the assistant's response
     assistant_message = result["choices"][0]["message"]
     return context + [assistant_message]

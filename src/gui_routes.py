@@ -3,12 +3,13 @@
 import asyncio
 import json
 from pathlib import Path
+from typing import Any
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.staticfiles import StaticFiles
 
-from src.trick import Trick, get_model_config, parse_mas_uri, remove_model_config, update_model_config
+from src.trick import Trick, get_model_config, remove_model_config, update_model_config
 from src.trickset import Trickset
 
 _log_capture = None
@@ -32,11 +33,23 @@ def _save_full_config(handler, api_key):
     for key in set(_modelset.keys()) | {"default"}:
         try:
             cfg = get_model_config(key)
-            modelset[key] = f"{cfg['model_url']}#m={cfg['model_name']}"
+            entry: dict[str, Any] = {"url": cfg.get("url", "")}
+            model_val = cfg.get("model")
+            if model_val is not None:
+                entry["model"] = model_val
+            key_val = cfg.get("key")
+            if key_val is not None:
+                entry["key"] = key_val
+            modelset[key] = entry
         except KeyError:
             pass
     if "default" not in modelset:
-        modelset["default"] = f"{handler.model_url}#m={handler.model_name or ''}"
+        entry: dict[str, Any] = {"url": handler.model_url}
+        if handler.model_name:
+            entry["model"] = handler.model_name
+        if api_key:
+            entry["key"] = api_key
+        modelset["default"] = entry
     config = {
         "model_url": handler.model_url,
         "model_name": handler.model_name or "",
@@ -170,12 +183,12 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
     async def gui_models(request: Request) -> Response:
         from src.trick import _modelset
         all_keys = sorted(set(_modelset.keys()) | {"default"})
-        configured: dict[str, dict[str, str]] = {}
+        configured: dict[str, dict[str, Any]] = {}
         for k in all_keys:
             try:
                 configured[k] = get_model_config(k)
             except KeyError:
-                configured[k] = {"model_url": "", "model_name": ""}
+                configured[k] = {"url": "", "model": "", "key": ""}
         return JSONResponse({
             "model_url": handler.model_url,
             "model_name": handler.model_name or "",
@@ -195,12 +208,13 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
         if "set_model" in data:
             sm = data["set_model"]
             key = sm.get("key", "")
-            url = sm.get("model_url", "").rstrip("/")
-            name = sm.get("model_name", "")
+            url = sm.get("model_url", sm.get("url", "")).rstrip("/")
+            model_val = sm.get("model_name", sm.get("model", ""))
+            key_val = sm.get("api_key", sm.get("key", ""))
             if key == "default":
                 handler.model_url = url
-                handler.model_name = name
-            update_model_config(key, url, name)
+                handler.model_name = model_val
+            update_model_config(key, url, model_val, key_val)
         if "remove_model" in data:
             remove_model_config(data["remove_model"])
         _save_full_config(handler, api_key)

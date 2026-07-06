@@ -21,6 +21,8 @@ Petsitter intercepts every request/response pair and runs it through a pipeline 
 3. **`post_hook`** - Validate, retry, or transform the model's response
 4. **`info`** - Declare capabilities back to your application
 
+Tricks also have lifecycle hooks (`install`, `startup`, `shutdown`, `uninstall`) for managing resources across their lifetime.
+
 A trick can be as simple as appending a sentence to the system prompt, or as involved as routing subtasks to three different models in parallel. There's a GUI at `/` for loading/unloading tricks, editing trickset filters, browsing logs, and pointing at different models at runtime.
 
 You can also edit tricks, reorder them, disable, add new ones, and filter them:
@@ -86,7 +88,9 @@ flowchart TD
   K -.-> Z
 ```
 
-The `Trick` class has four optional hooks and optional keyword activation:
+Tricks also have lifecycle hooks that run outside the request pipeline: `install()` on add, `startup()` on first concurrent use, `shutdown()` on last concurrent finish, and `uninstall()` on removal.
+
+The `Trick` class has four optional request hooks and optional keyword activation:
 
 ### `system_prompt(to_add: str) -> str`
 
@@ -434,6 +438,8 @@ The `parameters` field stores user-defined variables that tricks within the tric
 
 Each loaded trickset is also exposed as a model named `trickset/<name>` (e.g., `trickset/gemma4`). Selecting this model in a client bypasses the filter matching and runs that trickset's tricks directly on every request.
 
+The Models tab in the dashboard lets you configure model overrides per-trickset: select a trickset pill, then edit the model URL and name for each role. These overrides are stored in the trickset's `models` field and take precedence over the global model config when a trickset's tricks are running.
+
 ### Using tricksets
 
 ```bash
@@ -461,6 +467,10 @@ curl -X POST http://localhost:8080/api/tricksets/load \
 # Update filters
 curl -X PUT http://localhost:8080/api/tricksets/opencode \
   -d '{"filters": {"X-Title": "myagent*", "Model": "*"}}'
+
+# Update model overrides for a trickset
+curl -X PUT http://localhost:8080/api/tricksets/gemma4 \
+  -d '{"models": {"default": "http://localhost:11434#m=llama3:8b", "toolcall": "http://localhost:11434#m=lfm2.5:latest"}}'
 
 # Unload a trickset
 curl -X POST http://localhost:8080/api/tricksets/unload \
@@ -552,7 +562,7 @@ Petsitter exposes OpenAI-compatible endpoints plus management endpoints:
 - `POST /api/tricksets/load` - Load a trickset
 - `POST /api/tricksets/unload` - Unload a trickset
 - `GET /api/tricksets/{name}` - Get trickset details
-- `PUT /api/tricksets/{name}` - Update trickset filters/tricks
+- `PUT /api/tricksets/{name}` - Update trickset filters, tricks, parameters, or models
 
 A Swagger UI is available at `/docs` and the OpenAPI spec at `/static/openapi.json`.
 

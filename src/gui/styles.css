@@ -288,9 +288,9 @@ header .nav a:hover { background: #1a2a4d; }
 
 .model-entry {
   display: grid;
-  grid-template-columns: 100px 1fr 1fr;
+  grid-template-columns: 100px 1fr;
   gap: 8px;
-  align-items: center;
+  align-items: start;
   padding: 8px 10px;
   background: #1a1a33;
   border-radius: 4px;
@@ -301,6 +301,13 @@ header .nav a:hover { background: #1a2a4d; }
   color: #8ab4ff;
   font-size: 13px;
   font-family: monospace;
+  line-height: 28px;
+}
+
+.model-entry .model-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
 }
 
 .model-entry input {

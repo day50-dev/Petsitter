@@ -353,20 +353,8 @@ async function addTrickset() {
 let selectedModelScope = '_default';
 let _tsModels = {};
 
-function parseMasUri(uri) {
-  const hashIdx = uri.indexOf('#');
-  if (hashIdx === -1) return {url: uri, name: ''};
-  const url = uri.substring(0, hashIdx);
-  const frag = uri.substring(hashIdx + 1);
-  const params = {};
-  frag.split('&').forEach(p => { const eq = p.indexOf('='); if (eq > -1) params[p.substring(0, eq)] = decodeURIComponent(p.substring(eq + 1)); });
-  return {url, name: params.m || ''};
-}
-
-function buildMasUri(url, name) {
-  if (!name) return url;
-  return url + '#m=' + encodeURIComponent(name);
-}
+function _modelDisplay(v) { return v === false ? false : (v || ''); }
+function _keyDisplay(v) { return v === false ? false : (v || ''); }
 
 async function fetchModels() {
   try {
@@ -403,12 +391,22 @@ function renderModels(scope, globalConfigured) {
     return;
   }
   el.innerHTML = keys.map(k => {
-    const raw = models[k];
-    const m = typeof raw === 'string' ? parseMasUri(raw) : (raw || {});
+    const m = models[k] || {};
     const safe = scope.replace(/[^a-zA-Z0-9]/g, '_') + '-' + k.replace(/[^a-zA-Z0-9]/g, '_');
     const urlId = 'mu-' + safe;
     const nameId = 'mn-' + safe;
-    return '<div class="model-entry"><span class="key">' + escapeHtml(k) + '</span><input id="' + urlId + '" type="text" value="' + escapeHtml(m.url || '') + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',this.value,document.getElementById(\'' + nameId + '\').value)" placeholder="http://..."><input id="' + nameId + '" type="text" value="' + escapeHtml(m.name || '') + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',document.getElementById(\'' + urlId + '\').value,this.value)" placeholder="model-name"></div>';
+    const keyId = 'mk-' + safe;
+    const url = m.url || '';
+    const modelDisplay = m.model === false ? '' : (m.model || '');
+    const keyDisplay = m.key === false ? '' : (m.key || '');
+    const modelPlaceholder = m.model === false ? '(passthrough)' : 'model-name';
+    const keyPlaceholder = m.key === false ? '(passthrough)' : 'api-key';
+    return '<div class="model-entry"><span class="key">' + escapeHtml(k) + '</span>' +
+      '<input id="' + urlId + '" type="text" value="' + escapeHtml(url) + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',this.value,document.getElementById(\'' + nameId + '\').value,document.getElementById(\'' + keyId + '\').value)" placeholder="http://...">' +
+      '<div class="model-fields">' +
+      '<input id="' + nameId + '" type="text" value="' + escapeHtml(modelDisplay) + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',document.getElementById(\'' + urlId + '\').value,this.value,document.getElementById(\'' + keyId + '\').value)" placeholder="' + modelPlaceholder + '">' +
+      '<input id="' + keyId + '" type="text" value="' + escapeHtml(keyDisplay) + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',document.getElementById(\'' + urlId + '\').value,document.getElementById(\'' + nameId + '\').value,this.value)" placeholder="' + keyPlaceholder + '">' +
+      '</div></div>';
   }).join('');
 }
 
@@ -417,14 +415,19 @@ function switchModelScope(name) {
   fetchModels();
 }
 
-async function setModelForScope(scope, key, model_url, model_name) {
+async function setModelForScope(scope, key, model_url, model_name, api_key) {
+  const modelVal = model_name === '' ? '' : model_name;
+  const keyVal = api_key === '' ? '' : api_key;
   try {
     if (scope === '_default') {
-      await fetchJSON('/api/models', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({set_model: {key, model_url, model_name}})});
+      await fetchJSON('/api/models', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({set_model: {key, model_url, model: model_name, api_key}})});
       fetchInfo();
     } else {
       const ts = _tsModels[scope] || {};
-      const updated = {...ts, [key]: buildMasUri(model_url, model_name)};
+      const entry = {url: model_url};
+      if (modelVal !== '') entry.model = modelVal;
+      if (keyVal !== '') entry.key = keyVal;
+      const updated = {...ts, [key]: entry};
       await fetchJSON('/api/tricksets/' + encodeURIComponent(scope), {
         method:'PUT',
         headers:{'Content-Type':'application/json'},

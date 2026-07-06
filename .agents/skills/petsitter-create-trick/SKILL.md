@@ -45,6 +45,37 @@ The class itself should also have a docstring. The file name convention is `snak
 
 See the [template](assets/trick-template.py) for the exact structure.
 
+## Lifecycle hooks (optional)
+
+Every trick can implement up to 4 lifecycle hooks that the framework calls automatically:
+
+| Hook | When it runs | Purpose |
+|------|-------------|---------|
+| `install()` | Once when the trick is first added to a trickset | Clone repos, download files, create resources |
+| `startup()` | When the first concurrent request uses this trick (run counter 0→1) | Open connections, preload models |
+| `shutdown()` | When the last concurrent request finishes (run counter 1→0), or on server shutdown | Close connections, release resources |
+| `uninstall()` | When the trick is removed from a trickset | Undo install actions |
+
+The startup/shutdown hooks use a reference counter: `startup()` is called when the first concurrent request begins, and `shutdown()` is called when the last finishes. Multiple concurrent requests to the same trick won't trigger repeated startup/shutdown calls. On server exit, `shutdown()` is called for all active tricks.
+
+Example:
+```python
+class MyTrick(Trick):
+    def install(self):
+        self.model = download_model("some-pipeline")
+        logger.info("Model downloaded")
+
+    def startup(self):
+        self.session = create_session()
+
+    def shutdown(self):
+        self.session.close()
+
+    def uninstall(self):
+        import shutil
+        shutil.rmtree(self.cache_dir, ignore_errors=True)
+```
+
 ## Keyword activation (optional)
 
 Set `keywords` on your trick class to make it only activate when a keyword appears in the user's message. The keyword is stripped from the message before sending to the model. Tricks without `keywords` are always active (when their trickset matches).

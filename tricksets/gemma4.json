@@ -1,5 +1,5 @@
 {
-  "schema": "0.5.0",
+  "schema": "0.7.0",
   "name": "gemma4",
   "filters": {
     "X-Title": "*",
@@ -10,5 +10,6 @@
     "tricks/tool_call.py",
     "tricks/code_validator.py"
   ],
-  "parameters": {}
+  "parameters": {},
+  "models": {}
 }

@@ -462,7 +462,8 @@
                       "tricks": { "type": "array", "items": { "type": "string" } },
                       "file_path": { "type": "string", "nullable": true },
                       "trick_names": { "type": "array", "items": { "type": "string" } },
-                      "parameters": { "type": "object", "description": "User-defined variables for this trickset" }
+                      "parameters": { "type": "object", "description": "User-defined variables for this trickset" },
+                      "models": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Model overrides for this trickset (key -> MAS URI)" }
                     }
                   }
                 }
@@ -637,7 +638,8 @@
                     "tricks": { "type": "array", "items": { "type": "string" } },
                     "file_path": { "type": "string", "nullable": true },
                     "trick_names": { "type": "array", "items": { "type": "string" } },
-                    "parameters": { "type": "object", "description": "User-defined variables for this trickset" }
+                    "parameters": { "type": "object", "description": "User-defined variables for this trickset" },
+                    "models": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Model overrides for this trickset (key -> MAS URI)" }
                   }
                 }
               }
@@ -670,7 +672,8 @@
                 "properties": {
                   "filters": { "type": "object", "additionalProperties": { "type": "string" } },
                   "tricks": { "type": "array", "items": { "type": "string" } },
-                  "parameters": { "type": "object", "description": "User-defined variables for this trickset" }
+                  "parameters": { "type": "object", "description": "User-defined variables for this trickset" },
+                  "models": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Model overrides for this trickset (key -> MAS URI)" }
                 }
               }
             }

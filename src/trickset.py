@@ -11,7 +11,7 @@ from src.trick import Trick
 
 logger = logging.getLogger("petsitter")
 
-SCHEMA = "0.5.0"
+SCHEMA = "0.7.0"
 
 
 class Trickset:
@@ -23,6 +23,7 @@ class Trickset:
         trick_paths: list[str],
         file_path: str | None = None,
         parameters: dict[str, Any] | None = None,
+        models: dict[str, str] | None = None,
     ):
         self.name = name
         self.schema = schema
@@ -30,6 +31,7 @@ class Trickset:
         self.trick_paths = list(trick_paths)
         self.file_path = file_path
         self.parameters: dict[str, Any] = parameters or {}
+        self.models: dict[str, str] = models or {}
         self.tricks: list[Trick] = []
 
     def matches(self, x_title: str, model: str) -> bool:
@@ -54,6 +56,7 @@ class Trickset:
             "tricks": list(self.trick_paths),
             "file_path": self.file_path,
             "parameters": dict(self.parameters),
+            "models": dict(self.models),
         }
 
     def to_file_dict(self) -> dict:
@@ -63,6 +66,7 @@ class Trickset:
             "filters": dict(self.filters),
             "tricks": list(self.trick_paths),
             "parameters": dict(self.parameters),
+            "models": dict(self.models),
         }
 
     def save(self) -> None:
@@ -83,19 +87,21 @@ class Trickset:
         filters = data.get("filters", {"X-Title": "*", "Model": "*"})
         trick_paths = data.get("tricks", [])
         parameters = data.get("parameters", {})
-        ts = Trickset(name, schema, filters, trick_paths, file_path=str(p), parameters=parameters)
+        models = data.get("models", {})
+        ts = Trickset(name, schema, filters, trick_paths, file_path=str(p), parameters=parameters, models=models)
         ts.load_tricks()
         logger.info("Loaded trickset: %s (%d tricks)", name, len(ts.tricks))
         return ts
 
     @staticmethod
-    def from_legacy_tricks(name: str, tricks: list[Trick], trick_paths: list[str], parameters: dict[str, Any] | None = None) -> "Trickset":
+    def from_legacy_tricks(name: str, tricks: list[Trick], trick_paths: list[str], parameters: dict[str, Any] | None = None, models: dict[str, str] | None = None) -> "Trickset":
         ts = Trickset(
             name=name,
             schema=SCHEMA,
             filters={"X-Title": "*", "Model": "*"},
             trick_paths=trick_paths,
             parameters=parameters,
+            models=models,
         )
         ts.tricks = list(tricks)
         return ts

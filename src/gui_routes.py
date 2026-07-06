@@ -214,7 +214,8 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
         if not name:
             return JSONResponse({"success": False, "error": "name required"}, status_code=400)
         parameters = data.get("parameters", {})
-        ts = Trickset(name, "0.5.0", filters, [], parameters=parameters)
+        models = data.get("models", {})
+        ts = Trickset(name, "0.7.0", filters, [], parameters=parameters, models=models)
         ts.file_path = str(Path("tricksets") / f"{name}.json")
         ts.save()
         handler.tricksets[name] = ts

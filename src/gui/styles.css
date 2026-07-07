@@ -13,7 +13,9 @@ body {
 }
 
 h1 { font-size: 18px; font-weight: 600; color: #fff; }
-h2 { font-size: 15px; font-weight: 600; color: #a4b8d4; margin-bottom: 10px; }
+h2 { font-size: 15px; font-weight: 600; color: #a4b8d4; margin-bottom: 4px; }
+
+.section-desc { font-size: 12px; color: #5a7a8a; margin-bottom: 10px; }
 h3 { font-size: 13px; font-weight: 600; color: #7a9ab5; margin-bottom: 6px; }
 
 /* layout */
@@ -330,6 +332,46 @@ header .nav a:hover { background: #1a2a4d; }
   font-family: monospace;
 }
 
+.model-entry input:disabled {
+  background: #0a0a15;
+  color: #4a5a6a;
+  cursor: pointer;
+}
+
+.key-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.key-wrap input {
+  flex: 1;
+  min-width: 0;
+}
+
+.pt-btn {
+  background: none;
+  border: 1px solid #1e2a3a;
+  border-radius: 3px;
+  padding: 2px 5px;
+  color: #5a7a8a;
+  font-size: 12px;
+  cursor: pointer;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.pt-btn:hover {
+  color: #8ab4ff;
+  border-color: #2a4a6a;
+}
+
+.pt-btn.pt-active {
+  color: #6bff8a;
+  border-color: #2a5a3a;
+  background: #0a1a12;
+}
+
 /* agents */
 .agents-grid {
   display: grid;
@@ -350,7 +392,7 @@ header .nav a:hover { background: #1a2a4d; }
 
 .agent-card:hover { border-color: #2a3a4a; }
 
-.agent-card.agent-registered { border-color: #1a5a2a; background: #1a221a; }
+.agent-card.agent-registered { border-color: #2a9d4a; }
 
 .agent-icon {
   font-size: 32px;

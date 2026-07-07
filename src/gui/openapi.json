@@ -3,7 +3,7 @@
   "info": {
     "title": "PetSitter API",
     "version": "0.1.0",
-    "description": "OpenAI-compatible proxy that adds functionality to models through dynamically loadable tricks.\n\nTeach old models new tricks — intercept requests/responses to add tool calling, JSON mode enforcement, and more."
+    "description": "OpenAI-compatible proxy that adds functionality to models through dynamically loadable tricks.\n\nTeach old models new tricks: intercept requests/responses to add tool calling, JSON mode enforcement, and more."
   },
   "servers": [
     {

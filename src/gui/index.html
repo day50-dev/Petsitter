@@ -47,6 +47,7 @@
 <div class="two-col">
 <div class="card">
 <h2>Loaded Tricks</h2>
+<div class="section-desc">Active tricks in the current trickset. Drag to reorder, toggle on/off, or remove.</div>
 <div id="loaded-tricks"><div class="loader">Loading...</div></div>
 </div>
 <div class="card">
@@ -61,6 +62,7 @@
 </button>
 </div>
 </div>
+<div class="section-desc">Built-in tricks you can load from the project's tricks directory.</div>
 <div id="available-tricks"><div class="loader">Loading...</div></div>
 <div class="custom-path">
 <input type="text" id="custom-path" placeholder="Path to trick .py file">
@@ -77,6 +79,7 @@
 </div>
 <div class="card">
 <div class="card-title"><h2>Models</h2></div>
+<div class="section-desc">Upstream model endpoints. Set an API key to false (passthrough) to let the client supply its own key.</div>
 <div class="models-list" id="model-list"><div class="loader">Loading...</div></div>
 </div>
 </div>
@@ -418,17 +421,21 @@ function renderModels(scope, globalConfigured) {
     const urlId = 'mu-' + safe;
     const nameId = 'mn-' + safe;
     const keyId = 'mk-' + safe;
+    const ptId = 'mpt-' + safe;
     const url = m.url || '';
     const modelDisplay = m.model === false ? '' : (m.model || '');
-    const keyDisplay = m.key === false ? '' : (m.key || '');
+    const isPassthrough = m.key === false;
+    const keyDisplay = isPassthrough ? '' : (m.key || '');
     const modelPlaceholder = m.model === false ? '(passthrough)' : 'model-name';
-    const keyPlaceholder = m.key === false ? '(passthrough)' : 'api-key';
+    const keyPlaceholder = isPassthrough ? '(passthrough)' : 'api-key';
+    const ptActive = isPassthrough ? ' pt-active' : '';
     return '<div class="model-entry"><span class="key">' + escapeHtml(k) + '</span>' +
       '<div class="model-fields">' +
       '<input id="' + urlId + '" type="text" value="' + escapeHtml(url) + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',this.value,document.getElementById(\'' + nameId + '\').value,document.getElementById(\'' + keyId + '\').value)" placeholder="http://...">' +
       '<div class="model-subrow">' +
       '<input id="' + nameId + '" type="text" value="' + escapeHtml(modelDisplay) + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',document.getElementById(\'' + urlId + '\').value,this.value,document.getElementById(\'' + keyId + '\').value)" placeholder="' + modelPlaceholder + '">' +
-      '<input id="' + keyId + '" type="text" value="' + escapeHtml(keyDisplay) + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',document.getElementById(\'' + urlId + '\').value,document.getElementById(\'' + nameId + '\').value,this.value)" placeholder="' + keyPlaceholder + '">' +
+      '<div class="key-wrap"><input id="' + keyId + '" type="text" value="' + escapeHtml(keyDisplay) + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',document.getElementById(\'' + urlId + '\').value,document.getElementById(\'' + nameId + '\').value,this.value)" placeholder="' + keyPlaceholder + '"' + (isPassthrough ? ' disabled onclick="togglePassthrough(\'' + scope + '\',\'' + k + '\',\'' + keyId + '\',\'' + ptId + '\')"' : '') + '>' +
+      '<button class="pt-btn' + ptActive + '" id="' + ptId + '" onclick="togglePassthrough(\'' + scope + '\',\'' + k + '\',\'' + keyId + '\',\'' + ptId + '\')" title="Pass through client API key">&#x1f517;</button></div>' +
       '</div></div></div>';
   }).join('');
 }
@@ -460,6 +467,32 @@ async function setModelForScope(scope, key, model_url, model_name, api_key) {
     }
     showToast('Saved ' + key);
   } catch(e) { showToast(e.message, true); }
+}
+
+function togglePassthrough(scope, key, keyId, ptId) {
+  const input = document.getElementById(keyId);
+  const btn = document.getElementById(ptId);
+  const isActive = btn.classList.contains('pt-active');
+  if (isActive) {
+    input.disabled = false;
+    btn.classList.remove('pt-active');
+    input.placeholder = 'api-key';
+    input.focus();
+    setModelForScope(scope, key,
+      document.getElementById('mu-' + scope.replace(/[^a-zA-Z0-9]/g, '_') + '-' + key.replace(/[^a-zA-Z0-9]/g, '_')).value,
+      document.getElementById('mn-' + scope.replace(/[^a-zA-Z0-9]/g, '_') + '-' + key.replace(/[^a-zA-Z0-9]/g, '_')).value,
+      '');
+  } else {
+    input.disabled = true;
+    input.value = '';
+    btn.classList.add('pt-active');
+    input.placeholder = '(passthrough)';
+    setModelForScope(scope, key,
+      document.getElementById('mu-' + scope.replace(/[^a-zA-Z0-9]/g, '_') + '-' + key.replace(/[^a-zA-Z0-9]/g, '_')).value,
+      document.getElementById('mn-' + scope.replace(/[^a-zA-Z0-9]/g, '_') + '-' + key.replace(/[^a-zA-Z0-9]/g, '_')).value,
+      false);
+  }
+}
 }
 
 // ---- logs ----
@@ -535,7 +568,6 @@ async function fetchAgents() {
         + '<span class="' + statusClass + '">' + statusIcon + ' ' + escapeHtml(d.status || '') + '</span>'
         + '</div>'
         + '<div class="agent-paths">' + configPaths.map(function(p) { return '<span class="agent-path">' + escapeHtml(p) + '</span>'; }).join('') + '</div>'
-        + (isReg ? '<div class="agent-badge-reg">Registered</div>' : '')
         + '</div>'
         + '<div class="agent-actions">' + actionHtml + '</div>'
         + '</div>';

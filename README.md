@@ -90,6 +90,33 @@ flowchart TD
 
 Tricks also have lifecycle hooks that run outside the request pipeline: `install()` on add, `startup()` on first concurrent use, `shutdown()` on last concurrent finish, and `uninstall()` on removal.
 
+Here is a minimal trick that stops the model from using em-dashes (the long dash character that LLMs love to overuse) and replaces them with regular hyphens:
+
+```python
+"""No Em-Dash trick — replaces em-dashes with hyphens."""
+
+from src.trick import Trick
+
+EMDASH = "\u2014"
+
+class NoEmDashTrick(Trick):
+    __brief__ = "Replaces em-dashes with hyphens in model responses"
+    __display_name__ = "No Em-Dash"
+
+    def system_prompt(self, to_add: str) -> str:
+        return "Do NOT use em-dashes. Use a regular hyphen (-) instead."
+
+    def post_hook(self, context: list) -> list:
+        if not context:
+            return context
+        last = context[-1]
+        content = last.get("content", "")
+        if EMDASH in content:
+            content = content.replace(EMDASH, "-")
+            last["content"] = content
+        return context
+```
+
 The `Trick` class has four optional request hooks and optional keyword activation:
 
 ### `system_prompt(to_add: str) -> str`

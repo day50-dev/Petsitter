@@ -570,7 +570,8 @@ async function toggleAgent(id, enable) {
     if (enable) {
       const r = await fetchJSON('/api/agents/' + encodeURIComponent(id) + '/register', { method:'POST' });
       if (r.success) showToast(escapeHtml(id) + ' routed through petsitter');
-      else showToast(r.error || 'Registration failed', true);
+      else if (r.log && r.log.length) showToast((r.log[0].message || 'Registration failed'), true);
+      else showToast('Registration failed', true);
     } else {
       await fetchJSON('/api/agents/' + encodeURIComponent(id) + '/unregister', { method:'POST' });
       showToast(escapeHtml(id) + ' configuration restored');

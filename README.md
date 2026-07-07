@@ -66,7 +66,7 @@ Either way, now you can point your AI applications to `http://localhost:8080/v1`
 | `--url` | `-u` | Base URL of upstream model (e.g., `http://localhost:11434`) |
 | `--model` | `-m` | Model name (optional for vllm, sglang, llama.cpp) |
 | `--key` | `-k` | API key for upstream (if required) |
-| `--trick` | `-t` | Path to a trick module (can be repeated) |
+| `--trick` | `-t` | Path to a trick module, or `name:function` to run a lifecycle hook (can be repeated) |
 | `--trick-config` | `-tc` | Path to a trickset JSON file (can be repeated) |
 | `--model-config` | `-mc` |  Path to a model config JSON file (`{url, model, key}` objects) |
 | `--listen` | `-l` | Host:port to listen on (default: `localhost:8080`) |
@@ -285,6 +285,7 @@ The method receives the text after `mycommand: ` and can return:
 
 ### Agent
 
+ * [Swap Harness](#swap-harness) - Browse and swap system prompts from AI tool repositories
  * [Self-Improver](#self-improver) - Runtime agent that can add, modify, and list tricks
 
 ---
@@ -401,6 +402,44 @@ Detects and pseudonymizes sensitive information before it reaches the model, the
 ./petsitter -u http://localhost:11434 -t tricks/secrets_protector.py
 ```
 
+### Swap Harness
+
+[tricks/swapharness.py](tricks/swapharness.py)
+
+Browses and swaps system prompts from the [system-prompts-and-models-of-ai-tools](https://github.com/x1xhlol/system-prompts-and-models-of-ai-tools) repository. On first use, it clones the repo into `~/.config/petsitter/harnesses/`.
+
+Use the `swapharness` prompt keyword to navigate the directory tree and select a system prompt file. The selected content is injected into the system prompt on every request until a different file is chosen or the trick is uninstalled.
+
+```bash
+# Install (clone the repo) first
+petsitter -t swapharness:install
+```
+
+Once installed, include `(swapharness: path)` in any user message to browse or select a harness:
+
+```
+User: (swapharness: Cursor Prompts)
+Assistant: 📁 Cursor Prompts
+           📄 Rules for All Models.md
+           📄 Rules for Cursor.md
+           📄 ...
+
+User: (swapharness: Cursor Prompts/Rules for All Models.md)
+Assistant: ✅ Harness set to Cursor Prompts/Rules for All Models.md (2847 chars)
+           ────────────────────────────────────────────────
+           You are Cursor, an advanced AI coding assistant...
+```
+
+The selected system prompt is prepended to every subsequent request. Run `(swapharness: install)` to clone the repo, or use the lifecycle CLI:
+
+```bash
+# All lifecycle hooks available via trickname:function
+petsitter -t swapharness:install    # clone the repo
+petsitter -t swapharness:uninstall  # remove the repo
+petsitter -t swapharness:startup    # init per-session state
+petsitter -t swapharness:shutdown   # cleanup session
+```
+
 ### Self-Improver
 
 [tricks/self_improver.py](tricks/self_improver.py)
@@ -509,7 +548,7 @@ Petsitter has a one-click setup wizard for routing popular coding tools through 
 3. Patches the tool's config file to point at `http://localhost:8080`
 4. Saves the original config so it can be restored on shutdown
 
-The **exit button** (🚪) in the top-right restores every tool's original configuration and shuts petsitter down.
+The **exit button** in the top-right restores every tool's original configuration and shuts petsitter down.
 
 ### Available agents
 

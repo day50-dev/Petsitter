@@ -333,7 +333,8 @@ header .nav a:hover { background: #1a2a4d; }
 /* agents */
 .agents-grid {
   display: grid;
-  gap: 8px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
 }
 
 .agent-card {
@@ -379,6 +380,19 @@ header .nav a:hover { background: #1a2a4d; }
 .agent-detect .status-ready { color: #6bff8a; }
 .agent-detect .status-warn { color: #f5c542; }
 .agent-detect .status-err { color: #ff6b8a; }
+
+.agent-paths {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 2px;
+}
+
+.agent-path {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 11px;
+  color: #4a6572;
+}
 
 .agent-missing {
   color: #f5c542;

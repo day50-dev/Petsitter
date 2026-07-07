@@ -24,6 +24,7 @@ class OpenCodeAgent(Agent):
     description = "Open-source AI coding agent for the terminal"
     icon = "https://opencode.ai/favicon.ico"
     required_env: list[str] = []
+    config_paths = ["~/.config/opencode/opencode.json"]
     tricks = [
         "tricks/json_mode.py",
         "tricks/tool_call.py",

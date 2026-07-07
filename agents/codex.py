@@ -33,6 +33,7 @@ class CodexAgent(Agent):
     description = "OpenAI official CLI coding agent"
     icon = "https://chatgpt.com/favicon.ico"
     required_env = ["OPENAI_API_KEY"]
+    config_paths = ["~/.codex/config.toml", "$CODEX_HOME/config.toml"]
     tricks = [
         "tricks/json_mode.py",
         "tricks/tool_call.py",

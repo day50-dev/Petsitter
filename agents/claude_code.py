@@ -25,6 +25,7 @@ class ClaudeCodeAgent(Agent):
     description = "Anthropic official CLI coding agent"
     icon = "https://claude.ai/favicon.ico"
     required_env = ["ANTHROPIC_API_KEY"]
+    config_paths = ["~/.claude/settings.json"]
     tricks = [
         "tricks/json_mode.py",
         "tricks/tool_call.py",

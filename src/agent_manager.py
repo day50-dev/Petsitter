@@ -68,6 +68,7 @@ class AgentManager:
                 "display_name": agent.display_name,
                 "description": agent.description,
                 "icon": agent.icon,
+                "config_paths": list(agent.config_paths),
                 "tricks": agent.tricks,
                 "model_config": agent.model_config,
                 "detect": {

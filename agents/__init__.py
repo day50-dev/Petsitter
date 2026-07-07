@@ -59,6 +59,7 @@ class Agent:
     description: str = ""
     icon: str = ""
     required_env: list[str] = []
+    config_paths: list[str] = []
     tricks: list[str] = []
     model_config: dict[str, Any] = {}
 

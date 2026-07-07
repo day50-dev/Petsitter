@@ -524,15 +524,16 @@ async function fetchAgents() {
       var iconHtml = a.icon && a.icon.indexOf('http') === 0
         ? '<img src="' + escapeHtml(a.icon) + '" alt="" class="agent-favicon" onerror="defaultImage(this)">'
         : (a.icon || '&#x1F916;');
+      const configPaths = a.config_paths || [];
       return '<div class="agent-card' + (isReg ? ' agent-registered' : '') + '">'
         + '<div class="agent-icon">' + iconHtml + '</div>'
         + '<div class="agent-body">'
         + '<div class="agent-name">' + escapeHtml(a.display_name || id) + '</div>'
         + '<div class="agent-desc">' + escapeHtml(a.description || '') + '</div>'
         + '<div class="agent-detect">'
-        + '<span class="' + statusClass + '">' + statusIcon + ' ' + escapeHtml(d.message || d.status || '') + '</span>'
-        + (d.missing_env && d.missing_env.length ? '<span class="agent-missing">Missing: ' + escapeHtml(d.missing_env.join(', ')) + '</span>' : '')
+        + '<span class="' + statusClass + '">' + statusIcon + ' ' + escapeHtml(d.status || '') + '</span>'
         + '</div>'
+        + '<div class="agent-paths">' + configPaths.map(function(p) { return '<span class="agent-path">' + escapeHtml(p) + '</span>'; }).join('') + '</div>'
         + (isReg ? '<div class="agent-badge-reg">Registered</div>' : '')
         + '</div>'
         + '<div class="agent-actions">' + actionHtml + '</div>'

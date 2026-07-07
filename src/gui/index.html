@@ -416,8 +416,8 @@ function switchModelScope(name) {
 }
 
 async function setModelForScope(scope, key, model_url, model_name, api_key) {
-  const modelVal = model_name === '' ? '' : model_name;
-  const keyVal = api_key === '' ? '' : api_key;
+  const mVal = model_name === '' ? '' : model_name;
+  const kVal = api_key === '' ? '' : api_key;
   try {
     if (scope === '_default') {
       await fetchJSON('/api/models', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({set_model: {key, model_url, model: model_name, api_key}})});
@@ -425,8 +425,8 @@ async function setModelForScope(scope, key, model_url, model_name, api_key) {
     } else {
       const ts = _tsModels[scope] || {};
       const entry = {url: model_url};
-      if (modelVal !== '') entry.model = modelVal;
-      if (keyVal !== '') entry.key = keyVal;
+      if (mVal !== '') entry.model = mVal;
+      if (kVal !== '') entry.key = kVal;
       const updated = {...ts, [key]: entry};
       await fetchJSON('/api/tricksets/' + encodeURIComponent(scope), {
         method:'PUT',

@@ -68,7 +68,7 @@ Either way, now you can point your AI applications to `http://localhost:8080/v1`
 | `--key` | `-k` | API key for upstream (if required) |
 | `--trick` | `-t` | Path to a trick module (can be repeated) |
 | `--trick-config` | `-tc` | Path to a trickset JSON file (can be repeated) |
-| `--model-config` | `-mc` |  Path to a model config JSON file (MAS URIs for multi-model tricks) |
+| `--model-config` | `-mc` |  Path to a model config JSON file (`{url, model, key}` objects) |
 | `--listen` | `-l` | Host:port to listen on (default: `localhost:8080`) |
 
 ## Creating Custom Tricks
@@ -342,14 +342,26 @@ For a more advanced version with inline-argument parsing, confusion recovery, an
 
 A trick has full control of the request lifecycle - it can call any number of models, not just the one the user pointed at. This lets you decompose a problem into subtasks and route each one to the model best suited for it.
 
-Petsitter supports this through **model configs** - JSON files that map role names to MAS URIs (`url#m=model_name`). Tricks declare what roles they need; if a key is missing, petsitter prints a helpful error.
+Petsitter supports this through **model configs** - JSON files that map role names to `{url, model, key}` objects. Tricks declare what roles they need; if a key is missing, petsitter prints a helpful error.
+
+The `model` and `key` fields can be a string or boolean `false` — `false` means passthrough (don't set the field in the upstream request). This is distinct from `""` which clears the value.
 
 Example `modelset.json`:
 ```json
 {
-    "default": "http://localhost:11434#m=Qwen3.5:8b",
-    "thinker": "http://localhost:11434#m=VibeThinker-3B-GGUF:q4_K_M",
-    "toolcall": "http://localhost:11434#m=lfm2.5:latest"
+    "default": {
+        "url": "http://localhost:11434",
+        "model": "Qwen3.5:8b"
+    },
+    "thinker": {
+        "url": "http://localhost:11434",
+        "model": "VibeThinker-3B-GGUF:q4_K_M"
+    },
+    "toolcall": {
+        "url": "http://localhost:11434",
+        "model": "lfm2.5:latest",
+        "key": "sk-custom-key"
+    }
 }
 ```
 
@@ -434,7 +446,7 @@ Tricksets live as JSON files in the `tricksets/` directory:
 }
 ```
 
-The `parameters` field stores user-defined variables that tricks within the trickset can reference at runtime. The `models` field lets you override model routing for this trickset — each key is a model role and the value is a [MAS URI](https://day50.dev/mas.html) (same format as the global model config), letting different tricksets use different models for the same role. Manage both via the dashboard or the API.
+The `parameters` field stores user-defined variables that tricks within the trickset can reference at runtime. The `models` field lets you override model routing for this trickset — each key maps to a `{url, model, key}` object (same format as the global model config), letting different tricksets use different models for the same role. Set `model` or `key` to `false` for passthrough. Manage both via the dashboard or the API.
 
 Each loaded trickset is also exposed as a model named `trickset/<name>` (e.g., `trickset/gemma4`). Selecting this model in a client bypasses the filter matching and runs that trickset's tricks directly on every request.
 
@@ -490,17 +502,32 @@ The `schema` field in a trickset JSON file records the petsitter version that wr
 
 ## Model Configs
 
-A model config JSON file lets you run multi-model tricks like [Kennel](#kennel) that need different models for different subtasks. Each key maps to a [MAS URI](https://day50.dev/mas.html) - a URL with a fragment (`#m=`) specifying the model name:
+A model config JSON file lets you run multi-model tricks like [Kennel](#kennel) that need different models for different subtasks. Each key maps to a `{url, model, key}` object:
 
 ```json
 {
-    "default": "http://localhost:11434#m=Qwen3.5:8b",
-    "thinker": "http://localhost:11434#m=VibeThinker-3B-GGUF:q4_K_M",
-    "toolcall": "http://localhost:11434#m=lfm2.5:latest"
+    "default": {
+        "url": "http://localhost:11434",
+        "model": "Qwen3.5:8b"
+    },
+    "thinker": {
+        "url": "http://localhost:11434",
+        "model": "VibeThinker-3B-GGUF:q4_K_M"
+    },
+    "toolcall": {
+        "url": "http://localhost:11434",
+        "model": "lfm2.5:latest",
+        "key": "sk-custom-key"
+    }
 }
 ```
 
 The `"default"` key sets the primary model (equivalent to `-u`/`--url` + `-m`/`--model`). Tricks declare what keys they need - for example, KennelTrick requires `["default", "thinker", "toolcall"]`. If a key is missing, petsitter prints a helpful error with the expected format.
+
+The `model` and `key` fields accept:
+- A string — use as the model name / API key in upstream requests.
+- `false` (boolean) — passthrough, don't set the field at all.
+- `""` (empty string) — explicitly clear the value.
 
 ```bash
 # Use a model config instead of -u / -m

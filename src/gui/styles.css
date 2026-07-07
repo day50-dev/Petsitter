@@ -412,7 +412,64 @@ header .nav a:hover { background: #1a2a4d; }
   margin-top: 2px;
 }
 
+.agent-description {
+  font-size: 12px;
+  color: #6b8299;
+  margin-bottom: 14px;
+  line-height: 1.5;
+  padding: 0 2px;
+}
+
 .agent-actions { flex-shrink: 0; }
+
+/* agent toggle switch */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  cursor: pointer;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: #3a1a1a;
+  border-radius: 10px;
+  transition: background .15s;
+}
+
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #5a3a3a;
+  transition: transform .15s, background .15s;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background: #1a5a2a;
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(16px);
+  background: #6bff8a;
+}
+
+.toggle-switch input:disabled + .toggle-slider {
+  opacity: .35;
+  cursor: default;
+}
 
 .agent-log-panel {
   background: #0a0a15;

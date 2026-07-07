@@ -93,12 +93,6 @@ class AgentManager:
         agent = self._get(agent_id)
         log: list[dict[str, str]] = []
 
-        # Detect first
-        detect = agent.detect()
-        if detect.missing_env:
-            log.append({"level": "ERROR", "message": f"Missing credentials: {', '.join(detect.missing_env)}"})
-            return False, log
-
         # Create backup context
         backup: dict[str, Any] = {"trickset_name": agent_id, "env": {}, "files": {}}
         ctx = AgentContext(

@@ -327,7 +327,12 @@ def create_app(
         return JSONResponse({"success": True, "message": "Shutting down"})
     app.add_route("/api/shutdown", shutdown_server, methods=["POST"])
 
-    atexit.register(handler.shutdown_all)
+    async def shutdown_event():
+        handler.shutdown_all()
+        if _agent_manager is not None:
+            _agent_manager.unregister_all()
+
+    app.add_event_handler("shutdown", shutdown_event)
 
     return app
 
@@ -590,7 +595,7 @@ def cli(
         format="%(levelname)s: %(message)s"
     )
 
-    uvicorn.run(app, host=host, port=port)
+    uvicorn.run(app, host=host, port=port, timeout_graceful_shutdown=3)
 
 
 if __name__ == "__main__":

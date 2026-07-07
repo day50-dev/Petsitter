@@ -85,6 +85,7 @@
 <div class="tab-pane" id="tab-agents">
 <div class="card">
 <div class="card-title"><h2>Harness Agents</h2></div>
+<div class="agent-description">Harness agents automatically configure popular coding tools to route through petsitter. Toggle an agent on to patch its config file &mdash; toggle off to restore the original.</div>
 <div id="agent-setup-panel" style="display:none">
 <div class="agent-log-panel" id="agent-log-panel">
 <div class="agent-log-header">
@@ -518,9 +519,9 @@ async function fetchAgents() {
       const isReg = regAgents[id] && regAgents[id].status === 'registered';
       const statusIcon = d.status === 'ready' ? '&#x2705;' : (d.status === 'missing_creds' ? '&#x26A0;&#xFE0F;' : '&#x274C;');
       const statusClass = d.status === 'ready' ? 'status-ready' : (d.status === 'missing_creds' ? 'status-warn' : 'status-err');
-      const actionHtml = isReg
-        ? '<button class="btn btn-secondary btn-sm" onclick="unregisterAgent(\'' + id + '\')">Unregister</button>'
-        : '<button class="btn btn-success btn-sm" onclick="registerAgent(\'' + id + '\')" ' + (d.status !== 'ready' ? 'disabled' : '') + '>Set up</button>';
+      const actionHtml = '<label class="toggle-switch" title="' + (isReg ? 'Restore config' : 'Route through petsitter') + '">'
+        + '<input type="checkbox" ' + (isReg ? 'checked' : '') + ' onchange="toggleAgent(\'' + id + '\', this.checked)">'
+        + '<span class="toggle-slider"></span></label>';
       var iconHtml = a.icon && a.icon.indexOf('http') === 0
         ? '<img src="' + escapeHtml(a.icon) + '" alt="" class="agent-favicon" onerror="defaultImage(this)">'
         : (a.icon || '&#x1F916;');
@@ -564,47 +565,18 @@ function _appendAgentLog(entries) {
   el.scrollTop = el.scrollHeight;
 }
 
-async function registerAgent(id) {
-  document.getElementById('agent-setup-panel').style.display = '';
-  const logEl = document.getElementById('agent-log-content');
-  logEl.innerHTML = '<div class="agent-log-entry">Setting up ' + escapeHtml(id) + '...</div>';
-  document.getElementById('agent-log-title').textContent = 'Setting up ' + id + '...';
-  document.getElementById('agent-log-status').innerHTML = '';
+async function toggleAgent(id, enable) {
   try {
-    const r = await fetchJSON('/api/agents/' + encodeURIComponent(id) + '/register', { method:'POST' });
-    logEl.innerHTML = '';
-    if (r.log) _appendAgentLog(r.log);
-    if (r.success) {
-      document.getElementById('agent-log-title').textContent = id + ' ready';
-      document.getElementById('agent-log-status').innerHTML = '<span class="status-ready">&#x2705; ' + escapeHtml(id) + ' is now routed through petsitter</span>';
+    if (enable) {
+      const r = await fetchJSON('/api/agents/' + encodeURIComponent(id) + '/register', { method:'POST' });
+      if (r.success) showToast(escapeHtml(id) + ' routed through petsitter');
+      else showToast(r.error || 'Registration failed', true);
     } else {
-      document.getElementById('agent-log-title').textContent = id + ' failed';
-      document.getElementById('agent-log-status').innerHTML = '<span class="status-err">&#x274C; ' + escapeHtml(r.error || 'Setup failed') + '</span>';
+      await fetchJSON('/api/agents/' + encodeURIComponent(id) + '/unregister', { method:'POST' });
+      showToast(escapeHtml(id) + ' configuration restored');
     }
     fetchAgents();
-  } catch(e) {
-    logEl.innerHTML = '<div class="agent-log-entry lvl-ERROR">Error: ' + escapeHtml(e.message) + '</div>';
-    document.getElementById('agent-log-status').innerHTML = '<span class="status-err">&#x274C; ' + escapeHtml(e.message) + '</span>';
-  }
-}
-
-async function unregisterAgent(id) {
-  document.getElementById('agent-setup-panel').style.display = '';
-  const logEl = document.getElementById('agent-log-content');
-  logEl.innerHTML = '<div class="agent-log-entry">Restoring ' + escapeHtml(id) + '...</div>';
-  document.getElementById('agent-log-title').textContent = 'Restoring ' + id + '...';
-  document.getElementById('agent-log-status').innerHTML = '';
-  try {
-    const r = await fetchJSON('/api/agents/' + encodeURIComponent(id) + '/unregister', { method:'POST' });
-    logEl.innerHTML = '';
-    if (r.log) _appendAgentLog(r.log);
-    document.getElementById('agent-log-title').textContent = id + ' restored';
-    document.getElementById('agent-log-status').innerHTML = '<span class="status-ready">&#x2705; Configuration restored</span>';
-    fetchAgents();
-  } catch(e) {
-    logEl.innerHTML = '<div class="agent-log-entry lvl-ERROR">Error: ' + escapeHtml(e.message) + '</div>';
-    document.getElementById('agent-log-status').innerHTML = '<span class="status-err">&#x274C; ' + escapeHtml(e.message) + '</span>';
-  }
+  } catch(e) { showToast(e.message, true); }
 }
 
 async function shutdownPetsitter() {

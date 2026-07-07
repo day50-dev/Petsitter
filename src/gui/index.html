@@ -12,7 +12,6 @@
 <header>
 <div class="brand">
 <img src="/static/petsitter-type.avif" alt="PetSitter">
-
 </div>
 <div class="nav">
 <a href="https://github.com/day50-dev/Petsitter" target="_blank">GitHub</a>
@@ -23,12 +22,16 @@
 <span><span class="label">Upstream</span><span id="info-upstream">--</span></span>
 <span><span class="label">Model</span><span id="info-model">--</span></span>
 <span><span class="label">v</span><span id="info-version">--</span></span>
+<div class="exit-btn btn" onclick="shutdownPetsitter()" title="Shutdown &amp; restore configuration">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+</div>
 </div>
 </header>
 
 <div class="tabs">
 <div class="tab active" data-tab="tricks" onclick="switchTab('tricks')">Tricks</div>
 <div class="tab" data-tab="models" onclick="switchTab('models')">Models</div>
+<div class="tab" data-tab="agents" onclick="switchTab('agents')">Agents</div>
 <div class="tab" data-tab="logs" onclick="switchTab('logs')">Logs</div>
 </div>
 
@@ -75,6 +78,24 @@
 <div class="card">
 <div class="card-title"><h2>Models</h2></div>
 <div class="models-list" id="model-list"><div class="loader">Loading...</div></div>
+</div>
+</div>
+
+<!-- === AGENTS TAB === -->
+<div class="tab-pane" id="tab-agents">
+<div class="card">
+<div class="card-title"><h2>Harness Agents</h2></div>
+<div id="agent-setup-panel" style="display:none">
+<div class="agent-log-panel" id="agent-log-panel">
+<div class="agent-log-header">
+<span id="agent-log-title">Setting up...</span>
+<button class="btn btn-sm btn-secondary" onclick="closeAgentLog()">Close</button>
+</div>
+<div class="agent-log-content" id="agent-log-content"><div class="loader">Starting...</div></div>
+<div class="agent-log-status" id="agent-log-status"></div>
+</div>
+</div>
+<div id="agents-grid" class="agents-grid"><div class="loader">Loading agents...</div></div>
 </div>
 </div>
 
@@ -402,11 +423,12 @@ function renderModels(scope, globalConfigured) {
     const modelPlaceholder = m.model === false ? '(passthrough)' : 'model-name';
     const keyPlaceholder = m.key === false ? '(passthrough)' : 'api-key';
     return '<div class="model-entry"><span class="key">' + escapeHtml(k) + '</span>' +
-      '<input id="' + urlId + '" type="text" value="' + escapeHtml(url) + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',this.value,document.getElementById(\'' + nameId + '\').value,document.getElementById(\'' + keyId + '\').value)" placeholder="http://...">' +
       '<div class="model-fields">' +
+      '<input id="' + urlId + '" type="text" value="' + escapeHtml(url) + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',this.value,document.getElementById(\'' + nameId + '\').value,document.getElementById(\'' + keyId + '\').value)" placeholder="http://...">' +
+      '<div class="model-subrow">' +
       '<input id="' + nameId + '" type="text" value="' + escapeHtml(modelDisplay) + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',document.getElementById(\'' + urlId + '\').value,this.value,document.getElementById(\'' + keyId + '\').value)" placeholder="' + modelPlaceholder + '">' +
       '<input id="' + keyId + '" type="text" value="' + escapeHtml(keyDisplay) + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',document.getElementById(\'' + urlId + '\').value,document.getElementById(\'' + nameId + '\').value,this.value)" placeholder="' + keyPlaceholder + '">' +
-      '</div></div>';
+      '</div></div></div>';
   }).join('');
 }
 
@@ -435,6 +457,7 @@ async function setModelForScope(scope, key, model_url, model_name, api_key) {
       });
       _tsModels[scope] = updated;
     }
+    showToast('Saved ' + key);
   } catch(e) { showToast(e.message, true); }
 }
 
@@ -480,10 +503,129 @@ function clearLogDisplay() {
   setTimeout(startLogStream, 100);
 }
 
+// ---- agents ----
+async function fetchAgents() {
+  try {
+    const agents = await fetchJSON('/api/agents');
+    const registered = await fetchJSON('/api/agents/registered');
+    const regAgents = registered.agents || {};
+    const el = document.getElementById('agents-grid');
+    const ids = Object.keys(agents);
+    if (!ids.length) { el.innerHTML = '<div class="empty">No agent harnesses found.</div>'; return; }
+    el.innerHTML = ids.map(id => {
+      const a = agents[id];
+      const d = a.detect || {};
+      const isReg = regAgents[id] && regAgents[id].status === 'registered';
+      const statusIcon = d.status === 'ready' ? '&#x2705;' : (d.status === 'missing_creds' ? '&#x26A0;&#xFE0F;' : '&#x274C;');
+      const statusClass = d.status === 'ready' ? 'status-ready' : (d.status === 'missing_creds' ? 'status-warn' : 'status-err');
+      const actionHtml = isReg
+        ? '<button class="btn btn-secondary btn-sm" onclick="unregisterAgent(\'' + id + '\')">Unregister</button>'
+        : '<button class="btn btn-success btn-sm" onclick="registerAgent(\'' + id + '\')" ' + (d.status !== 'ready' ? 'disabled' : '') + '>Set up</button>';
+      var iconHtml = a.icon && a.icon.indexOf('http') === 0
+        ? '<img src="' + escapeHtml(a.icon) + '" alt="" class="agent-favicon" onerror="defaultImage(this)">'
+        : (a.icon || '&#x1F916;');
+      return '<div class="agent-card' + (isReg ? ' agent-registered' : '') + '">'
+        + '<div class="agent-icon">' + iconHtml + '</div>'
+        + '<div class="agent-body">'
+        + '<div class="agent-name">' + escapeHtml(a.display_name || id) + '</div>'
+        + '<div class="agent-desc">' + escapeHtml(a.description || '') + '</div>'
+        + '<div class="agent-detect">'
+        + '<span class="' + statusClass + '">' + statusIcon + ' ' + escapeHtml(d.message || d.status || '') + '</span>'
+        + (d.missing_env && d.missing_env.length ? '<span class="agent-missing">Missing: ' + escapeHtml(d.missing_env.join(', ')) + '</span>' : '')
+        + '</div>'
+        + (isReg ? '<div class="agent-badge-reg">Registered</div>' : '')
+        + '</div>'
+        + '<div class="agent-actions">' + actionHtml + '</div>'
+        + '</div>';
+    }).join('');
+  } catch(e) { document.getElementById('agents-grid').innerHTML = '<div class="loader">Error loading agents</div>'; }
+}
+
+function defaultImage(img) {
+  img.onerror = null;
+  img.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Ccircle cx='14' cy='14' r='12' fill='%234a6572'/%3E%3C/svg%3E";
+}
+
+function closeAgentLog() {
+  document.getElementById('agent-setup-panel').style.display = 'none';
+  document.getElementById('agent-log-content').innerHTML = '';
+  document.getElementById('agent-log-status').innerHTML = '';
+}
+
+function _appendAgentLog(entries) {
+  const el = document.getElementById('agent-log-content');
+  entries.forEach(function(entry) {
+    const d = document.createElement('div');
+    d.className = 'agent-log-entry lvl-' + (entry.level || 'INFO');
+    d.innerHTML = '<span class="time">' + escapeHtml(entry.time || '') + '</span>' + escapeHtml(entry.message);
+    el.appendChild(d);
+  });
+  el.scrollTop = el.scrollHeight;
+}
+
+async function registerAgent(id) {
+  document.getElementById('agent-setup-panel').style.display = '';
+  const logEl = document.getElementById('agent-log-content');
+  logEl.innerHTML = '<div class="agent-log-entry">Setting up ' + escapeHtml(id) + '...</div>';
+  document.getElementById('agent-log-title').textContent = 'Setting up ' + id + '...';
+  document.getElementById('agent-log-status').innerHTML = '';
+  try {
+    const r = await fetchJSON('/api/agents/' + encodeURIComponent(id) + '/register', { method:'POST' });
+    logEl.innerHTML = '';
+    if (r.log) _appendAgentLog(r.log);
+    if (r.success) {
+      document.getElementById('agent-log-title').textContent = id + ' ready';
+      document.getElementById('agent-log-status').innerHTML = '<span class="status-ready">&#x2705; ' + escapeHtml(id) + ' is now routed through petsitter</span>';
+    } else {
+      document.getElementById('agent-log-title').textContent = id + ' failed';
+      document.getElementById('agent-log-status').innerHTML = '<span class="status-err">&#x274C; ' + escapeHtml(r.error || 'Setup failed') + '</span>';
+    }
+    fetchAgents();
+  } catch(e) {
+    logEl.innerHTML = '<div class="agent-log-entry lvl-ERROR">Error: ' + escapeHtml(e.message) + '</div>';
+    document.getElementById('agent-log-status').innerHTML = '<span class="status-err">&#x274C; ' + escapeHtml(e.message) + '</span>';
+  }
+}
+
+async function unregisterAgent(id) {
+  document.getElementById('agent-setup-panel').style.display = '';
+  const logEl = document.getElementById('agent-log-content');
+  logEl.innerHTML = '<div class="agent-log-entry">Restoring ' + escapeHtml(id) + '...</div>';
+  document.getElementById('agent-log-title').textContent = 'Restoring ' + id + '...';
+  document.getElementById('agent-log-status').innerHTML = '';
+  try {
+    const r = await fetchJSON('/api/agents/' + encodeURIComponent(id) + '/unregister', { method:'POST' });
+    logEl.innerHTML = '';
+    if (r.log) _appendAgentLog(r.log);
+    document.getElementById('agent-log-title').textContent = id + ' restored';
+    document.getElementById('agent-log-status').innerHTML = '<span class="status-ready">&#x2705; Configuration restored</span>';
+    fetchAgents();
+  } catch(e) {
+    logEl.innerHTML = '<div class="agent-log-entry lvl-ERROR">Error: ' + escapeHtml(e.message) + '</div>';
+    document.getElementById('agent-log-status').innerHTML = '<span class="status-err">&#x274C; ' + escapeHtml(e.message) + '</span>';
+  }
+}
+
+async function shutdownPetsitter() {
+  if (!confirm('Restore original configuration and shutdown petsitter?')) return;
+  const statusEl = document.getElementById('agent-setup-panel');
+  if (statusEl) { statusEl.style.display = ''; }
+  const logEl = document.getElementById('agent-log-content');
+  if (logEl) { logEl.innerHTML = '<div class="agent-log-entry">Shutting down and restoring configuration...</div>'; }
+  const titleEl = document.getElementById('agent-log-title');
+  if (titleEl) titleEl.textContent = 'Shutting down...';
+  try {
+    const r = await fetchJSON('/api/shutdown', { method:'POST' });
+    if (logEl && r.log) _appendAgentLog(r.log);
+  } catch(e) {
+    if (logEl) logEl.innerHTML += '<div class="agent-log-entry lvl-ERROR">Error: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
 // ---- init ----
 var initialTab = location.hash.replace('#','') || 'tricks';
 if (document.querySelector('.tab[data-tab="' + initialTab + '"]')) switchTab(initialTab);
-fetchInfo(); fetchTricksets(); fetchAvailable(); fetchModels();
+fetchInfo(); fetchTricksets(); fetchAvailable(); fetchModels(); fetchAgents();
 startLogStream();
 </script>
 </body>

@@ -18,6 +18,7 @@ from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
+from src.agent_manager import AgentManager
 from src.gui_routes import register_gui_routes
 from src.loader import load_tricks
 from src.proxy import ProxyHandler
@@ -61,6 +62,7 @@ class LogCaptureHandler(logging.Handler):
 
 
 _log_capture: LogCaptureHandler | None = None
+_agent_manager: AgentManager | None = None
 
 CONFIG_DIR = Path.home() / ".config" / "petsitter"
 CONFIG_PATH = CONFIG_DIR / "config.json"
@@ -108,7 +110,8 @@ def create_app(
 
     handler = ProxyHandler(model_url, model_name, api_key, tricksets=tricksets)
 
-    global _log_capture
+    global _log_capture, _agent_manager
+    _agent_manager = AgentManager(config_dir=str(CONFIG_DIR))
     log_level = getattr(logging, os.getenv("LOGLEVEL", "INFO").upper(), logging.INFO)
     logging.getLogger().setLevel(log_level)
     _log_capture = LogCaptureHandler()
@@ -260,9 +263,65 @@ def create_app(
         return JSONResponse({"success": True})
     app.add_route("/api/tricksets/{name}", update_trickset, methods=["PUT"])
 
+    # ----- agent API endpoints -----
+
+    async def list_agents(request: Request) -> Response:
+        if _agent_manager is None:
+            return JSONResponse({"error": "Agent manager not initialized"}, status_code=500)
+        return JSONResponse(_agent_manager.get_agents())
+    app.add_route("/api/agents", list_agents, methods=["GET"])
+
+    async def get_agent_registered(request: Request) -> Response:
+        if _agent_manager is None:
+            return JSONResponse({"error": "Agent manager not initialized"}, status_code=500)
+        return JSONResponse(_agent_manager.get_registered())
+    app.add_route("/api/agents/registered", get_agent_registered, methods=["GET"])
+
+    async def register_agent(request: Request) -> Response:
+        if _agent_manager is None:
+            return JSONResponse({"error": "Agent manager not initialized"}, status_code=500)
+        agent_id = request.path_params.get("id")
+        try:
+            success, log = _agent_manager.register(agent_id)
+            status = 200 if success else 400
+            return JSONResponse({"success": success, "agent_id": agent_id, "log": log}, status_code=status)
+        except KeyError as e:
+            return JSONResponse({"success": False, "error": str(e), "log": []}, status_code=404)
+        except Exception as e:
+            return JSONResponse({"success": False, "error": str(e), "log": []}, status_code=500)
+    app.add_route("/api/agents/{id}/register", register_agent, methods=["POST"])
+
+    async def unregister_agent(request: Request) -> Response:
+        if _agent_manager is None:
+            return JSONResponse({"error": "Agent manager not initialized"}, status_code=500)
+        agent_id = request.path_params.get("id")
+        try:
+            success, log = _agent_manager.unregister(agent_id)
+            return JSONResponse({"success": success, "agent_id": agent_id, "log": log})
+        except KeyError as e:
+            return JSONResponse({"success": False, "error": str(e), "log": []}, status_code=404)
+        except Exception as e:
+            return JSONResponse({"success": False, "error": str(e), "log": []}, status_code=500)
+    app.add_route("/api/agents/{id}/unregister", unregister_agent, methods=["POST"])
+
+    async def shutdown_server(request: Request) -> Response:
+        if _agent_manager is not None:
+            _agent_manager.unregister_all()
+        handler.shutdown_all()
+        asyncio.create_task(_delayed_exit(0.5))
+        return JSONResponse({"success": True, "message": "Shutting down"})
+    app.add_route("/api/shutdown", shutdown_server, methods=["POST"])
+
     atexit.register(handler.shutdown_all)
 
     return app
+
+
+async def _delayed_exit(delay: float = 0.5) -> None:
+    """Exit the process after a short delay so the HTTP response can be sent."""
+    await asyncio.sleep(delay)
+    import os
+    os._exit(0)
 
 
 def _get_version() -> str:

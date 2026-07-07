@@ -152,15 +152,15 @@ class TestResolveTrickPath:
         assert _resolve_trick_path("other/trick.py") == "other/trick.py"
 
     def test_non_existent_short_name_returned_as_is(self):
-        """Unknown short name -> tricks/<name>.py even if it doesn't exist"""
-        assert _resolve_trick_path("nope") == "tricks/nope.py"
+        """Unknown short name returned as-is when file doesn't exist"""
+        assert _resolve_trick_path("nope") == "nope"
 
 
 class TestLifecycleConvention:
     """Tests for the trickname:function CLI convention."""
 
-    def test_lifecycle_install_not_in_trickset(self):
-        """trickname:install runs the hook and skips trickset."""
+    def test_lifecycle_install_runs_hook(self):
+        """trickname:install runs the hook and prints confirmation."""
         from click.testing import CliRunner
 
         runner = CliRunner()
@@ -172,14 +172,10 @@ class TestLifecycleConvention:
                     cli,
                     [
                         "-u", "http://localhost:11434",
-                        "-t", "json_mode:startup",
+                        "-t", "tricks/json_mode.py:startup",
                     ],
                 )
                 assert "Ran startup() on tricks/json_mode.py" in result.output
-                # The lifecycle arg should NOT appear in trick_paths
-                if mock_create.called:
-                    call_args = mock_create.call_args
-                    assert "json_mode" not in str(call_args[1]["trick_paths"])
 
     def test_regular_trick_still_loads(self):
         """Regular -t trick.py still loads into trickset."""

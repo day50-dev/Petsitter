@@ -20,7 +20,7 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from src.agent_manager import AgentManager
 from src.gui_routes import register_gui_routes
-from src.loader import load_tricks
+from src.loader import load_trick_from_path, load_tricks
 from src.proxy import ProxyHandler
 from src.trick import (
     configure_modelset,
@@ -66,6 +66,21 @@ _agent_manager: AgentManager | None = None
 
 CONFIG_DIR = Path.home() / ".config" / "petsitter"
 CONFIG_PATH = CONFIG_DIR / "config.json"
+
+
+def _resolve_trick_path(name: str) -> str:
+    """Resolve a trick name to a .py file path.
+
+    ``swapharness`` → ``tricks/swapharness.py``
+    ``tricks/json_mode.py`` → stays as-is.
+    """
+    if name.endswith(".py"):
+        return name
+    if "/" not in name:
+        candidate = f"tricks/{name}.py"
+        if Path(candidate).exists():
+            return candidate
+    return name
 
 
 def load_config() -> dict:
@@ -495,8 +510,37 @@ def cli(
                 if isinstance(inferred_model, str) and inferred_model:
                     model_name = inferred_model
 
-    trick_list = list(tricks) if tricks else cfg_tricks
+    # Process -t args: trickname:function runs a lifecycle hook,
+    # trickname or path loads the trick into the default trickset.
+    lifecycle_tricks: list[str] = []
+    load_tricks_list: list[str] = []
+    for arg in (list(tricks) if tricks else []):
+        if ":" in arg and not arg.endswith(".py"):
+            name, _, func = arg.partition(":")
+            path = _resolve_trick_path(name)
+            lifecycle_tricks.append(f"{path}:{func}")
+        else:
+            load_tricks_list.append(_resolve_trick_path(arg) if "/" not in arg else arg)
+    trick_list = load_tricks_list if load_tricks_list else cfg_tricks
     trickset_list = list(tricksets) if tricksets else cfg_tricksets
+
+    # Run lifecycle hooks (install, uninstall, startup, shutdown) on demand
+    for entry in lifecycle_tricks:
+        path, _, func = entry.partition(":")
+        try:
+            cls = load_trick_from_path(path)
+            trick = cls()
+            method = getattr(trick, func, None)
+            if method is None:
+                click.echo(f"Error: trick {path} has no method '{func}'", err=True)
+                continue
+            if asyncio.iscoroutinefunction(method):
+                asyncio.run(method())
+            else:
+                method()
+            click.echo(f"Ran {func}() on {path}")
+        except Exception as e:
+            click.echo(f"Error running {func}() on {path}: {e}", err=True)
 
     if ":" in listen_on:
         host, port_str = listen_on.rsplit(":", 1)

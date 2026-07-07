@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.server import create_app, cli
+from src.server import _resolve_trick_path, create_app, cli
 from src.trick import Trick
 
 
@@ -134,6 +134,90 @@ class TestServerEndpoints:
                 response = await ac.get("/v1/models")
                 assert response.status_code == 200
                 assert "data" in response.json()
+
+
+class TestResolveTrickPath:
+    """Tests for _resolve_trick_path helper."""
+
+    def test_resolves_short_name(self):
+        """swapharness -> tricks/swapharness.py"""
+        assert _resolve_trick_path("json_mode") == "tricks/json_mode.py"
+
+    def test_preserves_full_path(self):
+        """tricks/json_mode.py stays as-is"""
+        assert _resolve_trick_path("tricks/json_mode.py") == "tricks/json_mode.py"
+
+    def test_preserves_path_with_slash(self):
+        """Tricks outside tricks/ dir stay as-is"""
+        assert _resolve_trick_path("other/trick.py") == "other/trick.py"
+
+    def test_non_existent_short_name_returned_as_is(self):
+        """Unknown short name -> tricks/<name>.py even if it doesn't exist"""
+        assert _resolve_trick_path("nope") == "tricks/nope.py"
+
+
+class TestLifecycleConvention:
+    """Tests for the trickname:function CLI convention."""
+
+    def test_lifecycle_install_not_in_trickset(self):
+        """trickname:install runs the hook and skips trickset."""
+        from click.testing import CliRunner
+
+        runner = CliRunner()
+
+        with patch("src.server.uvicorn.run") as mock_run:
+            with patch("src.server.create_app") as mock_create:
+                mock_create.return_value = None
+                result = runner.invoke(
+                    cli,
+                    [
+                        "-u", "http://localhost:11434",
+                        "-t", "json_mode:startup",
+                    ],
+                )
+                assert "Ran startup() on tricks/json_mode.py" in result.output
+                # The lifecycle arg should NOT appear in trick_paths
+                if mock_create.called:
+                    call_args = mock_create.call_args
+                    assert "json_mode" not in str(call_args[1]["trick_paths"])
+
+    def test_regular_trick_still_loads(self):
+        """Regular -t trick.py still loads into trickset."""
+        from click.testing import CliRunner
+
+        runner = CliRunner()
+
+        with patch("src.server.uvicorn.run") as mock_run:
+            with patch("src.server.create_app") as mock_create:
+                mock_create.return_value = None
+                result = runner.invoke(
+                    cli,
+                    [
+                        "-u", "http://localhost:11434",
+                        "-t", "tricks/json_mode.py",
+                    ],
+                )
+                assert mock_create.called
+                call_args = mock_create.call_args
+                assert "tricks/json_mode.py" in call_args[1]["trick_paths"]
+
+    def test_unknown_method_prints_error(self):
+        """trickname:unknown prints error message."""
+        from click.testing import CliRunner
+
+        runner = CliRunner()
+
+        with patch("src.server.uvicorn.run") as mock_run:
+            with patch("src.server.create_app") as mock_create:
+                mock_create.return_value = None
+                result = runner.invoke(
+                    cli,
+                    [
+                        "-u", "http://localhost:11434",
+                        "-t", "json_mode:nonexistent",
+                    ],
+                )
+                assert "has no method 'nonexistent'" in result.output
 
 
 class TestCLI:

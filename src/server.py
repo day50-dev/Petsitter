@@ -262,7 +262,12 @@ def create_app(
         name = request.path_params.get("name")
         ts = handler.tricksets.get(name)
         if not ts:
-            return JSONResponse({"error": f"Trickset '{name}' not found"}, status_code=404)
+            path = Path("tricksets") / f"{name}.json"
+            if path.exists():
+                ts = Trickset.load_from_file(str(path))
+                handler.tricksets[name] = ts
+            else:
+                return JSONResponse({"error": f"Trickset '{name}' not found"}, status_code=404)
         data = await request.json()
         if "filters" in data:
             ts.filters = data["filters"]

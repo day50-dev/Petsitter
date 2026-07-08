@@ -35,15 +35,16 @@
 <div class="tab" data-tab="logs" onclick="switchTab('logs')">Logs</div>
 </div>
 
-<!-- === TRICKS TAB === -->
-<div class="tab-pane active" id="tab-tricks">
-<div class="ts-bar" id="ts-bar" style="display:none">
+<div class="ts-bar" id="ts-bar">
 <div class="ts-pills" id="ts-pills"></div>
 <div class="ts-filters">
 <span onclick="editFilter(this,'X-Title')">X-Title: <span class="val" id="ts-fx">*</span></span>
 <span onclick="editFilter(this,'Model')">Model: <span class="val" id="ts-fm">*</span></span>
 </div>
 </div>
+
+<!-- === TRICKS TAB === -->
+<div class="tab-pane active" id="tab-tricks">
 <div class="two-col">
 <div class="card">
 <h2>Loaded Tricks</h2>
@@ -74,9 +75,6 @@
 
 <!-- === MODELS TAB === -->
 <div class="tab-pane" id="tab-models">
-<div class="ms-bar">
-<div class="ts-pills" id="ms-pills"></div>
-</div>
 <div class="card">
 <div class="card-title"><h2>Models</h2></div>
 <div class="section-desc">Upstream model endpoints. Set an API key to false (passthrough) to let the client supply its own key.</div>
@@ -281,6 +279,15 @@ async function unloadTrick(name) {
 let selectedTrickset = '_default';
 let loadedTricksets = {};
 
+function _sharedPills(loaded, avail, selected, onSwitch, showAdd) {
+  const loadedNames = new Set(loaded.map(ts => ts.name));
+  const names = [...new Set(['_default', ...loadedNames, ...avail.map(ts => ts.name)])];
+  const el = document.getElementById('ts-pills');
+  el.innerHTML = names.map(n =>
+    '<span class="pill' + (n === selected ? ' active' : '') + (!loadedNames.has(n) ? ' pill-unloaded' : '') + '" data-name="' + escapeHtml(n) + '" onclick="' + onSwitch + '(this.dataset.name)">' + escapeHtml(n) + '</span>'
+  ).join('') + (showAdd ? '<span class="pill pill-add" onclick="addTrickset()">+ Add</span>' : '');
+}
+
 async function fetchTricksets() {
   try {
     const [loaded, avail] = await Promise.all([
@@ -289,14 +296,10 @@ async function fetchTricksets() {
     ]);
     loadedTricksets = {};
     loaded.forEach(ts => loadedTricksets[ts.name] = ts);
-    const names = [...new Set([...loaded.map(ts => ts.name), ...avail.map(ts => ts.name)])];
-    if (!names.includes(selectedTrickset) && names.length) selectedTrickset = names[0];
-    const el = document.getElementById('ts-pills');
-    el.innerHTML = names.map(n => {
-      const isLoaded = !!loadedTricksets[n];
-      return '<span class="pill' + (n === selectedTrickset ? ' active' : '') + (isLoaded ? '' : ' pill-unloaded') + '" data-name="' + n + '" onclick="switchTrickset(this.dataset.name)">' + escapeHtml(n) + '</span>';
-    }).join('') + '<span class="pill pill-add" onclick="addTrickset()">+ Add</span>';
-    if (names.length) switchTrickset(selectedTrickset);
+    _sharedPills(loaded, avail, selectedTrickset, 'switchTrickset', true);
+    const loadedNames = new Set(loaded.map(ts => ts.name));
+    if (!loadedNames.has(selectedTrickset) && loaded.length) selectedTrickset = loaded[0].name;
+    if (loaded.length) switchTrickset(selectedTrickset);
   } catch(e) { console.error(e); }
 }
 
@@ -383,19 +386,15 @@ function _keyDisplay(v) { return v === false ? false : (v || ''); }
 
 async function fetchModels() {
   try {
-    const [modelsData, tricksets] = await Promise.all([
+    const [modelsData, loaded, avail] = await Promise.all([
       fetchJSON('/api/models'),
       fetchJSON('/api/tricksets'),
+      fetchJSON('/api/tricksets/available'),
     ]);
     const configured = modelsData.configured_models || {};
     _tsModels = {};
-    tricksets.forEach(ts => _tsModels[ts.name] = ts.models || {});
-    const tsNames = tricksets.map(ts => ts.name);
-    const allScopes = ['_default', ...tsNames];
-    const pillsEl = document.getElementById('ms-pills');
-    pillsEl.innerHTML = allScopes.map(n =>
-      '<span class="pill' + (n === selectedModelScope ? ' active' : '') + '" data-name="' + escapeHtml(n) + '" onclick="switchModelScope(this.dataset.name)">' + escapeHtml(n) + '</span>'
-    ).join('');
+    loaded.forEach(ts => _tsModels[ts.name] = ts.models || {});
+    _sharedPills(loaded, avail, selectedModelScope, 'switchModelScope', true);
     renderModels(selectedModelScope, configured);
   } catch(e) { document.getElementById('model-list').innerHTML = '<div class="loader">Error loading models</div>'; }
 }

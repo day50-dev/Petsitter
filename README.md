@@ -93,7 +93,7 @@ Tricks also have lifecycle hooks that run outside the request pipeline: `install
 Here is a minimal trick that stops the model from using em-dashes (the long dash character that LLMs love to overuse) and replaces them with regular hyphens:
 
 ```python
-"""No Em-Dash trick — replaces em-dashes with hyphens."""
+"""No Em-Dash trick - replaces em-dashes with hyphens."""
 
 from src.trick import Trick
 
@@ -205,7 +205,7 @@ Every trick can implement up to 4 lifecycle hooks that the framework calls autom
 
 ### `install()`
 
-Called once when the trick is first added to a trickset. Use for one-time setup — clone repos, download files, create resources:
+Called once when the trick is first added to a trickset. Use for one-time setup - clone repos, download files, create resources:
 
 ```python
 def install(self):
@@ -216,7 +216,7 @@ def install(self):
 
 ### `startup()`
 
-Called when the first concurrent request starts using this trick (the internal run counter goes 0→1). Use for per-session initialization — open connections, preload models:
+Called when the first concurrent request starts using this trick (the internal run counter goes 0→1). Use for per-session initialization - open connections, preload models:
 
 ```python
 def startup(self):
@@ -225,7 +225,7 @@ def startup(self):
 
 ### `shutdown()`
 
-Called when the last concurrent request finishes using this trick (run counter goes 1→0), or during server shutdown for all active tricks. Use for per-session cleanup — close connections, release resources:
+Called when the last concurrent request finishes using this trick (run counter goes 1→0), or during server shutdown for all active tricks. Use for per-session cleanup - close connections, release resources:
 
 ```python
 def shutdown(self):
@@ -242,7 +242,7 @@ def uninstall(self):
     shutil.rmtree(self.cache_dir, ignore_errors=True)
 ```
 
-The startup/shutdown hooks use a reference counter so multiple concurrent requests to the same trick won't trigger repeated startup/shutdown calls — `startup()` fires once for the first request, and `shutdown()` fires when the last one finishes.
+The startup/shutdown hooks use a reference counter so multiple concurrent requests to the same trick won't trigger repeated startup/shutdown calls - `startup()` fires once for the first request, and `shutdown()` fires when the last one finishes.
 
 ## Keywords 
 
@@ -372,7 +372,7 @@ A trick has full control of the request lifecycle - it can call any number of mo
 
 Petsitter supports this through **model configs** - JSON files that map role names to `{url, model, key}` objects. Tricks declare what roles they need; if a key is missing, petsitter prints a helpful error.
 
-The `model` and `key` fields can be a string or boolean `false` — `false` means passthrough (don't set the field in the upstream request). This is distinct from `""` which clears the value.
+The `model` and `key` fields can be a string or boolean `false` - `false` means passthrough (don't set the field in the upstream request). This is distinct from `""` which clears the value.
 
 Example `modelset.json`:
 ```json
@@ -512,7 +512,7 @@ Tricksets live as JSON files in the `tricksets/` directory:
 }
 ```
 
-The `parameters` field stores user-defined variables that tricks within the trickset can reference at runtime. The `models` field lets you override model routing for this trickset — each key maps to a `{url, model, key}` object (same format as the global model config), letting different tricksets use different models for the same role. Set `model` or `key` to `false` for passthrough. Manage both via the dashboard or the API.
+The `parameters` field stores user-defined variables that tricks within the trickset can reference at runtime. The `models` field lets you override model routing for this trickset - each key maps to a `{url, model, key}` object (same format as the global model config), letting different tricksets use different models for the same role. Set `model` or `key` to `false` for passthrough. Manage both via the dashboard or the API.
 
 Each loaded trickset is also exposed as a model named `trickset/<name>` (e.g., `trickset/gemma4`). Selecting this model in a client bypasses the filter matching and runs that trickset's tricks directly on every request.
 
@@ -635,9 +635,9 @@ A model config JSON file lets you run multi-model tricks like [Kennel](#kennel) 
 The `"default"` key sets the primary model (equivalent to `-u`/`--url` + `-m`/`--model`). Tricks declare what keys they need - for example, KennelTrick requires `["default", "thinker", "toolcall"]`. If a key is missing, petsitter prints a helpful error with the expected format.
 
 The `model` and `key` fields accept:
-- A string — use as the model name / API key in upstream requests.
-- `false` (boolean) — passthrough, don't set the field at all.
-- `""` (empty string) — explicitly clear the value.
+- A string - use as the model name / API key in upstream requests.
+- `false` (boolean) - passthrough, don't set the field at all.
+- `""` (empty string) - explicitly clear the value.
 
 ```bash
 # Use a model config instead of -u / -m

@@ -401,54 +401,58 @@ async function fetchModels() {
 
 function renderModels(scope, globalConfigured) {
   const el = document.getElementById('model-list');
-  let models, prefix;
+  let prefix;
   if (scope === '_default') {
-    models = globalConfigured;
-    prefix = '';
-  } else {
-    models = _tsModels[scope] || {};
-    prefix = scope;
-  }
-  let keys = Object.keys(models).sort();
-  if (!keys.length) {
-    if (!prefix) {
-      el.innerHTML = '<div class="empty">No models configured.</div>';
-      return;
-    }
-    keys = Object.keys(globalConfigured).sort();
+    const models = globalConfigured;
+    const keys = Object.keys(models).sort();
     if (!keys.length) {
       el.innerHTML = '<div class="empty">No models configured.</div>';
       return;
     }
-    models = globalConfigured;
+    el.innerHTML = keys.map(k => {
+      const m = models[k] || {};
+      return renderModelEntry(scope, k, m);
+    }).join('');
+  } else {
+    const scoped = _tsModels[scope] || {};
+    const allKeys = new Set([...Object.keys(scoped), ...Object.keys(globalConfigured)]);
+    const keys = [...allKeys].sort();
+    if (!keys.length) {
+      el.innerHTML = '<div class="empty">No models configured for <strong>' + escapeHtml(scope) + '</strong>.</div>';
+      return;
+    }
+    el.innerHTML = keys.map(k => {
+      const m = scoped[k] || {};
+      return renderModelEntry(scope, k, m);
+    }).join('');
   }
-  el.innerHTML = keys.map(k => {
-    const m = models[k] || {};
-    const safe = scope.replace(/[^a-zA-Z0-9]/g, '_') + '-' + k.replace(/[^a-zA-Z0-9]/g, '_');
-    const urlId = 'mu-' + safe;
-    const nameId = 'mn-' + safe;
-    const keyId = 'mk-' + safe;
-    const ptId = 'mpt-' + safe;
-    const url = m.url || '';
-    const isNamePt = m.model === false;
-    const modelDisplay = isNamePt ? '' : (m.model || '');
-    const keyPassthrough = m.key === false;
-    const keyDisplay = keyPassthrough ? '' : (m.key || '');
-    const namePlaceholder = isNamePt ? '(passthrough)' : 'model-name';
-    const keyPlaceholder = keyPassthrough ? '(passthrough)' : 'api-key';
-    const keyPtActive = keyPassthrough ? ' pt-active' : '';
-    const namePtActive = isNamePt ? ' pt-active' : '';
-    const namePtId = 'mpn-' + safe;
-    return '<div class="model-entry" data-scope="' + escapeHtml(scope) + '" data-key="' + escapeHtml(k) + '"><span class="key">' + escapeHtml(k) + '</span>' +
-      '<div class="model-fields">' +
-      '<input id="' + urlId + '" type="text" value="' + escapeHtml(url) + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',this.value,document.getElementById(\'' + nameId + '\').value,document.getElementById(\'' + keyId + '\').value)" placeholder="http://...">' +
-      '<div class="model-subrow">' +
-      '<div class="key-wrap"><input id="' + nameId + '" type="text" value="' + escapeHtml(modelDisplay) + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',document.getElementById(\'' + urlId + '\').value,this.value,document.getElementById(\'' + keyId + '\').value)" placeholder="' + namePlaceholder + '"' + (isNamePt ? ' oninput="offPassthrough(this)" onclick="offPassthrough(this)"' : '') + '>' +
-      '<button class="pt-btn' + namePtActive + '" id="' + namePtId + '" onclick="togglePassthrough(this)" data-field="name" title="Pass through client model name">pass</button></div>' +
-      '<div class="key-wrap"><input id="' + keyId + '" type="text" value="' + escapeHtml(keyDisplay) + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',document.getElementById(\'' + urlId + '\').value,document.getElementById(\'' + nameId + '\').value,this.value)" placeholder="' + keyPlaceholder + '"' + (keyPassthrough ? ' oninput="offPassthrough(this)" onclick="offPassthrough(this)"' : '') + '>' +
-      '<button class="pt-btn' + keyPtActive + '" id="' + ptId + '" onclick="togglePassthrough(this)" data-field="key" title="Pass through client API key">pass</button></div>' +
-      '</div></div></div>';
-  }).join('');
+}
+
+function renderModelEntry(scope, k, m) {
+  const safe = scope.replace(/[^a-zA-Z0-9]/g, '_') + '-' + k.replace(/[^a-zA-Z0-9]/g, '_');
+  const urlId = 'mu-' + safe;
+  const nameId = 'mn-' + safe;
+  const keyId = 'mk-' + safe;
+  const ptId = 'mpt-' + safe;
+  const url = m.url || '';
+  const isNamePt = m.model === false;
+  const modelDisplay = isNamePt ? '' : (m.model || '');
+  const keyPassthrough = m.key === false;
+  const keyDisplay = keyPassthrough ? '' : (m.key || '');
+  const namePlaceholder = isNamePt ? '(passthrough)' : 'model-name';
+  const keyPlaceholder = keyPassthrough ? '(passthrough)' : 'api-key';
+  const keyPtActive = keyPassthrough ? ' pt-active' : '';
+  const namePtActive = isNamePt ? ' pt-active' : '';
+  const namePtId = 'mpn-' + safe;
+  return '<div class="model-entry" data-scope="' + escapeHtml(scope) + '" data-key="' + escapeHtml(k) + '"><span class="key">' + escapeHtml(k) + '</span>' +
+    '<div class="model-fields">' +
+    '<input id="' + urlId + '" type="text" value="' + escapeHtml(url) + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',this.value,document.getElementById(\'' + nameId + '\').value,document.getElementById(\'' + keyId + '\').value)" placeholder="http://...">' +
+    '<div class="model-subrow">' +
+    '<div class="key-wrap"><input id="' + nameId + '" type="text" value="' + escapeHtml(modelDisplay) + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',document.getElementById(\'' + urlId + '\').value,this.value,document.getElementById(\'' + keyId + '\').value)" placeholder="' + namePlaceholder + '"' + (isNamePt ? ' oninput="offPassthrough(this)" onclick="offPassthrough(this)"' : '') + '>' +
+    '<button class="pt-btn' + namePtActive + '" id="' + namePtId + '" onclick="togglePassthrough(this)" data-field="name" title="Pass through client model name">pass</button></div>' +
+    '<div class="key-wrap"><input id="' + keyId + '" type="text" value="' + escapeHtml(keyDisplay) + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',document.getElementById(\'' + urlId + '\').value,document.getElementById(\'' + nameId + '\').value,this.value)" placeholder="' + keyPlaceholder + '"' + (keyPassthrough ? ' oninput="offPassthrough(this)" onclick="offPassthrough(this)"' : '') + '>' +
+    '<button class="pt-btn' + keyPtActive + '" id="' + ptId + '" onclick="togglePassthrough(this)" data-field="key" title="Pass through client API key">pass</button></div>' +
+    '</div></div></div>';
 }
 
 function switchModelScope(name) {

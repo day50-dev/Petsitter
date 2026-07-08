@@ -11,5 +11,9 @@
     "tricks/code_validator.py"
   ],
   "parameters": {},
-  "models": {}
+  "models": {
+    "default": {
+      "url": "http://127.0.0.1:123"
+    }
+  }
 }

@@ -409,10 +409,18 @@ function renderModels(scope, globalConfigured) {
     models = _tsModels[scope] || {};
     prefix = scope;
   }
-  const keys = Object.keys(models).sort();
+  let keys = Object.keys(models).sort();
   if (!keys.length) {
-    el.innerHTML = '<div class="empty">No models configured' + (prefix ? ' for <strong>' + escapeHtml(scope) + '</strong>' : '') + '.</div>';
-    return;
+    if (!prefix) {
+      el.innerHTML = '<div class="empty">No models configured.</div>';
+      return;
+    }
+    keys = Object.keys(globalConfigured).sort();
+    if (!keys.length) {
+      el.innerHTML = '<div class="empty">No models configured.</div>';
+      return;
+    }
+    models = globalConfigured;
   }
   el.innerHTML = keys.map(k => {
     const m = models[k] || {};

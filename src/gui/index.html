@@ -493,7 +493,6 @@ function togglePassthrough(scope, key, keyId, ptId) {
       false);
   }
 }
-}
 
 // ---- logs ----
 let logEventSource = null;
@@ -509,6 +508,7 @@ function startLogStream() {
     if (e.data && e.data.startsWith('{')) {
       try {
         const entry = JSON.parse(e.data);
+        if (viewer.querySelector('.loader')) viewer.innerHTML = '';
         const atBottom = viewer.scrollHeight - viewer.scrollTop - viewer.clientHeight < 40;
         viewer.insertAdjacentHTML('beforeend', '<div class="log-entry lvl-' + entry.level + '"><span class="time">' + escapeHtml(entry.time) + '</span>' + escapeHtml(entry.level) + ': ' + escapeHtml(entry.message) + '</div>');
         pending++;

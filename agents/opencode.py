@@ -50,8 +50,10 @@ class OpenCodeAgent(Agent):
                 # Check if any provider has a baseURL set already
                 providers = data.get("provider", {})
                 for pid, pcfg in providers.items() if isinstance(providers, dict) else []:
-                    if isinstance(pcfg, dict) and pcfg.get("baseURL"):
-                        notes.append(f"  {pid} baseURL: {pcfg['baseURL']}")
+                    if isinstance(pcfg, dict):
+                        burl = pcfg.get("options", {}).get("baseURL") or pcfg.get("baseURL")
+                        if burl:
+                            notes.append(f"  {pid} baseURL: {burl}")
             except (json.JSONDecodeError, OSError):
                 notes.append("Found opencode.json (unreadable)")
         else:
@@ -77,9 +79,13 @@ class OpenCodeAgent(Agent):
 
         backup.setdefault("files", {})[f"file::{GLOBAL_CONFIG}"] = json.dumps(existing, indent=2) + "\n" if existing else ""
 
-        # Determine which provider to patch
+        # Determine which provider to patch — use first provider that has a key
         model = existing.get("model", "")
-        provider_id = model.split("/")[0] if "/" in model else "openai"
+        provider_id = model.split("/")[0] if "/" in model else ""
+        if not provider_id:
+            providers = existing.get("provider", {})
+            if isinstance(providers, dict):
+                provider_id = next(iter(providers), "openai")
 
         providers = existing.get("provider", {})
         if not isinstance(providers, dict):
@@ -89,11 +95,15 @@ class OpenCodeAgent(Agent):
         if not isinstance(provider_cfg, dict):
             provider_cfg = {}
 
-        existing_url = provider_cfg.get("baseURL", "")
+        existing_url = provider_cfg.get("options", {}).get("baseURL", "")
         if existing_url:
             log.append({"level": "INFO", "message": f"Saved existing {provider_id} baseURL: {existing_url}"})
 
-        provider_cfg["baseURL"] = f"{PETSITTER_URL}/v1"
+        options = provider_cfg.get("options", {})
+        if not isinstance(options, dict):
+            options = {}
+        options["baseURL"] = f"{PETSITTER_URL}/v1"
+        provider_cfg["options"] = options
         providers[provider_id] = provider_cfg
         existing["provider"] = providers
 

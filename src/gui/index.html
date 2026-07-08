@@ -434,7 +434,7 @@ function renderModels(scope, globalConfigured) {
       '<div class="model-subrow">' +
       '<input id="' + nameId + '" type="text" value="' + escapeHtml(modelDisplay) + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',document.getElementById(\'' + urlId + '\').value,this.value,document.getElementById(\'' + keyId + '\').value)" placeholder="' + modelPlaceholder + '">' +
       '<div class="key-wrap"><input id="' + keyId + '" type="text" value="' + escapeHtml(keyDisplay) + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',document.getElementById(\'' + urlId + '\').value,document.getElementById(\'' + nameId + '\').value,this.value)" placeholder="' + keyPlaceholder + '"' + (isPassthrough ? ' disabled onclick="togglePassthrough(\'' + scope + '\',\'' + k + '\',\'' + keyId + '\',\'' + ptId + '\')"' : '') + '>' +
-      '<button class="pt-btn' + ptActive + '" id="' + ptId + '" onclick="togglePassthrough(\'' + scope + '\',\'' + k + '\',\'' + keyId + '\',\'' + ptId + '\')" title="Pass through client API key">&#x1f517;</button></div>' +
+      '<button class="pt-btn' + ptActive + '" id="' + ptId + '" onclick="togglePassthrough(\'' + scope + '\',\'' + k + '\',\'' + keyId + '\',\'' + ptId + '\')" title="Pass through client API key">&#x27a1;&#xfe0f;</button></div>' +
       '</div></div></div>';
   }).join('');
 }

@@ -422,19 +422,23 @@ function renderModels(scope, globalConfigured) {
     const keyId = 'mk-' + safe;
     const ptId = 'mpt-' + safe;
     const url = m.url || '';
-    const modelDisplay = m.model === false ? '' : (m.model || '');
-    const isPassthrough = m.key === false;
-    const keyDisplay = isPassthrough ? '' : (m.key || '');
-    const modelPlaceholder = m.model === false ? '(passthrough)' : 'model-name';
-    const keyPlaceholder = isPassthrough ? '(passthrough)' : 'api-key';
-    const ptActive = isPassthrough ? ' pt-active' : '';
-    return '<div class="model-entry"><span class="key">' + escapeHtml(k) + '</span>' +
+    const isNamePt = m.model === false;
+    const modelDisplay = isNamePt ? '' : (m.model || '');
+    const keyPassthrough = m.key === false;
+    const keyDisplay = keyPassthrough ? '' : (m.key || '');
+    const namePlaceholder = isNamePt ? '(passthrough)' : 'model-name';
+    const keyPlaceholder = keyPassthrough ? '(passthrough)' : 'api-key';
+    const keyPtActive = keyPassthrough ? ' pt-active' : '';
+    const namePtActive = isNamePt ? ' pt-active' : '';
+    const namePtId = 'mpn-' + safe;
+    return '<div class="model-entry" data-scope="' + escapeHtml(scope) + '" data-key="' + escapeHtml(k) + '"><span class="key">' + escapeHtml(k) + '</span>' +
       '<div class="model-fields">' +
       '<input id="' + urlId + '" type="text" value="' + escapeHtml(url) + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',this.value,document.getElementById(\'' + nameId + '\').value,document.getElementById(\'' + keyId + '\').value)" placeholder="http://...">' +
       '<div class="model-subrow">' +
-      '<input id="' + nameId + '" type="text" value="' + escapeHtml(modelDisplay) + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',document.getElementById(\'' + urlId + '\').value,this.value,document.getElementById(\'' + keyId + '\').value)" placeholder="' + modelPlaceholder + '">' +
-      '<div class="key-wrap"><input id="' + keyId + '" type="text" value="' + escapeHtml(keyDisplay) + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',document.getElementById(\'' + urlId + '\').value,document.getElementById(\'' + nameId + '\').value,this.value)" placeholder="' + keyPlaceholder + '"' + (isPassthrough ? ' disabled onclick="togglePassthrough(\'' + scope + '\',\'' + k + '\',\'' + keyId + '\',\'' + ptId + '\')"' : '') + '>' +
-      '<button class="pt-btn' + ptActive + '" id="' + ptId + '" onclick="togglePassthrough(\'' + scope + '\',\'' + k + '\',\'' + keyId + '\',\'' + ptId + '\')" title="Pass through client API key">&#x27a1;&#xfe0f;</button></div>' +
+      '<div class="key-wrap"><input id="' + nameId + '" type="text" value="' + escapeHtml(modelDisplay) + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',document.getElementById(\'' + urlId + '\').value,this.value,document.getElementById(\'' + keyId + '\').value)" placeholder="' + namePlaceholder + '"' + (isNamePt ? ' oninput="offPassthrough(this)" onclick="offPassthrough(this)"' : '') + '>' +
+      '<button class="pt-btn' + namePtActive + '" id="' + namePtId + '" onclick="togglePassthrough(this)" data-field="name" title="Pass through client model name">pass</button></div>' +
+      '<div class="key-wrap"><input id="' + keyId + '" type="text" value="' + escapeHtml(keyDisplay) + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',document.getElementById(\'' + urlId + '\').value,document.getElementById(\'' + nameId + '\').value,this.value)" placeholder="' + keyPlaceholder + '"' + (keyPassthrough ? ' oninput="offPassthrough(this)" onclick="offPassthrough(this)"' : '') + '>' +
+      '<button class="pt-btn' + keyPtActive + '" id="' + ptId + '" onclick="togglePassthrough(this)" data-field="key" title="Pass through client API key">pass</button></div>' +
       '</div></div></div>';
   }).join('');
 }
@@ -468,29 +472,54 @@ async function setModelForScope(scope, key, model_url, model_name, api_key) {
   } catch(e) { showToast(e.message, true); }
 }
 
-function togglePassthrough(scope, key, keyId, ptId) {
-  const input = document.getElementById(keyId);
-  const btn = document.getElementById(ptId);
-  const isActive = btn.classList.contains('pt-active');
-  if (isActive) {
-    input.disabled = false;
+function togglePassthrough(btn) {
+  const wrap = btn.closest('.key-wrap');
+  const input = wrap.querySelector('input');
+  const entry = btn.closest('.model-entry');
+  const scope = entry.dataset.scope;
+  const key = entry.dataset.key;
+  const fields = entry.querySelector('.model-fields');
+  const urlInput = fields.querySelector('input');
+  const subrow = fields.querySelector('.model-subrow');
+  const wraps = subrow.querySelectorAll('.key-wrap');
+  const nameInput = wraps[0].querySelector('input');
+  const keyInput = wraps[1].querySelector('input');
+  const isName = btn.dataset.field === 'name';
+
+  if (btn.classList.contains('pt-active')) {
     btn.classList.remove('pt-active');
-    input.placeholder = 'api-key';
-    input.focus();
-    setModelForScope(scope, key,
-      document.getElementById('mu-' + scope.replace(/[^a-zA-Z0-9]/g, '_') + '-' + key.replace(/[^a-zA-Z0-9]/g, '_')).value,
-      document.getElementById('mn-' + scope.replace(/[^a-zA-Z0-9]/g, '_') + '-' + key.replace(/[^a-zA-Z0-9]/g, '_')).value,
-      '');
-  } else {
-    input.disabled = true;
+    input.placeholder = isName ? 'model-name' : 'api-key';
     input.value = '';
+    input.focus();
+    setModelForScope(scope, key, urlInput.value, isName ? '' : nameInput.value, isName ? keyInput.value : '');
+  } else {
     btn.classList.add('pt-active');
+    input.value = '';
     input.placeholder = '(passthrough)';
-    setModelForScope(scope, key,
-      document.getElementById('mu-' + scope.replace(/[^a-zA-Z0-9]/g, '_') + '-' + key.replace(/[^a-zA-Z0-9]/g, '_')).value,
-      document.getElementById('mn-' + scope.replace(/[^a-zA-Z0-9]/g, '_') + '-' + key.replace(/[^a-zA-Z0-9]/g, '_')).value,
-      false);
+    setModelForScope(scope, key, urlInput.value, isName ? false : nameInput.value, isName ? keyInput.value : false);
   }
+}
+
+function offPassthrough(input) {
+  const wrap = input.closest('.key-wrap');
+  const btn = wrap.querySelector('.pt-btn');
+  if (!btn || !btn.classList.contains('pt-active')) return;
+  const entry = input.closest('.model-entry');
+  const scope = entry.dataset.scope;
+  const key = entry.dataset.key;
+  const fields = entry.querySelector('.model-fields');
+  const urlInput = fields.querySelector('input');
+  const subrow = fields.querySelector('.model-subrow');
+  const wraps = subrow.querySelectorAll('.key-wrap');
+  const nameInput = wraps[0].querySelector('input');
+  const keyInput = wraps[1].querySelector('input');
+  const isName = btn.dataset.field === 'name';
+
+  btn.classList.remove('pt-active');
+  input.placeholder = isName ? 'model-name' : 'api-key';
+  input.value = '';
+  input.focus();
+  setModelForScope(scope, key, urlInput.value, isName ? '' : nameInput.value, isName ? keyInput.value : '');
 }
 
 // ---- logs ----

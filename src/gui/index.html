@@ -33,6 +33,7 @@
 <div class="tab" data-tab="models" onclick="switchTab('models')">Models</div>
 <div class="tab" data-tab="agents" onclick="switchTab('agents')">Agents</div>
 <div class="tab" data-tab="logs" onclick="switchTab('logs')">Logs</div>
+<div class="tab" data-tab="help" onclick="switchTab('help')">Help</div>
 </div>
 
 <div class="ts-bar" id="ts-bar">
@@ -118,6 +119,19 @@
 <span class="log-count" id="log-count"></span>
 </div>
 <div class="log-viewer" id="log-viewer"><div class="loader">Loading logs...</div></div>
+</div>
+</div>
+
+<!-- === HELP TAB === -->
+<div class="tab-pane" id="tab-help">
+<div class="card">
+<h2>About PetSitter</h2>
+<p>PetSitter is an OpenAI-compatible proxy that sits between your LLM client and upstream providers. It adds <em>tricks</em> &mdash; composable middleware modules that can modify requests and responses, enforce JSON mode, inject tool calls, protect secrets, and more.</p>
+<p>Tricks are organized into <em>tricksets</em> &mdash; named groups with URL/header filters so you can apply different behaviors to different clients or model routes. Example tricksets (<strong>gemma4</strong>, <strong>opencode</strong>) are installed automatically on first run.</p>
+<h3>Example Tricksets</h3>
+<p>Re-install example tricksets to your config directory. Existing files are backed up to <code>~/.config/petsitter/backups/</code> before being overwritten.</p>
+<button class="btn" id="btn-install-examples" onclick="installExamples()">Install Examples</button>
+<div id="install-examples-result" style="margin-top:8px"></div>
 </div>
 </div>
 
@@ -375,6 +389,42 @@ async function addTrickset() {
     selectedTrickset = name;
     fetchTricksets();
   } catch(e) { showToast(e.message, true); }
+}
+
+async function installExamples() {
+  const btn = document.getElementById('btn-install-examples');
+  const resultEl = document.getElementById('install-examples-result');
+  btn.disabled = true;
+  btn.textContent = 'Installing...';
+  resultEl.innerHTML = '';
+  try {
+    const res = await fetchJSON('/api/tricksets/install-examples', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({force: false}),
+    });
+    const conflicts = (res.results || []).filter(r => !r.result);
+    if (conflicts.length) {
+      if (!confirm(conflicts.map(c => c.errmsg).join('\n') + '\n\nOverwrite with backup?')) {
+        btn.disabled = false;
+        btn.textContent = 'Install Examples';
+        return;
+      }
+      const res2 = await fetchJSON('/api/tricksets/install-examples', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({force: true}),
+      });
+      res.results = res2.results;
+    }
+    const lines = (res.results || []).map(r => r.result
+      ? '<span style="color:#6bff8a">\u2713</span> ' + escapeHtml(r.name)
+      : '<span style="color:#ff6b6b">\u2717</span> ' + escapeHtml(r.name) + ' &mdash; ' + escapeHtml(r.errmsg || 'failed'));
+    resultEl.innerHTML = lines.join('<br>');
+    if (conflicts.length) fetchTricksets();
+  } catch(e) { showToast(e.message, true); }
+  btn.disabled = false;
+  btn.textContent = 'Install Examples';
 }
 
 // ---- models ----

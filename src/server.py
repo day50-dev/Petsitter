@@ -5,6 +5,7 @@ import atexit
 import json
 import logging
 import os
+import shutil
 import subprocess
 from collections import deque
 from datetime import datetime
@@ -66,6 +67,9 @@ _agent_manager: AgentManager | None = None
 
 CONFIG_DIR = Path.home() / ".config" / "petsitter"
 CONFIG_PATH = CONFIG_DIR / "config.json"
+TRICKSETS_DIR = CONFIG_DIR / "tricksets"
+BACKUPS_DIR = CONFIG_DIR / "backups"
+_SOURCE_TRICKSETS = Path(__file__).resolve().parent.parent / "tricksets"
 
 
 def _resolve_trick_path(name: str) -> str:
@@ -95,6 +99,38 @@ def load_config() -> dict:
 def save_config(config: dict) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     CONFIG_PATH.write_text(json.dumps(config, indent=2) + "\n")
+
+
+def install_examples(force: bool = False) -> list[dict]:
+    """Copy example tricksets from package source to CONFIG_DIR/tricksets/.
+
+    When *force* is ``False``, existing files are left untouched and the
+    result entry for that file contains ``"result": False`` with an
+    ``"errmsg"``.  When *force* is ``True``, the current file is backed up
+    to ``CONFIG_DIR/backups/{stem}-{timestamp}.json`` before overwriting.
+
+    Returns a list of dicts, one per source file::
+
+        {"name": "gemma4", "result": True}
+        {"name": "opencode", "result": False, "errmsg": "opencode.json already exists"}
+    """
+    results: list[dict] = []
+    if not _SOURCE_TRICKSETS.exists():
+        return results
+    TRICKSETS_DIR.mkdir(parents=True, exist_ok=True)
+    for f in sorted(_SOURCE_TRICKSETS.glob("*.json")):
+        dest = TRICKSETS_DIR / f.name
+        if dest.exists():
+            if not force:
+                results.append({"name": f.stem, "result": False, "errmsg": f"{f.name} already exists"})
+                continue
+            BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            backup = BACKUPS_DIR / f"{f.stem}-{stamp}.json"
+            shutil.copy2(str(dest), str(backup))
+        shutil.copy2(str(f), str(dest))
+        results.append({"name": f.stem, "result": True})
+    return results
 
 
 def create_app(
@@ -133,6 +169,18 @@ def create_app(
     _log_capture.setLevel(log_level)
     _log_capture.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
     logging.getLogger().addHandler(_log_capture)
+
+    # First-run: install example tricksets to user config dir
+    cfg = load_config()
+    if not cfg.get("first_run"):
+        results = install_examples()
+        for r in results:
+            if r["result"]:
+                logging.getLogger("petsitter").info("Installed example trickset: %s", r["name"])
+            else:
+                logging.getLogger("petsitter").info("Skipped existing trickset: %s (%s)", r["name"], r.get("errmsg", ""))
+        cfg["first_run"] = True
+        save_config(cfg)
 
     app = Starlette()
 
@@ -220,10 +268,9 @@ def create_app(
     app.add_route("/api/tricksets", list_tricksets, methods=["GET"])
 
     async def tricksets_available(request: Request) -> Response:
-        tricksets_dir = Path("tricksets")
         files = []
-        if tricksets_dir.exists():
-            for f in sorted(tricksets_dir.glob("*.json")):
+        if TRICKSETS_DIR.exists():
+            for f in sorted(TRICKSETS_DIR.glob("*.json")):
                 files.append({"path": str(f), "name": f.stem})
         return JSONResponse(files)
     app.add_route("/api/tricksets/available", tricksets_available, methods=["GET"])
@@ -262,7 +309,7 @@ def create_app(
         name = request.path_params.get("name")
         ts = handler.tricksets.get(name)
         if not ts:
-            path = Path("tricksets") / f"{name}.json"
+            path = TRICKSETS_DIR / f"{name}.json"
             if path.exists():
                 ts = Trickset.load_from_file(str(path))
                 handler.tricksets[name] = ts
@@ -282,6 +329,13 @@ def create_app(
             ts.save()
         return JSONResponse({"success": True})
     app.add_route("/api/tricksets/{name}", update_trickset, methods=["PUT"])
+
+    async def install_examples_endpoint(request: Request) -> Response:
+        data = await request.json()
+        force = data.get("force", False)
+        results = install_examples(force=force)
+        return JSONResponse({"results": results})
+    app.add_route("/api/tricksets/install-examples", install_examples_endpoint, methods=["POST"])
 
     # ----- agent API endpoints -----
 

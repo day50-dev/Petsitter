@@ -230,7 +230,7 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
         parameters = data.get("parameters", {})
         models = data.get("models", {})
         ts = Trickset(name, "0.7.0", filters, [], parameters=parameters, models=models)
-        ts.file_path = str(Path("tricksets") / f"{name}.json")
+        ts.file_path = str(Path.home() / ".config" / "petsitter" / "tricksets" / f"{name}.json")
         ts.save()
         handler.tricksets[name] = ts
         return JSONResponse({"success": True, "name": name})

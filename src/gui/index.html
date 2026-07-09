@@ -6,6 +6,9 @@
 <title>PetSitter Dashboard</title>
 <link rel="icon" type="image/png" href="/static/favicon.png">
 <link rel="stylesheet" href="/static/styles.css">
+<script src="https://cdn.jsdelivr.net/npm/marked@15.0.7/marked.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
 </head>
 <body>
 
@@ -162,8 +165,10 @@ async function loadHelpContent() {
   if (_helpLoaded) return;
   _helpLoaded = true;
   try {
-    const html = await (await fetch('/api/help')).text();
+    const md = await (await fetch('/api/help')).text();
+    const html = marked.parse(md, { breaks: true });
     document.getElementById('help-content').innerHTML = html;
+    document.querySelectorAll('#help-content pre code').forEach(block => hljs.highlightElement(block));
   } catch(e) {
     document.getElementById('help-content').innerHTML = '<div class="empty">Failed to load help content.</div>';
   }
@@ -171,7 +176,7 @@ async function loadHelpContent() {
 
 window.addEventListener('hashchange', function() {
   var tab = location.hash.replace('#','') || 'tricks';
-  if (document.querySelector('.tab[data-tab="' + tab + '"]')) switchTab(tab);
+  if (tab === 'help' || document.querySelector('.tab[data-tab="' + tab + '"]')) switchTab(tab);
 });
 
 // ---- info ----
@@ -731,7 +736,7 @@ async function shutdownPetsitter() {
 
 // ---- init ----
 var initialTab = location.hash.replace('#','') || 'tricks';
-if (document.querySelector('.tab[data-tab="' + initialTab + '"]')) switchTab(initialTab);
+if (initialTab === 'help' || document.querySelector('.tab[data-tab="' + initialTab + '"]')) switchTab(initialTab);
 fetchInfo(); fetchTricksets(); fetchAvailable(); fetchModels(); fetchAgents();
 startLogStream();
 </script>

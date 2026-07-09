@@ -5,7 +5,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-import markdown
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.staticfiles import StaticFiles
@@ -104,9 +103,8 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
 
     async def help_page(request: Request) -> Response:
         readme = Path(__file__).resolve().parent.parent / "README.md"
-        md = readme.read_text(encoding="utf-8")
-        html = markdown.markdown(md, extensions=["fenced_code", "tables", "nl2br", "sane_lists"])
-        return Response(content=html, media_type="text/html")
+        text = readme.read_text(encoding="utf-8")
+        return Response(content=text, media_type="text/plain")
     app.add_route("/api/help", help_page, methods=["GET"])
 
     async def gui_info(request: Request) -> Response:

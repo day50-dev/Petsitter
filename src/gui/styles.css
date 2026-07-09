@@ -704,26 +704,6 @@ header .nav a:hover { background: #1a2a4d; }
 #help-content li { margin: 0.3em 0; }
 #help-content a { color: #8ab4ff; }
 #help-content a:hover { text-decoration: underline; }
-#help-content code {
-  background: #0f0f1a;
-  border: 1px solid #1e2a3a;
-  border-radius: 3px;
-  padding: 1px 4px;
-  font-size: 0.9em;
-  font-family: monospace;
-}
-#help-content pre {
-  background: #0a0a15;
-  border: 1px solid #1e2a3a;
-  border-radius: 4px;
-  padding: 12px;
-  overflow-x: auto;
-}
-#help-content pre code {
-  background: none;
-  border: none;
-  padding: 0;
-}
 #help-content table {
   border-collapse: collapse;
   margin: 0.8em 0;
@@ -747,6 +727,15 @@ header .nav a:hover { background: #1a2a4d; }
   background: #0a0a15;
 }
 #help-content hr { border: none; border-top: 1px solid #1e2a3a; margin: 1.5em 0; }
+#help-content :not(pre) > code {
+  background: #1a1a2e;
+  border: 1px solid #2a2a4a;
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 0.9em;
+  font-family: monospace;
+  color: #c8d6e5;
+}
 
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(10px); }

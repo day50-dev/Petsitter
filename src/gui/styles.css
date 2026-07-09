@@ -594,6 +594,8 @@ header .nav a:hover { background: #1a2a4d; }
 .btn-secondary:hover { background: #2a3a4a; }
 .btn-neutral { background: #1a3a5a; color: #8ab4ff; }
 .btn-neutral:hover { background: #2a4a6a; }
+.btn-accent { background: #2a5a3a; color: #6bff8a; border: 1px solid #3a7a4a; }
+.btn-accent:hover { background: #3a7a4a; }
 
 /* logs */
 .log-controls {
@@ -682,6 +684,69 @@ header .nav a:hover { background: #1a2a4d; }
 }
 
 .toast.error { background: #3d1a2a; color: #ff6b8a; }
+
+/* help content */
+#help-content {
+  line-height: 1.6;
+  overflow-x: auto;
+}
+#help-content h1,
+#help-content h2,
+#help-content h3,
+#help-content h4 {
+  margin: 1.2em 0 0.5em;
+  color: #c8d6e5;
+}
+#help-content h1 { font-size: 1.5em; border-bottom: 1px solid #1e2a3a; padding-bottom: 0.3em; }
+#help-content h2 { font-size: 1.3em; border-bottom: 1px solid #1e2a3a; padding-bottom: 0.2em; }
+#help-content p { margin: 0.6em 0; }
+#help-content ul, #help-content ol { margin: 0.5em 0; padding-left: 2em; }
+#help-content li { margin: 0.3em 0; }
+#help-content a { color: #8ab4ff; }
+#help-content a:hover { text-decoration: underline; }
+#help-content code {
+  background: #0f0f1a;
+  border: 1px solid #1e2a3a;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 0.9em;
+  font-family: monospace;
+}
+#help-content pre {
+  background: #0a0a15;
+  border: 1px solid #1e2a3a;
+  border-radius: 4px;
+  padding: 12px;
+  overflow-x: auto;
+}
+#help-content pre code {
+  background: none;
+  border: none;
+  padding: 0;
+}
+#help-content table {
+  border-collapse: collapse;
+  margin: 0.8em 0;
+  width: 100%;
+}
+#help-content th, #help-content td {
+  border: 1px solid #1e2a3a;
+  padding: 6px 10px;
+  text-align: left;
+}
+#help-content th {
+  background: #0f0f1a;
+  color: #8ab4ff;
+}
+#help-content img { max-width: 100%; height: auto; }
+#help-content blockquote {
+  border-left: 3px solid #2a4a6a;
+  margin: 0.8em 0;
+  padding: 4px 12px;
+  color: #7a9ab5;
+  background: #0a0a15;
+}
+#help-content hr { border: none; border-top: 1px solid #1e2a3a; margin: 1.5em 0; }
 
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(10px); }

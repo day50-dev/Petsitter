@@ -16,6 +16,7 @@
 <div class="nav">
 <a href="https://github.com/day50-dev/Petsitter" target="_blank">GitHub</a>
 <a href="/docs">API</a>
+<a href="#" onclick="switchTab('help');return false">Help</a>
 </div>
 <div class="info">
 <span><span class="label">Listening</span><span id="info-listen">--</span></span>
@@ -33,7 +34,6 @@
 <div class="tab" data-tab="models" onclick="switchTab('models')">Models</div>
 <div class="tab" data-tab="agents" onclick="switchTab('agents')">Agents</div>
 <div class="tab" data-tab="logs" onclick="switchTab('logs')">Logs</div>
-<div class="tab" data-tab="help" onclick="switchTab('help')">Help</div>
 </div>
 
 <div class="ts-bar" id="ts-bar">
@@ -125,13 +125,11 @@
 <!-- === HELP TAB === -->
 <div class="tab-pane" id="tab-help">
 <div class="card">
-<h2>About PetSitter</h2>
-<p>PetSitter is an OpenAI-compatible proxy that sits between your LLM client and upstream providers. It adds <em>tricks</em> &mdash; composable middleware modules that can modify requests and responses, enforce JSON mode, inject tool calls, protect secrets, and more.</p>
-<p>Tricks are organized into <em>tricksets</em> &mdash; named groups with URL/header filters so you can apply different behaviors to different clients or model routes. Example tricksets (<strong>gemma4</strong>, <strong>opencode</strong>) are installed automatically on first run.</p>
-<h3>Example Tricksets</h3>
-<p>Re-install example tricksets to your config directory. Existing files are backed up to <code>~/.config/petsitter/backups/</code> before being overwritten.</p>
-<button class="btn" id="btn-install-examples" onclick="installExamples()">Install Examples</button>
+<div style="margin-bottom:16px">
+<button class="btn btn-accent" id="btn-install-examples" onclick="installExamples()">Install Examples</button>
 <div id="install-examples-result" style="margin-top:8px"></div>
+</div>
+<div id="help-content"><div class="loader">Loading help...</div></div>
 </div>
 </div>
 
@@ -156,6 +154,19 @@ function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'tab-'+name));
   location.hash = name;
+  if (name === 'help') loadHelpContent();
+}
+
+let _helpLoaded = false;
+async function loadHelpContent() {
+  if (_helpLoaded) return;
+  _helpLoaded = true;
+  try {
+    const html = await (await fetch('/api/help')).text();
+    document.getElementById('help-content').innerHTML = html;
+  } catch(e) {
+    document.getElementById('help-content').innerHTML = '<div class="empty">Failed to load help content.</div>';
+  }
 }
 
 window.addEventListener('hashchange', function() {

@@ -160,6 +160,7 @@ function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'tab-'+name));
   if (name === 'help') loadHelpContent();
+  if (name === 'models') renderModels(selectedTrickset, _cachedConfiguredModels);
   updateHash();
 }
 
@@ -392,7 +393,11 @@ async function switchTrickset(name) {
     document.getElementById('ts-bar').style.display = '';
     document.getElementById('ts-fx').textContent = ts.filters['X-Title'] || '*';
     document.getElementById('ts-fm').textContent = ts.filters['Model'] || '*';
-    fetchTricks();
+    if (document.querySelector('.tab.active')?.dataset.tab === 'models') {
+      renderModels(selectedTrickset, _cachedConfiguredModels);
+    } else {
+      fetchTricks();
+    }
   } catch(e) { console.error(e); }
 }
 
@@ -477,8 +482,8 @@ async function installExamples() {
   btn.textContent = 'Install Examples';
 }
 
-let _selectedModelScope = '_default';
 let _tsModels = {};
+let _cachedConfiguredModels = {};
 
 function _modelDisplay(v) { return v === false ? false : (v || ''); }
 function _keyDisplay(v) { return v === false ? false : (v || ''); }
@@ -490,11 +495,11 @@ async function fetchModels() {
       fetchJSON('/api/tricksets'),
       fetchJSON('/api/tricksets/available'),
     ]);
-    const configured = modelsData.configured_models || {};
+    _cachedConfiguredModels = modelsData.configured_models || {};
     _tsModels = {};
     loaded.forEach(ts => _tsModels[ts.name] = ts.models || {});
-    _sharedPills(loaded, avail, _selectedModelScope, 'switchTrickset', true);
-    renderModels(_selectedModelScope, configured);
+    _sharedPills(loaded, avail, selectedTrickset, 'switchTrickset', true);
+    renderModels(selectedTrickset, _cachedConfiguredModels);
   } catch(e) { document.getElementById('model-list').innerHTML = '<div class="loader">Error loading models</div>'; }
 }
 
@@ -517,7 +522,7 @@ function renderModels(scope, globalConfigured) {
     const allKeys = new Set([...Object.keys(scoped), ...Object.keys(globalConfigured)]);
     const keys = [...allKeys].sort();
     if (!keys.length) {
-      el.innerHTML = '<div class="empty">No models configured for <strong>' + escapeHtml(scope) + '</strong>.</div>';
+      el.innerHTML = `<div class="empty">No models configured for <strong>${escapeHtml(scope)}</strong>.</div>`;
       return;
     }
     el.innerHTML = keys.map(k => {
@@ -643,7 +648,7 @@ function startLogStream() {
         const entry = JSON.parse(e.data);
         if (viewer.querySelector('.loader')) viewer.innerHTML = '';
         const atBottom = viewer.scrollHeight - viewer.scrollTop - viewer.clientHeight < 40;
-        viewer.insertAdjacentHTML('beforeend', '<div class="log-entry lvl-' + entry.level + '"><span class="time">' + escapeHtml(entry.time) + '</span>' + escapeHtml(entry.level) + ': ' + escapeHtml(entry.message) + '</div>');
+        viewer.insertAdjacentHTML('beforeend', `<div class="log-entry lvl-${entry.level}"><span class="time">${escapeHtml(entry.time)}</span>${escapeHtml(entry.level)}: ${escapeHtml(entry.message)}</div>`);
         pending++;
         document.getElementById('log-count').textContent = viewer.querySelectorAll('.log-entry').length + ' entries';
         if (atBottom) viewer.scrollTop = viewer.scrollHeight;

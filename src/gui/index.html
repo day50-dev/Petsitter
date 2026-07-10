@@ -205,7 +205,7 @@ async function fetchTricks() {
       if (t.keywords && t.keywords.length) badges.push(...t.keywords.map(k => '<span class="badge badge-kw">' + escapeHtml(k) + '</span>'));
       if (t.required_models && t.required_models.length) badges.push(...t.required_models.map(m => '<span class="badge badge-models">' + escapeHtml(m) + '</span>'));
       if (t.trickset && t.trickset !== '_default') badges.push('<span class="badge badge-ts">' + escapeHtml(t.trickset) + '</span>');
-      return '<div class="trick-item" draggable="true" data-name="' + escapeHtml(t.name) + '"><div class="info"><div><span class="name">' + escapeHtml(t.display_name || t.name) + '</span><span class="path">' + escapeHtml(t.path || t.module) + '</span></div><div class="brief">' + escapeHtml(t.brief || '') + '</div><div class="trick-meta">' + badges.join('') + '</div></div><div class="actions"><button class="toggle ' + (on ? 'on' : 'off') + '" onclick="toggleTrick(\'' + t.name + '\',' + (!on) + ')" title="' + (on ? 'Disable' : 'Enable') + '">' + (on ? 'ON' : 'OFF') + '</button><button class="btn btn-danger btn-sm" onclick="unloadTrick(\'' + t.name + '\')" title="Remove">\u2715</button></div></div>';
+      return '<div class="trick-item" draggable="true" data-name="' + escapeHtml(t.name) + '" data-id="' + escapeHtml(t.id || '') + '"><div class="info"><div><span class="name">' + escapeHtml(t.display_name || t.name) + '</span><span class="path">' + escapeHtml(t.path || t.module) + '</span></div><div class="brief">' + escapeHtml(t.brief || '') + '</div><div class="trick-meta">' + badges.join('') + '</div></div><div class="actions"><button class="toggle ' + (on ? 'on' : 'off') + '" onclick="toggleTrick(\'' + escapeHtml(t.id || '') + '\',\'' + escapeHtml(t.name) + '\',' + (!on) + ')" title="' + (on ? 'Disable' : 'Enable') + '">' + (on ? 'ON' : 'OFF') + '</button><button class="btn btn-danger btn-sm" onclick="unloadTrick(\'' + t.name + '\')" title="Remove">\u2715</button></div></div>';
     }).join('');
   } catch(e) { document.getElementById('loaded-tricks').innerHTML = '<div class="loader">Error loading tricks</div>'; }
 }
@@ -245,10 +245,11 @@ document.getElementById('loaded-tricks').addEventListener('drop', function(e) {
   reorderTrick(_dragName, toIdx);
 });
 
-async function toggleTrick(name, enabled) {
+async function toggleTrick(id, name, enabled) {
   try {
-    const d = await fetchJSON('/api/tricks/' + encodeURIComponent(name) + '/toggle', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enabled}) });
-    showToast(name + ': ' + (d.enabled ? 'enabled' : 'disabled'));
+    if (!id) { showToast('Cannot toggle: missing trick ID', true); return; }
+    const d = await fetchJSON('/api/tricksets/' + encodeURIComponent(selectedTrickset), { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({tricks: [{id, enabled}]}) });
+    if (d.success) showToast(name + ': ' + (enabled ? 'enabled' : 'disabled'));
     fetchTricks();
   } catch(e) { showToast(e.message, true); }
 }

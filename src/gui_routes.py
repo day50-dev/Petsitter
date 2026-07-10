@@ -179,8 +179,14 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
         name = request.path_params.get("name")
         data = await request.json()
         enabled = data.get("enabled")
-        if handler.toggle_trick(name, enabled):
-            return JSONResponse({"success": True, "enabled": handler._enabled.get(name, True)})
+        ts_name = data.get("trickset", "_default")
+        if handler.toggle_trick(name, enabled, ts_name=ts_name):
+            ts = handler.tricksets.get(ts_name)
+            if ts:
+                for i, t in enumerate(ts.tricks):
+                    if type(t).__name__ == name:
+                        return JSONResponse({"success": True, "enabled": ts.trick_enabled[i] if i < len(ts.trick_enabled) else True})
+            return JSONResponse({"success": True, "enabled": True})
         return JSONResponse({"success": False, "error": f"Trick '{name}' not found"}, status_code=404)
     app.add_route("/api/tricks/{name}/toggle", gui_trick_toggle, methods=["POST"])
 

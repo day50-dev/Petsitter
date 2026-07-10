@@ -39,8 +39,8 @@ class ProxyHandler:
         if tricks is not None and not self.tricksets:
             ts = Trickset("_default", "0.3.0", {"X-Title": "*", "Model": "*"}, [])
             ts.tricks = list(tricks)
+            ts.trick_enabled = [True] * len(tricks)
             self.tricksets["_default"] = ts
-        self._enabled: dict[str, bool] = {}
         self._run_counts: dict[str, int] = {}
         configure(self.model_url, self.model_name or "", self.api_key)
 
@@ -53,21 +53,17 @@ class ProxyHandler:
 
     def _matching_tricks(self, x_title: str, model: str) -> list[Trick]:
         tricks: list[Trick] = []
-        seen: set[str] = set()
         default_ts = self.tricksets.get("_default")
         for name, ts in self.tricksets.items():
             if name == "_default":
                 continue
             if ts.matches(x_title, model):
-                for t in ts.tricks:
-                    cls_name = type(t).__name__
-                    if cls_name not in seen and self._enabled.get(cls_name, True):
+                for i, t in enumerate(ts.tricks):
+                    if i < len(ts.trick_enabled) and ts.trick_enabled[i]:
                         tricks.append(t)
-                        seen.add(cls_name)
         if not tricks and default_ts:
-            for t in default_ts.tricks:
-                cls_name = type(t).__name__
-                if self._enabled.get(cls_name, True):
+            for i, t in enumerate(default_ts.tricks):
+                if i < len(default_ts.trick_enabled) and default_ts.trick_enabled[i]:
                     tricks.append(t)
         return tricks
 
@@ -261,7 +257,6 @@ class ProxyHandler:
                 ts = Trickset("_default", "0.3.0", {"X-Title": "*", "Model": "*"}, [])
                 self.tricksets["_default"] = ts
         trick = ts.add_trick(path)
-        self._enabled[type(trick).__name__] = True
         try:
             trick.install()
         except Exception:
@@ -294,20 +289,28 @@ class ProxyHandler:
             ts = self.tricksets.get(ts_name)
             if not ts:
                 return False
-            return ts.remove_trick(class_name)
+            tid = ts.find_trick_id_by_class(class_name)
+            if tid:
+                return ts.remove_trick(tid)
+            return False
         for ts in self.tricksets.values():
-            if ts.remove_trick(class_name):
+            tid = ts.find_trick_id_by_class(class_name)
+            if tid and ts.remove_trick(tid):
                 return True
         return False
 
-    def reorder_trick(self, name: str, new_index: int, ts_name: str | None = None) -> bool:
+    def reorder_trick(self, class_name: str, new_index: int, ts_name: str | None = None) -> bool:
         if ts_name:
             ts = self.tricksets.get(ts_name)
             if not ts:
                 return False
-            return ts.reorder_trick(name, new_index)
+            tid = ts.find_trick_id_by_class(class_name)
+            if tid:
+                return ts.reorder_trick(tid, new_index)
+            return False
         for ts in self.tricksets.values():
-            if ts.reorder_trick(name, new_index):
+            tid = ts.find_trick_id_by_class(class_name)
+            if tid and ts.reorder_trick(tid, new_index):
                 return True
         return False
 
@@ -319,24 +322,34 @@ class ProxyHandler:
                 path = ts.trick_paths[i] if i < len(ts.trick_paths) else ""
                 result.append({
                     "name": name,
+                    "id": ts.trick_ids[i] if i < len(ts.trick_ids) else "",
                     "display_name": getattr(t, "__display_name__", None) or name,
                     "brief": getattr(t, "__brief__", ""),
                     "module": type(t).__module__,
                     "trickset": ts_name,
                     "path": path,
-                    "enabled": self._enabled.get(name, True),
+                    "enabled": i < len(ts.trick_enabled) and ts.trick_enabled[i],
                     "keywords": list(t.keywords),
                     "required_models": list(t.required_models),
                 })
         return result
 
-    def toggle_trick(self, name: str, enabled: bool | None = None) -> bool:
-        for t in self.tricks:
-            if type(t).__name__ == name:
-                if enabled is None:
-                    enabled = not self._enabled.get(name, True)
-                self._enabled[name] = enabled
-                return True
+    def toggle_trick(self, name: str, enabled: bool | None = None, ts_name: str | None = None) -> bool:
+        for ts in self.tricksets.values():
+            if ts_name is not None and ts.name != ts_name:
+                continue
+            for i, t in enumerate(ts.tricks):
+                if type(t).__name__ == name:
+                    if enabled is None:
+                        enabled = not (ts.trick_enabled[i] if i < len(ts.trick_enabled) else True)
+                    while len(ts.trick_enabled) <= i:
+                        ts.trick_enabled.append(True)
+                    ts.trick_enabled[i] = enabled
+                    try:
+                        ts.save()
+                    except ValueError:
+                        pass
+                    return True
         return False
 
     # --- lifecycle management ---

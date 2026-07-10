@@ -2,6 +2,7 @@
 
 import json
 import logging
+import uuid
 from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,10 @@ logger = logging.getLogger("petsitter")
 SCHEMA = "0.7.0"
 
 
+def _new_id() -> str:
+    return uuid.uuid4().hex[:12]
+
+
 class Trickset:
     def __init__(
         self,
@@ -24,15 +29,32 @@ class Trickset:
         file_path: str | None = None,
         parameters: dict[str, Any] | None = None,
         models: dict[str, str] | None = None,
+        trick_enabled: list[bool] | None = None,
+        trick_ids: list[str] | None = None,
     ):
         self.name = name
         self.schema = schema
         self.filters = filters
         self.trick_paths = list(trick_paths)
+        self.trick_enabled = list(trick_enabled) if trick_enabled else [True] * len(trick_paths)
+        if trick_ids:
+            self.trick_ids = list(trick_ids)
+        else:
+            self.trick_ids = [_new_id() for _ in range(len(trick_paths))]
         self.file_path = file_path
         self.parameters: dict[str, Any] = parameters or {}
         self.models: dict[str, str] = models or {}
         self.tricks: list[Trick] = []
+
+    def _trick_entries(self) -> list[dict]:
+        return [
+            {
+                "id": self.trick_ids[i] if i < len(self.trick_ids) else _new_id(),
+                "file": path,
+                "enabled": self.trick_enabled[i] if i < len(self.trick_enabled) else True,
+            }
+            for i, path in enumerate(self.trick_paths)
+        ]
 
     def matches(self, x_title: str, model: str) -> bool:
         for key, pattern in self.filters.items():
@@ -53,7 +75,7 @@ class Trickset:
             "name": self.name,
             "schema": self.schema,
             "filters": dict(self.filters),
-            "tricks": list(self.trick_paths),
+            "tricks": self._trick_entries(),
             "file_path": self.file_path,
             "parameters": dict(self.parameters),
             "models": dict(self.models),
@@ -64,7 +86,7 @@ class Trickset:
             "schema": self.schema,
             "name": self.name,
             "filters": dict(self.filters),
-            "tricks": list(self.trick_paths),
+            "tricks": self._trick_entries(),
             "parameters": dict(self.parameters),
             "models": dict(self.models),
         }
@@ -85,10 +107,22 @@ class Trickset:
         name = data.get("name", p.stem)
         schema = data.get("schema", "unknown")
         filters = data.get("filters", {"X-Title": "*", "Model": "*"})
-        trick_paths = data.get("tricks", [])
+        raw_tricks = data.get("tricks", [])
+        trick_paths: list[str] = []
+        trick_enabled: list[bool] = []
+        trick_ids: list[str] = []
+        for entry in raw_tricks:
+            if isinstance(entry, str):
+                trick_paths.append(entry)
+                trick_enabled.append(True)
+                trick_ids.append(_new_id())
+            elif isinstance(entry, dict):
+                trick_paths.append(entry.get("file", ""))
+                trick_enabled.append(entry.get("enabled", True))
+                trick_ids.append(entry.get("id") or _new_id())
         parameters = data.get("parameters", {})
         models = data.get("models", {})
-        ts = Trickset(name, schema, filters, trick_paths, file_path=str(p), parameters=parameters, models=models)
+        ts = Trickset(name, schema, filters, trick_paths, file_path=str(p), parameters=parameters, models=models, trick_enabled=trick_enabled, trick_ids=trick_ids)
         ts.load_tricks()
         logger.info("Loaded trickset: %s (%d tricks)", name, len(ts.tricks))
         return ts
@@ -104,32 +138,71 @@ class Trickset:
             models=models,
         )
         ts.tricks = list(tricks)
+        ts.trick_enabled = [True] * len(tricks)
+        ts.trick_ids = [_new_id() for _ in range(len(tricks))]
         return ts
 
-    def add_trick(self, path: str) -> Trick:
+    def merge_tricks(self, entries: list[dict]) -> bool:
+        """Merge incoming trick entries by id. Returns True if anything changed."""
+        changed = False
+        for entry in entries:
+            eid = entry.get("id", "")
+            if not eid:
+                continue
+            for i, tid in enumerate(self.trick_ids):
+                if tid != eid:
+                    continue
+                if "file" in entry and entry["file"] != self.trick_paths[i]:
+                    self.trick_paths[i] = entry["file"]
+                    changed = True
+                if "enabled" in entry:
+                    val = entry["enabled"]
+                    while len(self.trick_enabled) <= i:
+                        self.trick_enabled.append(True)
+                    if self.trick_enabled[i] != val:
+                        self.trick_enabled[i] = val
+                        changed = True
+        return changed
+
+    def add_trick(self, path: str, enabled: bool = True) -> Trick:
         cls = load_trick_from_path(path)
         trick = cls()
         self.tricks.append(trick)
         self.trick_paths.append(path)
+        self.trick_enabled.append(enabled)
+        self.trick_ids.append(_new_id())
         logger.info("Trickset %s: added trick %s", self.name, path)
         return trick
 
-    def remove_trick(self, class_name: str) -> bool:
-        for i, trick in enumerate(self.tricks):
-            if type(trick).__name__ == class_name:
+    def remove_trick(self, trick_id: str) -> bool:
+        for i, tid in enumerate(self.trick_ids):
+            if tid == trick_id:
                 del self.tricks[i]
                 del self.trick_paths[i]
-                logger.info("Trickset %s: removed trick %s", self.name, class_name)
+                del self.trick_ids[i]
+                if i < len(self.trick_enabled):
+                    del self.trick_enabled[i]
+                logger.info("Trickset %s: removed trick %s", self.name, tid)
                 return True
         return False
 
-    def reorder_trick(self, class_name: str, new_index: int) -> bool:
-        for i, trick in enumerate(self.tricks):
-            if type(trick).__name__ == class_name:
+    def reorder_trick(self, trick_id: str, new_index: int) -> bool:
+        for i, tid in enumerate(self.trick_ids):
+            if tid == trick_id:
                 t = self.tricks.pop(i)
                 tp = self.trick_paths.pop(i)
+                tid2 = self.trick_ids.pop(i)
+                te = self.trick_enabled.pop(i) if i < len(self.trick_enabled) else True
                 new_index = max(0, min(new_index, len(self.tricks)))
                 self.tricks.insert(new_index, t)
                 self.trick_paths.insert(new_index, tp)
+                self.trick_ids.insert(new_index, tid2)
+                self.trick_enabled.insert(new_index, te)
                 return True
         return False
+
+    def find_trick_id_by_class(self, class_name: str) -> str | None:
+        for i, t in enumerate(self.tricks):
+            if type(t).__name__ == class_name:
+                return self.trick_ids[i] if i < len(self.trick_ids) else None
+        return None

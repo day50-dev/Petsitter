@@ -26,7 +26,7 @@ from src.proxy import ProxyHandler
 from src.trick import (
     configure_modelset,
 )
-from src.trickset import Trickset
+from src.trickset import Trickset, _new_id
 
 
 class LogCaptureHandler(logging.Handler):
@@ -319,8 +319,31 @@ def create_app(
         if "filters" in data:
             ts.filters = data["filters"]
         if "tricks" in data:
-            ts.trick_paths = list(data["tricks"])
-            ts.load_tricks()
+            raw = data["tricks"]
+            has_ids = all(isinstance(e, dict) and e.get("id") for e in raw)
+            if has_ids:
+                if ts.merge_tricks(raw):
+                    if ts.file_path:
+                        ts.save()
+            else:
+                new_paths: list[str] = []
+                new_enabled: list[bool] = []
+                new_ids: list[str] = []
+                for entry in raw:
+                    if isinstance(entry, str):
+                        new_paths.append(entry)
+                        new_enabled.append(True)
+                        new_ids.append(_new_id())
+                    elif isinstance(entry, dict):
+                        new_paths.append(entry.get("file", ""))
+                        new_enabled.append(entry.get("enabled", True))
+                        new_ids.append(entry.get("id") or _new_id())
+                ts.trick_paths = new_paths
+                ts.trick_enabled = new_enabled
+                ts.trick_ids = new_ids
+                ts.load_tricks()
+                if ts.file_path:
+                    ts.save()
         if "parameters" in data:
             ts.parameters = dict(data["parameters"])
         if "models" in data:

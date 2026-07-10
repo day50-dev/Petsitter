@@ -41,6 +41,8 @@
 <div class="ts-filters">
 <span onclick="editFilter(this,'X-Title')">X-Title: <span class="val" id="ts-fx">*</span></span>
 <span onclick="editFilter(this,'Model')">Model: <span class="val" id="ts-fm">*</span></span>
+<span onclick="editName()">Name: <span class="val" id="ts-name"></span></span>
+<span class="ts-delete" onclick="if (confirm('Delete trickset "' + selectedTrickset + '"? This cannot be undone.')) deleteTrickset()">delete</span>
 </div>
 </div>
 
@@ -387,6 +389,7 @@ async function switchTrickset(name) {
     document.getElementById('ts-bar').style.display = '';
     document.getElementById('ts-fx').textContent = ts.filters['X-Title'] || '*';
     document.getElementById('ts-fm').textContent = ts.filters['Model'] || '*';
+    document.getElementById('ts-name').textContent = ts.name;
     if (document.querySelector('.tab.active')?.dataset.tab === 'models') {
       renderModels(selectedTrickset, _cachedConfiguredModels);
     } else {
@@ -423,6 +426,47 @@ async function saveFilter(valSpan, key, val, orig, parentEl) {
       body: JSON.stringify({filters}),
     });
   } catch(e) { showToast(e.message, true); valSpan.textContent = orig; }
+}
+
+function editName() {
+  const valSpan = document.getElementById('ts-name');
+  const orig = valSpan.textContent;
+  const inp = document.createElement('input');
+  inp.type = 'text';
+  inp.value = orig;
+  inp.onblur = function() { saveName(valSpan, inp.value, orig); };
+  inp.onkeydown = function(e) { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { valSpan.textContent = orig; } };
+  valSpan.textContent = '';
+  valSpan.appendChild(inp);
+  inp.focus();
+  inp.select();
+}
+
+async function saveName(valSpan, val, orig) {
+  valSpan.textContent = val || orig;
+  if (!val || val === orig) return;
+  try {
+    await fetchJSON('/api/tricksets/' + encodeURIComponent(orig), {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: val}),
+    });
+    selectedTrickset = val;
+    showToast('Renamed to ' + val);
+    fetchTricksets();
+  } catch(e) { showToast(e.message, true); valSpan.textContent = orig; }
+}
+
+async function deleteTrickset() {
+  if (!confirm('Delete trickset "' + selectedTrickset + '"? This cannot be undone.')) return;
+  try {
+    await fetchJSON('/api/tricksets/' + encodeURIComponent(selectedTrickset), {
+      method: 'DELETE',
+    });
+    showToast('Deleted');
+    selectedTrickset = '_default';
+    fetchTricksets();
+  } catch(e) { showToast(e.message, true); }
 }
 
 async function addTrickset() {

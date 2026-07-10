@@ -157,6 +157,16 @@ header .nav a:hover { background: #1a2a4d; }
 }
 
 .ts-filters span:hover .val { text-decoration-color: #5a8ab5; }
+
+.ts-filters .ts-delete {
+  color: #4a6572;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: #2a3a4a;
+  text-underline-offset: 3px;
+  margin-left: auto;
+}
+.ts-filters .ts-delete:hover { color: #7a9ab5; }
 .ts-filters .val {
   font-family: monospace;
   text-decoration: underline;

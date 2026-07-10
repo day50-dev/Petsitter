@@ -348,10 +348,33 @@ def create_app(
             ts.parameters = dict(data["parameters"])
         if "models" in data:
             ts.models = dict(data["models"])
+        if "name" in data and data["name"] != ts.name:
+            new_name = data["name"]
+            if new_name in handler.tricksets:
+                return JSONResponse({"error": f"Trickset '{new_name}' already exists"}, status_code=409)
+            old_name = ts.name
+            ts.name = new_name
+            if ts.file_path:
+                old_path = Path(ts.file_path)
+                new_path = old_path.parent / f"{new_name}.json"
+                old_path.rename(new_path)
+                ts.file_path = str(new_path)
+            handler.tricksets[new_name] = handler.tricksets.pop(old_name)
         if ts.file_path:
             ts.save()
         return JSONResponse({"success": True})
     app.add_route("/api/tricksets/{name}", update_trickset, methods=["PUT"])
+
+    async def delete_trickset(request: Request) -> Response:
+        name = request.path_params.get("name")
+        if name == "_default":
+            return JSONResponse({"error": "Cannot delete default trickset"}, status_code=400)
+        ts = handler.tricksets.get(name)
+        if ts and ts.file_path:
+            Path(ts.file_path).unlink(missing_ok=True)
+        handler.tricksets.pop(name, None)
+        return JSONResponse({"success": True})
+    app.add_route("/api/tricksets/{name}", delete_trickset, methods=["DELETE"])
 
     async def install_examples_endpoint(request: Request) -> Response:
         data = await request.json()

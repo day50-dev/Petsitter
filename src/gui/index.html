@@ -22,9 +22,6 @@
 <a href="#" onclick="switchTab('help');return false">Help</a>
 </div>
 <div class="info">
-<span><span class="label">Listening</span><span id="info-listen">--</span></span>
-<span><span class="label">Upstream</span><span id="info-upstream">--</span></span>
-<span><span class="label">Model</span><span id="info-model">--</span></span>
 <span><span class="label">v</span><span id="info-version">--</span></span>
 <div class="exit-btn btn" onclick="shutdownPetsitter()" title="Shutdown &amp; restore configuration">
 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
@@ -207,9 +204,6 @@ window.addEventListener('hashchange', function() {
 async function fetchInfo() {
     try {
       const d = await fetchJSON('/api/info');
-      document.getElementById('info-listen').textContent = d.listen_on;
-      document.getElementById('info-upstream').textContent = d.model_url;
-      document.getElementById('info-model').textContent = d.model_name || '(default)';
       document.getElementById('info-version').textContent = d.version || '--';
     } catch(e) { console.error(e); }
   }

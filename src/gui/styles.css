@@ -166,7 +166,7 @@ header .nav a:hover { background: #1a2a4d; }
   text-underline-offset: 3px;
   margin-left: auto;
 }
-.ts-filters .ts-delete:hover { color: #7a9ab5; }
+.ts-filters .ts-delete:hover { color: #ff6b8a; }
 .ts-filters .val {
   font-family: monospace;
   text-decoration: underline;

@@ -150,7 +150,10 @@ async function fetchJSON(url, opts) {
   if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.error || r.statusText); }
   return r.json();
 }
-function escapeHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escapeHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+function html(strings, ...vals) {
+  return strings.reduce((r, s, i) => r + s + (i < vals.length ? escapeHtml(vals[i]) : ''), '');
+}
 
 // ---- tabs ----
 function switchTab(name) {
@@ -222,10 +225,10 @@ async function fetchTricks() {
     el.innerHTML = tricks.map(t => {
       const on = t.enabled !== false;
       const badges = [];
-      if (t.keywords && t.keywords.length) badges.push(...t.keywords.map(k => '<span class="badge badge-kw">' + escapeHtml(k) + '</span>'));
-      if (t.required_models && t.required_models.length) badges.push(...t.required_models.map(m => '<span class="badge badge-models">' + escapeHtml(m) + '</span>'));
-      if (t.trickset && t.trickset !== '_default') badges.push('<span class="badge badge-ts">' + escapeHtml(t.trickset) + '</span>');
-      return '<div class="trick-item" draggable="true" data-name="' + escapeHtml(t.name) + '" data-id="' + escapeHtml(t.id || '') + '" data-trickset="' + escapeHtml(t.trickset || '') + '"><div class="info"><div><span class="name">' + escapeHtml(t.display_name || t.name) + '</span><span class="path">' + escapeHtml(t.path || t.module) + '</span></div><div class="brief">' + escapeHtml(t.brief || '') + '</div><div class="trick-meta">' + badges.join('') + '</div></div><div class="actions"><button class="toggle ' + (on ? 'on' : 'off') + '" onclick="toggleTrick(this,\'' + escapeHtml(t.name) + '\',' + (!on) + ')" title="' + (on ? 'Disable' : 'Enable') + '">' + (on ? 'ON' : 'OFF') + '</button><button class="btn btn-danger btn-sm" onclick="unloadTrick(\'' + t.name + '\')" title="Remove">\u2715</button></div></div>';
+      if (t.keywords && t.keywords.length) badges.push(...t.keywords.map(k => `<span class="badge badge-kw">${escapeHtml(k)}</span>`));
+      if (t.required_models && t.required_models.length) badges.push(...t.required_models.map(m => `<span class="badge badge-models">${escapeHtml(m)}</span>`));
+      if (t.trickset && t.trickset !== '_default') badges.push(`<span class="badge badge-ts">${escapeHtml(t.trickset)}</span>`);
+      return `<div class="trick-item" draggable="true" data-name="${escapeHtml(t.name)}" data-id="${escapeHtml(t.id || '')}"><div class="info"><div><span class="name">${escapeHtml(t.display_name || t.name)}</span><span class="path">${escapeHtml(t.path || t.module)}</span></div><div class="brief">${escapeHtml(t.brief || '')}</div><div class="trick-meta">${badges.join('')}</div></div><div class="actions"><button class="toggle ${on ? 'on' : 'off'}" onclick="toggleTrick(this,'${escapeHtml(t.name)}',${!on})" title="${on ? 'Disable' : 'Enable'}">${on ? 'ON' : 'OFF'}</button><button class="btn btn-danger btn-sm" onclick="unloadTrick('${t.name}')" title="Remove">\u2715</button></div></div>`;
     }).join('');
   } catch(e) { document.getElementById('loaded-tricks').innerHTML = '<div class="loader">Error loading tricks</div>'; }
 }
@@ -300,7 +303,13 @@ async function fetchAvailable() {
       if (sortMode === 'chrono') return (b.mtime || 0) - (a.mtime || 0);
       return (a.display_name || a.path).localeCompare(b.display_name || b.path);
     });
-    el.innerHTML = sorted.map(f => '<div class="avail-item"><div><span class="name">' + escapeHtml(f.display_name || f.path) + '</span><span class="path">' + escapeHtml(f.path) + '</span>' + (f.brief ? '<div class="brief">' + escapeHtml(f.brief) + '</div>' : '') + '</div><button class="btn btn-neutral btn-sm" onclick="loadTrick(\'' + f.path.replace(/'/g, "\\'") + '\')">Load</button></div>').join('');
+    el.innerHTML = sorted.map(f => {
+      const name = escapeHtml(f.display_name || f.path);
+      const path = escapeHtml(f.path);
+      const brief = f.brief ? `<div class="brief">${escapeHtml(f.brief)}</div>` : '';
+      const loadPath = f.path.replace(/'/g, "\\'");
+      return `<div class="avail-item"><div><span class="name">${name}</span><span class="path">${path}</span>${brief}</div><button class="btn btn-neutral btn-sm" onclick="loadTrick('${loadPath}')">Load</button></div>`;
+    }).join('');
   } catch(e) { document.getElementById('available-tricks').innerHTML = '<div class="loader">Error loading</div>'; }
 }
 
@@ -336,9 +345,10 @@ function _sharedPills(loaded, avail, selected, onSwitch, showAdd) {
   const loadedNames = new Set(loaded.map(ts => ts.name));
   const names = [...new Set(['_default', ...loadedNames, ...avail.map(ts => ts.name)])];
   const el = document.getElementById('ts-pills');
-  el.innerHTML = names.map(n =>
-    '<span class="pill' + (n === selected ? ' active' : '') + (!loadedNames.has(n) ? ' pill-unloaded' : '') + '" data-name="' + escapeHtml(n) + '" onclick="' + onSwitch + '(this.dataset.name)">' + escapeHtml(n) + '</span>'
-  ).join('') + (showAdd ? '<span class="pill pill-add" onclick="addTrickset()">+ Add</span>' : '');
+  el.innerHTML = names.map(n => {
+    const cls = 'pill' + (n === selected ? ' active' : '') + (!loadedNames.has(n) ? ' pill-unloaded' : '');
+    return `<span class="${cls}" data-name="${escapeHtml(n)}" onclick="${onSwitch}(this.dataset.name)">${escapeHtml(n)}</span>`;
+  }).join('') + (showAdd ? '<span class="pill pill-add" onclick="addTrickset()">+ Add</span>' : '');
 }
 
 async function fetchTricksets() {
@@ -458,8 +468,8 @@ async function installExamples() {
       res.results = res2.results;
     }
     const lines = (res.results || []).map(r => r.result
-      ? '<span style="color:#6bff8a">\u2713</span> ' + escapeHtml(r.name)
-      : '<span style="color:#ff6b6b">\u2717</span> ' + escapeHtml(r.name) + ' &mdash; ' + escapeHtml(r.errmsg || 'failed'));
+      ? `<span style="color:#6bff8a">\u2713</span> ${escapeHtml(r.name)}`
+      : `<span style="color:#ff6b6b">\u2717</span> ${escapeHtml(r.name)} &mdash; ${escapeHtml(r.errmsg || 'failed')}`);
     resultEl.innerHTML = lines.join('<br>');
     if (conflicts.length) fetchTricksets();
   } catch(e) { showToast(e.message, true); }
@@ -467,7 +477,6 @@ async function installExamples() {
   btn.textContent = 'Install Examples';
 }
 
-// ---- models ----
 let _selectedModelScope = '_default';
 let _tsModels = {};
 
@@ -534,15 +543,14 @@ function renderModelEntry(scope, k, m) {
   const keyPtActive = keyPassthrough ? ' pt-active' : '';
   const namePtActive = isNamePt ? ' pt-active' : '';
   const namePtId = 'mpn-' + safe;
-  return '<div class="model-entry" data-scope="' + escapeHtml(scope) + '" data-key="' + escapeHtml(k) + '"><span class="key">' + escapeHtml(k) + '</span>' +
-    '<div class="model-fields">' +
-    '<input id="' + urlId + '" type="text" value="' + escapeHtml(url) + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',this.value,document.getElementById(\'' + nameId + '\').value,document.getElementById(\'' + keyId + '\').value)" placeholder="http://...">' +
-    '<div class="model-subrow">' +
-    '<div class="key-wrap"><input id="' + nameId + '" type="text" value="' + escapeHtml(modelDisplay) + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',document.getElementById(\'' + urlId + '\').value,this.value,document.getElementById(\'' + keyId + '\').value)" placeholder="' + namePlaceholder + '"' + (isNamePt ? ' oninput="offPassthrough(this)" onclick="offPassthrough(this)"' : '') + '>' +
-    '<button class="pt-btn' + namePtActive + '" id="' + namePtId + '" onclick="togglePassthrough(this)" data-field="name" title="Pass through client model name">pass</button></div>' +
-    '<div class="key-wrap"><input id="' + keyId + '" type="text" value="' + escapeHtml(keyDisplay) + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',document.getElementById(\'' + urlId + '\').value,document.getElementById(\'' + nameId + '\').value,this.value)" placeholder="' + keyPlaceholder + '"' + (keyPassthrough ? ' oninput="offPassthrough(this)" onclick="offPassthrough(this)"' : '') + '>' +
-    '<button class="pt-btn' + keyPtActive + '" id="' + ptId + '" onclick="togglePassthrough(this)" data-field="key" title="Pass through client API key">pass</button></div>' +
-    '</div></div></div>';
+  const sc = escapeHtml(scope);
+  const kk = escapeHtml(k);
+  const urlEsc = escapeHtml(url);
+  const modelEsc = escapeHtml(modelDisplay);
+  const keyEsc = escapeHtml(keyDisplay);
+  const nameInput = isNamePt ? ' oninput="offPassthrough(this)" onclick="offPassthrough(this)"' : '';
+  const keyInput = keyPassthrough ? ' oninput="offPassthrough(this)" onclick="offPassthrough(this)"' : '';
+  return `<div class="model-entry" data-scope="${sc}" data-key="${kk}"><span class="key">${kk}</span><div class="model-fields"><input id="${urlId}" type="text" value="${urlEsc}" onchange="setModelForScope('${sc}','${kk}',this.value,document.getElementById('${nameId}').value,document.getElementById('${keyId}').value)" placeholder="http://..."><div class="model-subrow"><div class="key-wrap"><input id="${nameId}" type="text" value="${modelEsc}" onchange="setModelForScope('${sc}','${kk}',document.getElementById('${urlId}').value,this.value,document.getElementById('${keyId}').value)" placeholder="${namePlaceholder}"${nameInput}><button class="pt-btn${namePtActive}" id="${namePtId}" onclick="togglePassthrough(this)" data-field="name" title="Pass through client model name">pass</button></div><div class="key-wrap"><input id="${keyId}" type="text" value="${keyEsc}" onchange="setModelForScope('${sc}','${kk}',document.getElementById('${urlId}').value,document.getElementById('${nameId}').value,this.value)" placeholder="${keyPlaceholder}"${keyInput}><button class="pt-btn${keyPtActive}" id="${ptId}" onclick="togglePassthrough(this)" data-field="key" title="Pass through client API key">pass</button></div></div></div></div>`;
 }
 
 async function setModelForScope(scope, key, model_url, model_name, api_key) {
@@ -675,27 +683,15 @@ async function fetchAgents() {
       const a = agents[id];
       const d = a.detect || {};
       const isReg = regAgents[id] && regAgents[id].status === 'registered';
-      const statusIcon = d.status === 'ready' ? '&#x2705;' : (d.status === 'missing_creds' ? '&#x26A0;&#xFE0F;' : '&#x274C;');
+      const statusIcon = d.status === 'ready' ? '\u2705' : (d.status === 'missing_creds' ? '\u26A0\uFE0F' : '\u274C');
       const statusClass = d.status === 'ready' ? 'status-ready' : (d.status === 'missing_creds' ? 'status-warn' : 'status-err');
-      const actionHtml = '<label class="toggle-switch" title="' + (isReg ? 'Restore config' : 'Route through petsitter') + '">'
-        + '<input type="checkbox" ' + (isReg ? 'checked' : '') + ' onchange="toggleAgent(\'' + id + '\', this.checked)">'
-        + '<span class="toggle-slider"></span></label>';
+      const idEsc = escapeHtml(id);
+      const actionHtml = `<label class="toggle-switch" title="${isReg ? 'Restore config' : 'Route through petsitter'}"><input type="checkbox" ${isReg ? 'checked' : ''} onchange="toggleAgent('${idEsc}', this.checked)"><span class="toggle-slider"></span></label>`;
       var iconHtml = a.icon && a.icon.indexOf('http') === 0
-        ? '<img src="' + escapeHtml(a.icon) + '" alt="" class="agent-favicon" onerror="defaultImage(this)">'
-        : (a.icon || '&#x1F916;');
+        ? `<img src="${escapeHtml(a.icon)}" alt="" class="agent-favicon" onerror="defaultImage(this)">`
+        : (a.icon || '\u{1F916}');
       const configPaths = a.config_paths || [];
-      return '<div class="agent-card' + (isReg ? ' agent-registered' : '') + '">'
-        + '<div class="agent-icon">' + iconHtml + '</div>'
-        + '<div class="agent-body">'
-        + '<div class="agent-name">' + escapeHtml(a.display_name || id) + '</div>'
-        + '<div class="agent-desc">' + escapeHtml(a.description || '') + '</div>'
-        + '<div class="agent-detect">'
-        + '<span class="' + statusClass + '">' + statusIcon + ' ' + escapeHtml(d.status || '') + '</span>'
-        + '</div>'
-        + '<div class="agent-paths">' + configPaths.map(function(p) { return '<span class="agent-path">' + escapeHtml(p) + '</span>'; }).join('') + '</div>'
-        + '</div>'
-        + '<div class="agent-actions">' + actionHtml + '</div>'
-        + '</div>';
+      return `<div class="agent-card${isReg ? ' agent-registered' : ''}"><div class="agent-icon">${iconHtml}</div><div class="agent-body"><div class="agent-name">${escapeHtml(a.display_name || id)}</div><div class="agent-desc">${escapeHtml(a.description || '')}</div><div class="agent-detect"><span class="${statusClass}">${statusIcon} ${escapeHtml(d.status || '')}</span></div><div class="agent-paths">${configPaths.map(function(p) { return `<span class="agent-path">${escapeHtml(p)}</span>`; }).join('')}</div></div><div class="agent-actions">${actionHtml}</div></div>`;
     }).join('');
   } catch(e) { document.getElementById('agents-grid').innerHTML = '<div class="loader">Error loading agents</div>'; }
 }
@@ -715,8 +711,8 @@ function _appendAgentLog(entries) {
   const el = document.getElementById('agent-log-content');
   entries.forEach(function(entry) {
     const d = document.createElement('div');
-    d.className = 'agent-log-entry lvl-' + (entry.level || 'INFO');
-    d.innerHTML = '<span class="time">' + escapeHtml(entry.time || '') + '</span>' + escapeHtml(entry.message);
+    d.className = `agent-log-entry lvl-${entry.level || 'INFO'}`;
+    d.innerHTML = `<span class="time">${escapeHtml(entry.time || '')}</span>${escapeHtml(entry.message)}`;
     el.appendChild(d);
   });
   el.scrollTop = el.scrollHeight;
@@ -726,12 +722,12 @@ async function toggleAgent(id, enable) {
   try {
     if (enable) {
       const r = await fetchJSON('/api/agents/' + encodeURIComponent(id) + '/register', { method:'POST' });
-      if (r.success) showToast(escapeHtml(id) + ' routed through petsitter');
+      if (r.success) showToast(`${escapeHtml(id)} routed through petsitter`);
       else if (r.log && r.log.length) showToast((r.log[0].message || 'Registration failed'), true);
       else showToast('Registration failed', true);
     } else {
       await fetchJSON('/api/agents/' + encodeURIComponent(id) + '/unregister', { method:'POST' });
-      showToast(escapeHtml(id) + ' configuration restored');
+      showToast(`${escapeHtml(id)} configuration restored`);
     }
     fetchAgents();
   } catch(e) { showToast(e.message, true); }
@@ -749,7 +745,7 @@ async function shutdownPetsitter() {
     const r = await fetchJSON('/api/shutdown', { method:'POST' });
     if (logEl && r.log) _appendAgentLog(r.log);
   } catch(e) {
-    if (logEl) logEl.innerHTML += '<div class="agent-log-entry lvl-ERROR">Error: ' + escapeHtml(e.message) + '</div>';
+    if (logEl) logEl.innerHTML += `<div class="agent-log-entry lvl-ERROR">Error: ${escapeHtml(e.message)}</div>`;
   }
 }
 

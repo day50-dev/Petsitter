@@ -205,7 +205,7 @@ async function fetchTricks() {
       if (t.keywords && t.keywords.length) badges.push(...t.keywords.map(k => '<span class="badge badge-kw">' + escapeHtml(k) + '</span>'));
       if (t.required_models && t.required_models.length) badges.push(...t.required_models.map(m => '<span class="badge badge-models">' + escapeHtml(m) + '</span>'));
       if (t.trickset && t.trickset !== '_default') badges.push('<span class="badge badge-ts">' + escapeHtml(t.trickset) + '</span>');
-      return '<div class="trick-item" draggable="true" data-name="' + escapeHtml(t.name) + '" data-id="' + escapeHtml(t.id || '') + '"><div class="info"><div><span class="name">' + escapeHtml(t.display_name || t.name) + '</span><span class="path">' + escapeHtml(t.path || t.module) + '</span></div><div class="brief">' + escapeHtml(t.brief || '') + '</div><div class="trick-meta">' + badges.join('') + '</div></div><div class="actions"><button class="toggle ' + (on ? 'on' : 'off') + '" onclick="toggleTrick(\'' + escapeHtml(t.id || '') + '\',\'' + escapeHtml(t.name) + '\',' + (!on) + ')" title="' + (on ? 'Disable' : 'Enable') + '">' + (on ? 'ON' : 'OFF') + '</button><button class="btn btn-danger btn-sm" onclick="unloadTrick(\'' + t.name + '\')" title="Remove">\u2715</button></div></div>';
+      return '<div class="trick-item" draggable="true" data-name="' + escapeHtml(t.name) + '" data-id="' + escapeHtml(t.id || '') + '" data-trickset="' + escapeHtml(t.trickset || '') + '"><div class="info"><div><span class="name">' + escapeHtml(t.display_name || t.name) + '</span><span class="path">' + escapeHtml(t.path || t.module) + '</span></div><div class="brief">' + escapeHtml(t.brief || '') + '</div><div class="trick-meta">' + badges.join('') + '</div></div><div class="actions"><button class="toggle ' + (on ? 'on' : 'off') + '" onclick="toggleTrick(this,\'' + escapeHtml(t.name) + '\',' + (!on) + ')" title="' + (on ? 'Disable' : 'Enable') + '">' + (on ? 'ON' : 'OFF') + '</button><button class="btn btn-danger btn-sm" onclick="unloadTrick(\'' + t.name + '\')" title="Remove">\u2715</button></div></div>';
     }).join('');
   } catch(e) { document.getElementById('loaded-tricks').innerHTML = '<div class="loader">Error loading tricks</div>'; }
 }
@@ -245,10 +245,14 @@ document.getElementById('loaded-tricks').addEventListener('drop', function(e) {
   reorderTrick(_dragName, toIdx);
 });
 
-async function toggleTrick(id, name, enabled) {
+async function toggleTrick(btn, name, enabled) {
   try {
+    const item = btn.closest('.trick-item');
+    const id = item ? item.dataset.id : '';
+    const ts = _selectedModelScope; 
     if (!id) { showToast('Cannot toggle: missing trick ID', true); return; }
-    const d = await fetchJSON('/api/tricksets/' + encodeURIComponent(selectedTrickset), { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({tricks: [{id, enabled}]}) });
+    if (!ts) { showToast('Cannot toggle: missing trickset', true); return; }
+    const d = await fetchJSON('/api/tricksets/' + encodeURIComponent(ts), { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({tricks: [{id, enabled}]}) });
     if (d.success) showToast(name + ': ' + (enabled ? 'enabled' : 'disabled'));
     fetchTricks();
   } catch(e) { showToast(e.message, true); }
@@ -445,7 +449,7 @@ async function installExamples() {
 }
 
 // ---- models ----
-let selectedModelScope = '_default';
+let _selectedModelScope = '_default';
 let _tsModels = {};
 
 function _modelDisplay(v) { return v === false ? false : (v || ''); }
@@ -461,8 +465,8 @@ async function fetchModels() {
     const configured = modelsData.configured_models || {};
     _tsModels = {};
     loaded.forEach(ts => _tsModels[ts.name] = ts.models || {});
-    _sharedPills(loaded, avail, selectedModelScope, 'switchModelScope', true);
-    renderModels(selectedModelScope, configured);
+    _sharedPills(loaded, avail, _selectedModelScope, 'switchModelScope', true);
+    renderModels(_selectedModelScope, configured);
   } catch(e) { document.getElementById('model-list').innerHTML = '<div class="loader">Error loading models</div>'; }
 }
 
@@ -523,7 +527,7 @@ function renderModelEntry(scope, k, m) {
 }
 
 function switchModelScope(name) {
-  selectedModelScope = name;
+  _selectedModelScope = name;
   fetchModels();
 }
 

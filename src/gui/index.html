@@ -156,8 +156,24 @@ function escapeHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&l
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'tab-'+name));
-  location.hash = name;
   if (name === 'help') loadHelpContent();
+  updateHash();
+}
+
+function updateHash() {
+  var tabEl = document.querySelector('.tab.active');
+  var tab = tabEl ? tabEl.dataset.tab : 'tricks';
+  location.hash = tab + '/' + selectedTrickset;
+}
+
+function parseHash() {
+  var raw = location.hash.replace('#', '') || 'tricks/_default';
+  var parts = raw.split('/');
+  var tab = parts[0] || 'tricks';
+  var ts = parts[1] || '_default';
+  if (tab === 'help') ts = '_default';
+  if (!document.querySelector('.tab[data-tab="' + tab + '"]')) { tab = 'tricks'; ts = '_default'; }
+  return {tab, ts};
 }
 
 let _helpLoaded = false;
@@ -175,8 +191,12 @@ async function loadHelpContent() {
 }
 
 window.addEventListener('hashchange', function() {
-  var tab = location.hash.replace('#','') || 'tricks';
-  if (tab === 'help' || document.querySelector('.tab[data-tab="' + tab + '"]')) switchTab(tab);
+  var p = parseHash();
+  switchTab(p.tab);
+  if (p.ts !== '_default' || p.tab === 'tricks' || p.tab === 'models') {
+    selectedTrickset = p.ts;
+    if (document.querySelector('#ts-pills .pill[data-name="' + p.ts + '"]')) switchTrickset(p.ts);
+  }
 });
 
 // ---- info ----
@@ -249,10 +269,8 @@ async function toggleTrick(btn, name, enabled) {
   try {
     const item = btn.closest('.trick-item');
     const id = item ? item.dataset.id : '';
-    const ts = _selectedModelScope; 
     if (!id) { showToast('Cannot toggle: missing trick ID', true); return; }
-    if (!ts) { showToast('Cannot toggle: missing trickset', true); return; }
-    const d = await fetchJSON('/api/tricksets/' + encodeURIComponent(ts), { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({tricks: [{id, enabled}]}) });
+    const d = await fetchJSON('/api/tricksets/' + encodeURIComponent(selectedTrickset), { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({tricks: [{id, enabled}]}) });
     if (d.success) showToast(name + ': ' + (enabled ? 'enabled' : 'disabled'));
     fetchTricks();
   } catch(e) { showToast(e.message, true); }
@@ -340,6 +358,7 @@ async function fetchTricksets() {
 
 async function switchTrickset(name) {
   selectedTrickset = name;
+  updateHash();
   document.querySelectorAll('#ts-pills .pill[data-name]').forEach(p => p.classList.toggle('active', p.dataset.name === name));
   const isLoaded = !!loadedTricksets[name];
   if (!isLoaded) {
@@ -465,7 +484,7 @@ async function fetchModels() {
     const configured = modelsData.configured_models || {};
     _tsModels = {};
     loaded.forEach(ts => _tsModels[ts.name] = ts.models || {});
-    _sharedPills(loaded, avail, _selectedModelScope, 'switchModelScope', true);
+    _sharedPills(loaded, avail, _selectedModelScope, 'switchTrickset', true);
     renderModels(_selectedModelScope, configured);
   } catch(e) { document.getElementById('model-list').innerHTML = '<div class="loader">Error loading models</div>'; }
 }
@@ -524,11 +543,6 @@ function renderModelEntry(scope, k, m) {
     '<div class="key-wrap"><input id="' + keyId + '" type="text" value="' + escapeHtml(keyDisplay) + '" onchange="setModelForScope(\'' + scope + '\',\'' + k + '\',document.getElementById(\'' + urlId + '\').value,document.getElementById(\'' + nameId + '\').value,this.value)" placeholder="' + keyPlaceholder + '"' + (keyPassthrough ? ' oninput="offPassthrough(this)" onclick="offPassthrough(this)"' : '') + '>' +
     '<button class="pt-btn' + keyPtActive + '" id="' + ptId + '" onclick="togglePassthrough(this)" data-field="key" title="Pass through client API key">pass</button></div>' +
     '</div></div></div>';
-}
-
-function switchModelScope(name) {
-  _selectedModelScope = name;
-  fetchModels();
 }
 
 async function setModelForScope(scope, key, model_url, model_name, api_key) {
@@ -740,8 +754,9 @@ async function shutdownPetsitter() {
 }
 
 // ---- init ----
-var initialTab = location.hash.replace('#','') || 'tricks';
-if (initialTab === 'help' || document.querySelector('.tab[data-tab="' + initialTab + '"]')) switchTab(initialTab);
+var initHash = parseHash();
+switchTab(initHash.tab);
+if (initHash.ts !== '_default') selectedTrickset = initHash.ts;
 fetchInfo(); fetchTricksets(); fetchAvailable(); fetchModels(); fetchAgents();
 startLogStream();
 </script>

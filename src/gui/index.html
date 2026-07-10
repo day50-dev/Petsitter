@@ -518,7 +518,7 @@ function renderModels(scope, globalConfigured) {
       return renderModelEntry(scope, k, m);
     }).join('');
   } else {
-    const scoped = _tsModels[scope] || {};
+    const scoped = _tsModels[scope] || (loadedTricksets[scope] && loadedTricksets[scope].models) || {};
     const allKeys = new Set([...Object.keys(scoped), ...Object.keys(globalConfigured)]);
     const keys = [...allKeys].sort();
     if (!keys.length) {

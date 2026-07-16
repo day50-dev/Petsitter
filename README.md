@@ -301,10 +301,12 @@ The method receives the text after `mycommand: ` and can return:
 
  * [Tool Calling](#tool-calling) - Add tool calling to models without native support
  * [Andybot Toolcall](#andybot-toolcall) - Conversational persona tool calling for small/older models 
+ * [MCP Tools](#mcp-tools) - Inject tools from an mcp.json file into any harness
 
 ### Pipeline
 
  * [Kennel](#kennel) - Route cognitive subtasks to specialized models
+ * [Multi-Model Consultant](#multi-model-consultant) - Two models cross-validate and improve each other's responses
 
 ### Security
 
@@ -366,6 +368,45 @@ petsitter -u http://localhost:11434 -t tricks/andybot_toolcall.py -t tricks/json
 
 For a more advanced version with inline-argument parsing, confusion recovery, and multi-turn state management, see [`tricks/conversational_tool.py`](tricks/conversational_tool.py).
 
+### MCP Tools
+
+[tricks/mcp_tools.py](tricks/mcp_tools.py)
+
+Injects tools defined in an [mcp.json](https://github.com/sourcey/mcp-schema) file into any harness. Converts MCP tool definitions to OpenAI function-calling format and merges them into `params["tools"]`. Tools with name collisions take precedence over existing tool definitions.
+
+Default path: `~/.config/petsitter/mcp.json`. Use the `mcp` prompt keyword to switch files at runtime.
+
+```bash
+# Default path
+petsitter -u http://localhost:11434 -t tricks/mcp_tools.py
+
+# With a custom mcp.json
+petsitter -u http://localhost:11434 -t tricks/mcp_tools.py
+# Then: (mcp: /path/to/my-tools.json)
+```
+
+The `mcp.json` format follows the [MCP spec](https://modelcontextprotocol.io):
+```json
+{
+  "mcpSpec": "1.0.0",
+  "server": { "name": "my-tools", "version": "1.0.0" },
+  "tools": [
+    {
+      "name": "search_docs",
+      "description": "Search documentation by query",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string" },
+          "limit": { "type": "number", "default": 10 }
+        },
+        "required": ["query"]
+      }
+    }
+  ]
+}
+```
+
 ### Multi-Model Orchestration
 
 A trick has full control of the request lifecycle - it can call any number of models, not just the one the user pointed at. This lets you decompose a problem into subtasks and route each one to the model best suited for it.
@@ -414,6 +455,39 @@ Pipeline:
 3. **Emitter** receives the enriched context and generates the final response
 
 Kennel is one architecture; you could write a trick that routes by language, by file type, by user role, or by anything else you can express in a `post_hook`.
+
+#### Multi-Model Consultant
+
+[tricks/multiconsult.py](tricks/multiconsult.py)
+
+Cross-validates responses between two models through iterative refinement and voting. Requires a `default` model and a `consultant` model in the modelset.
+
+Pipeline per round:
+1. **model1's** response (from the proxy call) is sent to **model2** for improvement
+2. **model2** generates a fresh response to the original prompt
+3. **model1** improves model2's fresh response
+4. Both models vote on which improved output is better
+5. If they agree, return the winner; if not, repeat once more
+6. On second disagreement, randomly pick one as fallback
+
+```bash
+# Needs a modelset with "default" and "consultant" keys
+petsitter -mc modelset.json -t tricks/multiconsult.py
+```
+
+Example `modelset.json`:
+```json
+{
+    "default": {
+        "url": "http://localhost:11434",
+        "model": "llama3:8b"
+    },
+    "consultant": {
+        "url": "http://localhost:11434",
+        "model": "qwen3:8b"
+    }
+}
+```
 
 ### Secrets Protector
 

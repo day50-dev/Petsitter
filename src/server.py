@@ -437,6 +437,8 @@ def create_app(
         if _agent_manager is not None:
             _agent_manager.unregister_all()
 
+    import ipdb
+    ipdb.set_trace()
     app.add_event_handler("shutdown", shutdown_event)
 
     return app

@@ -317,6 +317,10 @@ The method receives the text after `mycommand: ` and can return:
  * [Swap Harness](#swap-harness) - Browse and swap system prompts from AI tool repositories
  * [Self-Improver](#self-improver) - Runtime agent that can add, modify, and list tricks
 
+### Utility
+
+ * [Export It](#export-it) - Export conversation as llcat-compatible JSON
+
 ---
 
 ### JSON Mode
@@ -560,6 +564,41 @@ Model: Creates tricks/request_logger.py and explains how to load it
 User: explain the CAP theorem (petsitter: add a thinking mode)
 Model: Explains CAP theorem (tag stripped, petsitter handled separately)
 ```
+
+### Export It
+
+[tricks/exportit.py](tricks/exportit.py)
+
+Exports the conversation history as an [llcat](https://github.com/day50-dev/llcat)-compatible JSON file. The output is the raw message array format used by OpenAI-compatible APIs, making it interoperable with llcat, prompt tools, and anything that speaks the Chat Completions message schema.
+
+Use the `exportit` prompt keyword in any message to trigger the export:
+
+```bash
+petsitter -u http://localhost:11434 -t tricks/exportit.py
+```
+
+```
+User: (exportit)
+Assistant: Conversation exported to `/tmp/petsitter/convo-20260718-143022.json` (6 messages, llcat-compatible)
+
+User: (exportit: backup before refactor)
+Assistant: Conversation exported to `/tmp/petsitter/convo-20260718-143022.json` (6 messages, llcat-compatible)
+Note: backup before refactor
+```
+
+The exported JSON is a plain array of messages in OpenAI Chat Completions format:
+
+```json
+[
+  { "role": "system", "content": "You are a helpful assistant." },
+  { "role": "user", "content": "What is the CAP theorem?" },
+  { "role": "assistant", "content": "The CAP theorem states...", "tool_calls": [] },
+  { "role": "user", "content": "Can you give an example?" },
+  { "role": "assistant", "content": "Sure! Consider a distributed..." }
+]
+```
+
+Tool calls, reasoning (chain-of-thought), and tool results are all preserved in their standard formats. You can load the exported file directly with `llcat -c convo.json` or pipe it into any OpenAI-compatible tool.
 
 
 

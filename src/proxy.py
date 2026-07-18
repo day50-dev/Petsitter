@@ -205,7 +205,7 @@ class ProxyHandler:
                 keyword = p["keyword"].lower()
                 trick = p["trick"]
                 try:
-                    response = trick.handle_prompt_keyword(request_text)
+                    response = trick.handle_prompt_keyword(request_text, modified)
                 except Exception as e:
                     logger.exception(f"prompt_keyword handler for {keyword!r} failed: {e}")
                     response = {

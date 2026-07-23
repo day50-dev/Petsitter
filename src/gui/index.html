@@ -222,6 +222,7 @@ async function fetchTricks() {
     el.innerHTML = tricks.map(t => {
       const on = t.enabled !== false;
       const badges = [];
+      if (t.prompt_keyword) badges.push(`<span class="badge badge-kw">${escapeHtml(t.prompt_keyword)}</span>`);
       if (t.keywords && t.keywords.length) badges.push(...t.keywords.map(k => `<span class="badge badge-kw">${escapeHtml(k)}</span>`));
       if (t.required_models && t.required_models.length) badges.push(...t.required_models.map(m => `<span class="badge badge-models">${escapeHtml(m)}</span>`));
       if (t.trickset && t.trickset !== '_default') badges.push(`<span class="badge badge-ts">${escapeHtml(t.trickset)}</span>`);
@@ -304,8 +305,12 @@ async function fetchAvailable() {
       const name = escapeHtml(f.display_name || f.path);
       const path = escapeHtml(f.path);
       const brief = f.brief ? `<div class="brief">${escapeHtml(f.brief)}</div>` : '';
+      const badges = [];
+      if (f.prompt_keyword) badges.push(`<span class="badge badge-kw">${escapeHtml(f.prompt_keyword)}</span>`);
+      if (f.keywords && f.keywords.length) badges.push(...f.keywords.map(k => `<span class="badge badge-kw">${escapeHtml(k)}</span>`));
+      const badgeHtml = badges.length ? `<div class="trick-meta">${badges.join('')}</div>` : '';
       const loadPath = f.path.replace(/'/g, "\\'");
-      return `<div class="avail-item"><div><span class="name">${name}</span><span class="path">${path}</span>${brief}</div><button class="btn btn-neutral btn-sm" onclick="loadTrick('${loadPath}')">Load</button></div>`;
+      return `<div class="avail-item"><div><span class="name">${name}</span><span class="path">${path}</span>${brief}${badgeHtml}</div><button class="btn btn-neutral btn-sm" onclick="loadTrick('${loadPath}')">Load</button></div>`;
     }).join('');
   } catch(e) { document.getElementById('available-tricks').innerHTML = '<div class="loader">Error loading</div>'; }
 }

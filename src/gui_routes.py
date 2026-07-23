@@ -61,10 +61,10 @@ def _save_full_config(handler, api_key):
 
 
 def _introspect_trick_file(path: Path) -> dict:
-    """Extract display_name and brief from a trick module without instantiating."""
+    """Extract display_name, brief, keywords, and prompt_keyword from a trick module without instantiating."""
     import importlib.util
 
-    info = {"path": str(path), "display_name": None, "brief": None, "mtime": path.stat().st_mtime_ns}
+    info = {"path": str(path), "display_name": None, "brief": None, "keywords": [], "prompt_keyword": "", "mtime": path.stat().st_mtime_ns}
     try:
         spec = importlib.util.spec_from_file_location(path.stem, str(path))
         if spec and spec.loader:
@@ -75,6 +75,8 @@ def _introspect_trick_file(path: Path) -> dict:
                 if isinstance(obj, type) and issubclass(obj, Trick) and obj is not Trick:
                     info["display_name"] = getattr(obj, "__display_name__", None) or name
                     info["brief"] = getattr(obj, "__brief__", "")
+                    info["keywords"] = list(getattr(obj, "keywords", []) or [])
+                    info["prompt_keyword"] = getattr(obj, "prompt_keyword", "") or ""
                     break
     except Exception:
         pass

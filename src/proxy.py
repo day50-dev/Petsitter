@@ -330,6 +330,7 @@ class ProxyHandler:
                     "path": path,
                     "enabled": i < len(ts.trick_enabled) and ts.trick_enabled[i],
                     "keywords": list(t.keywords),
+                    "prompt_keyword": getattr(t, "prompt_keyword", "") or "",
                     "required_models": list(t.required_models),
                 })
         return result

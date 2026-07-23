@@ -154,7 +154,7 @@ class ProxyHandler:
                 i += 1
         return results
 
-    def _filter_prompt_keywords(self, messages: list) -> tuple[list, dict | None]:
+    def _filter_prompt_keywords(self, messages: list, payload: dict | None = None) -> tuple[list, dict | None]:
         registry: dict[str, Trick] = {}
         for t in self.tricks:
             kw = t.prompt_keyword
@@ -205,7 +205,7 @@ class ProxyHandler:
                 keyword = p["keyword"].lower()
                 trick = p["trick"]
                 try:
-                    response = trick.handle_prompt_keyword(request_text, modified)
+                    response = trick.handle_prompt_keyword(request_text, modified, payload)
                 except Exception as e:
                     logger.exception(f"prompt_keyword handler for {keyword!r} failed: {e}")
                     response = {
@@ -397,7 +397,7 @@ class ProxyHandler:
             raise ValueError("No upstream model configured. Set a model URL via the dashboard.")
         messages = payload.get("messages", [])
 
-        messages, pk_response = self._filter_prompt_keywords(messages)
+        messages, pk_response = self._filter_prompt_keywords(messages, payload)
         if pk_response:
             return {
                 "id": "chatcmpl-pk-" + str(int(time.time())),

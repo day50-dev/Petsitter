@@ -46,7 +46,7 @@ class SwapHarnessTrick(Trick):
             logger.error("git not found — install git to use SwapHarnessTrick")
             raise
 
-    def handle_prompt_keyword(self, request: str) -> dict | None:
+    def handle_prompt_keyword(self, request: str, messages: list | None = None, payload: dict | None = None) -> dict | None:
         path = request.strip().rstrip("/")
         base = CACHE_DIR
 
@@ -71,6 +71,19 @@ class SwapHarnessTrick(Trick):
                 icon = "📁" if e.is_dir() else "📄"
                 label = e.name + "/" if e.is_dir() else e.name
                 lines.append(f"{icon}  {label}")
+
+            # Check for question tool - if missing, provide prompt-based fallback guidance
+            tools = (payload or {}).get("tools") or []
+            has_question_tool = any(
+                "question" in (t.get("function", {}).get("name", "").lower())
+                for t in tools
+            ) if tools else False
+
+            if not has_question_tool:
+                lines.append("")
+                lines.append("⚠️  No question tool found. Invoke with (swapharness: <word>) where word is one of:")
+                lines.extend(f"  - {e.name}" for e in entries if e.is_dir())
+
             lines.append("")
             lines.append("(swapharness: path/to/file) to select")
             return {"role": "assistant", "content": "\n".join(lines)}

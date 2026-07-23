@@ -455,7 +455,7 @@ class TestFilterPromptKeywords:
     def test_recognized_keyword_returns_response(self):
         class PromptTrick(Trick):
             prompt_keyword = "cmd"
-            def handle_prompt_keyword(self, request: str, messages: list | None = None) -> dict | None:
+            def handle_prompt_keyword(self, request: str, messages: list | None = None, payload: dict | None = None) -> dict | None:
                 return {"role": "assistant", "content": f"handled: {request}"}
 
         handler = ProxyHandler("http://localhost:11434", "test", tricks=[PromptTrick()])
@@ -467,7 +467,7 @@ class TestFilterPromptKeywords:
     def test_handler_returns_none_strips_pattern(self):
         class PromptTrick(Trick):
             prompt_keyword = "cmd"
-            def handle_prompt_keyword(self, request: str, messages: list | None = None) -> dict | None:
+            def handle_prompt_keyword(self, request: str, messages: list | None = None, payload: dict | None = None) -> dict | None:
                 return None
 
         handler = ProxyHandler("http://localhost:11434", "test", tricks=[PromptTrick()])
@@ -499,7 +499,7 @@ class TestFilterPromptKeywords:
     def test_recognized_and_unrecognized(self):
         class PromptTrick(Trick):
             prompt_keyword = "cmd"
-            def handle_prompt_keyword(self, request: str, messages: list | None = None) -> dict | None:
+            def handle_prompt_keyword(self, request: str, messages: list | None = None, payload: dict | None = None) -> dict | None:
                 return None
 
         handler = ProxyHandler("http://localhost:11434", "test", tricks=[PromptTrick()])
@@ -511,7 +511,7 @@ class TestFilterPromptKeywords:
     def test_handler_raises_returns_error(self):
         class PromptTrick(Trick):
             prompt_keyword = "cmd"
-            def handle_prompt_keyword(self, request: str, messages: list | None = None) -> dict | None:
+            def handle_prompt_keyword(self, request: str, messages: list | None = None, payload: dict | None = None) -> dict | None:
                 raise ValueError("oops")
 
         handler = ProxyHandler("http://localhost:11434", "test", tricks=[PromptTrick()])
@@ -530,7 +530,7 @@ class TestFilterPromptKeywords:
     def test_non_user_message_skipped(self):
         class PromptTrick(Trick):
             prompt_keyword = "cmd"
-            def handle_prompt_keyword(self, request: str, messages: list | None = None) -> dict | None:
+            def handle_prompt_keyword(self, request: str, messages: list | None = None, payload: dict | None = None) -> dict | None:
                 return {"role": "assistant", "content": "done"}
 
         handler = ProxyHandler("http://localhost:11434", "test", tricks=[PromptTrick()])
@@ -544,7 +544,7 @@ class TestFilterPromptKeywords:
     def test_case_insensitive_keyword_matching(self):
         class PromptTrick(Trick):
             prompt_keyword = "cmd"
-            def handle_prompt_keyword(self, request: str, messages: list | None = None) -> dict | None:
+            def handle_prompt_keyword(self, request: str, messages: list | None = None, payload: dict | None = None) -> dict | None:
                 return {"role": "assistant", "content": f"ok: {request}"}
 
         handler = ProxyHandler("http://localhost:11434", "test", tricks=[PromptTrick()])
@@ -555,12 +555,12 @@ class TestFilterPromptKeywords:
     def test_earliest_in_text_order_wins(self):
         class FirstTrick(Trick):
             prompt_keyword = "first"
-            def handle_prompt_keyword(self, request: str, messages: list | None = None) -> dict | None:
+            def handle_prompt_keyword(self, request: str, messages: list | None = None, payload: dict | None = None) -> dict | None:
                 return {"role": "assistant", "content": f"first: {request}"}
 
         class SecondTrick(Trick):
             prompt_keyword = "second"
-            def handle_prompt_keyword(self, request: str, messages: list | None = None) -> dict | None:
+            def handle_prompt_keyword(self, request: str, messages: list | None = None, payload: dict | None = None) -> dict | None:
                 return {"role": "assistant", "content": f"second: {request}"}
 
         handler = ProxyHandler("http://localhost:11434", "test", tricks=[FirstTrick(), SecondTrick()])
@@ -571,7 +571,7 @@ class TestFilterPromptKeywords:
     def test_all_handlers_return_none(self):
         class PromptTrick(Trick):
             prompt_keyword = "cmd"
-            def handle_prompt_keyword(self, request: str, messages: list | None = None) -> dict | None:
+            def handle_prompt_keyword(self, request: str, messages: list | None = None, payload: dict | None = None) -> dict | None:
                 return None
 
         handler = ProxyHandler("http://localhost:11434", "test", tricks=[PromptTrick()])
@@ -584,7 +584,7 @@ class TestFilterPromptKeywords:
     def test_nested_parens_in_prompt_keyword(self):
         class PromptTrick(Trick):
             prompt_keyword = "cmd"
-            def handle_prompt_keyword(self, request: str, messages: list | None = None) -> dict | None:
+            def handle_prompt_keyword(self, request: str, messages: list | None = None, payload: dict | None = None) -> dict | None:
                 return {"role": "assistant", "content": f"got: {request}"}
 
         handler = ProxyHandler("http://localhost:11434", "test", tricks=[PromptTrick()])

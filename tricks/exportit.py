@@ -22,7 +22,7 @@ class ExportItTrick(Trick):
     __display_name__ = "Export It"
     prompt_keyword = "exportit"
 
-    def handle_prompt_keyword(self, request: str, messages: list | None = None) -> dict | None:
+    def handle_prompt_keyword(self, request: str, messages: list | None = None, payload: dict | None = None) -> dict | None:
         os.makedirs(EXPORT_DIR, exist_ok=True)
         messages = messages or []
 

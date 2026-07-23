@@ -106,7 +106,7 @@ class SelfImproverTrick(Trick):
     def __init__(self, max_iterations: int = 10):
         self.max_iterations = max_iterations
 
-    def handle_prompt_keyword(self, request: str) -> dict | None:
+    def handle_prompt_keyword(self, request: str, messages: list | None = None, payload: dict | None = None) -> dict | None:
         skill = self._read_skill()
         system_prompt = f"{skill}\n\n{_tool_defs_text()}"
         context = [{"role": "system", "content": system_prompt}]

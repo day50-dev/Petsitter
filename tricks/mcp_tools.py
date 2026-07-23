@@ -55,7 +55,7 @@ class McpToolsTrick(Trick):
 
     # -- prompt keyword ------------------------------------------------------
 
-    def handle_prompt_keyword(self, request: str) -> dict | None:
+    def handle_prompt_keyword(self, request: str, messages: list | None = None, payload: dict | None = None) -> dict | None:
         path = request.strip()
         if path:
             self._mcp_path = Path(path).expanduser()

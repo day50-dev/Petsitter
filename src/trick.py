@@ -212,7 +212,7 @@ class Trick:
         Undo anything done during install().
         """
 
-    def handle_prompt_keyword(self, request: str, messages: list | None = None) -> dict | None:
+    def handle_prompt_keyword(self, request: str, messages: list | None = None, payload: dict | None = None) -> dict | None:
         """Handle a prompt keyword detected in the user message.
 
         When the framework finds ``(<prompt_keyword>: <request>)`` in a user
@@ -223,6 +223,8 @@ class Trick:
             request: The text after the keyword and colon, e.g. "add a thinking mode".
             messages: The full conversation context (list of message dicts) at the
                 time the keyword was detected. May be ``None`` if not provided.
+            payload: The original request payload dict (contains tools, temperature, etc.).
+                May be ``None`` if not provided.
 
         Returns:
             An assistant message dict like ``{"role": "assistant", "content": "..."}``

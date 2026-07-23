@@ -338,18 +338,22 @@ def create_app(
                 new_paths: list[str] = []
                 new_enabled: list[bool] = []
                 new_ids: list[str] = []
+                new_keywords: list[str | None] = []
                 for entry in raw:
                     if isinstance(entry, str):
                         new_paths.append(entry)
                         new_enabled.append(True)
                         new_ids.append(_new_id())
+                        new_keywords.append(None)
                     elif isinstance(entry, dict):
                         new_paths.append(entry.get("file", ""))
                         new_enabled.append(entry.get("enabled", True))
                         new_ids.append(entry.get("id") or _new_id())
+                        new_keywords.append(entry.get("keyword"))
                 ts.trick_paths = new_paths
                 ts.trick_enabled = new_enabled
                 ts.trick_ids = new_ids
+                ts.trick_keywords = new_keywords
                 ts.load_tricks()
                 if ts.file_path:
                     ts.save()

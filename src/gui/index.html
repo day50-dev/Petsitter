@@ -222,7 +222,7 @@ async function fetchTricks() {
     el.innerHTML = tricks.map(t => {
       const on = t.enabled !== false;
       const badges = [];
-      if (t.prompt_keyword) badges.push(`<span class="badge badge-kw">${escapeHtml(t.prompt_keyword)}</span>`);
+      if (t.prompt_keyword) badges.push(`<span class="badge badge-kw" onclick="editKeyword('${escapeHtml(t.id || '')}','${escapeHtml(t.name)}','${escapeHtml(t.prompt_keyword)}')" title="Click to override keyword">${escapeHtml(t.prompt_keyword)}</span>`);
       if (t.keywords && t.keywords.length) badges.push(...t.keywords.map(k => `<span class="badge badge-kw">${escapeHtml(k)}</span>`));
       if (t.required_models && t.required_models.length) badges.push(...t.required_models.map(m => `<span class="badge badge-models">${escapeHtml(m)}</span>`));
       if (t.trickset && t.trickset !== '_default') badges.push(`<span class="badge badge-ts">${escapeHtml(t.trickset)}</span>`);
@@ -280,6 +280,20 @@ async function toggleTrick(btn, name, enabled) {
 async function reorderTrick(name, newIndex) {
   try {
     await fetchJSON('/api/tricks/reorder', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name, new_index: newIndex, trickset: selectedTrickset}) });
+    fetchTricks();
+  } catch(e) { showToast(e.message, true); }
+}
+
+async function editKeyword(id, name, current) {
+  const val = prompt('Override prompt keyword for ' + name + ':', current || '');
+  if (val === null) return;
+  const keyword = val.trim() || null;
+  try {
+    await fetchJSON('/api/tricksets/' + encodeURIComponent(selectedTrickset), {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ tricks: [{ id, keyword }] })
+    });
     fetchTricks();
   } catch(e) { showToast(e.message, true); }
 }

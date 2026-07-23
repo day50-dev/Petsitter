@@ -156,10 +156,11 @@ class ProxyHandler:
 
     def _filter_prompt_keywords(self, messages: list, payload: dict | None = None) -> tuple[list, dict | None]:
         registry: dict[str, Trick] = {}
-        for t in self.tricks:
-            kw = t.prompt_keyword
-            if kw:
-                registry[kw.lower()] = t
+        for ts_name, ts in self.tricksets.items():
+            for i, t in enumerate(ts.tricks):
+                kw = (ts.trick_keywords[i] if i < len(ts.trick_keywords) and ts.trick_keywords[i] else None) or t.prompt_keyword
+                if kw:
+                    registry[kw.lower()] = t
 
         modified = list(messages)
         for msg in reversed(modified):
@@ -330,7 +331,7 @@ class ProxyHandler:
                     "path": path,
                     "enabled": i < len(ts.trick_enabled) and ts.trick_enabled[i],
                     "keywords": list(t.keywords),
-                    "prompt_keyword": getattr(t, "prompt_keyword", "") or "",
+                    "prompt_keyword": (ts.trick_keywords[i] if i < len(ts.trick_keywords) and ts.trick_keywords[i] else None) or getattr(t, "prompt_keyword", "") or "",
                     "required_models": list(t.required_models),
                 })
         return result

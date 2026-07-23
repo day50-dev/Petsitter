@@ -31,6 +31,7 @@ class Trickset:
         models: dict[str, str] | None = None,
         trick_enabled: list[bool] | None = None,
         trick_ids: list[str] | None = None,
+        trick_keywords: list[str | None] | None = None,
     ):
         self.name = name
         self.schema = schema
@@ -41,6 +42,9 @@ class Trickset:
             self.trick_ids = list(trick_ids)
         else:
             self.trick_ids = [_new_id() for _ in range(len(trick_paths))]
+        self.trick_keywords = list(trick_keywords) if trick_keywords else [None] * len(trick_paths)
+        while len(self.trick_keywords) < len(self.trick_paths):
+            self.trick_keywords.append(None)
         self.file_path = file_path
         self.parameters: dict[str, Any] = parameters or {}
         self.models: dict[str, str] = models or {}
@@ -52,6 +56,7 @@ class Trickset:
                 "id": self.trick_ids[i] if i < len(self.trick_ids) else _new_id(),
                 "file": path,
                 "enabled": self.trick_enabled[i] if i < len(self.trick_enabled) else True,
+                "keyword": self.trick_keywords[i] if i < len(self.trick_keywords) else None,
             }
             for i, path in enumerate(self.trick_paths)
         ]
@@ -111,18 +116,21 @@ class Trickset:
         trick_paths: list[str] = []
         trick_enabled: list[bool] = []
         trick_ids: list[str] = []
+        trick_keywords: list[str | None] = []
         for entry in raw_tricks:
             if isinstance(entry, str):
                 trick_paths.append(entry)
                 trick_enabled.append(True)
                 trick_ids.append(_new_id())
+                trick_keywords.append(None)
             elif isinstance(entry, dict):
                 trick_paths.append(entry.get("file", ""))
                 trick_enabled.append(entry.get("enabled", True))
                 trick_ids.append(entry.get("id") or _new_id())
+                trick_keywords.append(entry.get("keyword"))
         parameters = data.get("parameters", {})
         models = data.get("models", {})
-        ts = Trickset(name, schema, filters, trick_paths, file_path=str(p), parameters=parameters, models=models, trick_enabled=trick_enabled, trick_ids=trick_ids)
+        ts = Trickset(name, schema, filters, trick_paths, file_path=str(p), parameters=parameters, models=models, trick_enabled=trick_enabled, trick_ids=trick_ids, trick_keywords=trick_keywords)
         ts.load_tricks()
         logger.info("Loaded trickset: %s (%d tricks)", name, len(ts.tricks))
         return ts
@@ -162,15 +170,23 @@ class Trickset:
                     if self.trick_enabled[i] != val:
                         self.trick_enabled[i] = val
                         changed = True
+                if "keyword" in entry:
+                    val = entry["keyword"]
+                    while len(self.trick_keywords) <= i:
+                        self.trick_keywords.append(None)
+                    if self.trick_keywords[i] != val:
+                        self.trick_keywords[i] = val
+                        changed = True
         return changed
 
-    def add_trick(self, path: str, enabled: bool = True) -> Trick:
+    def add_trick(self, path: str, enabled: bool = True, keyword: str | None = None) -> Trick:
         cls = load_trick_from_path(path)
         trick = cls()
         self.tricks.append(trick)
         self.trick_paths.append(path)
         self.trick_enabled.append(enabled)
         self.trick_ids.append(_new_id())
+        self.trick_keywords.append(keyword)
         logger.info("Trickset %s: added trick %s", self.name, path)
         return trick
 
@@ -182,6 +198,8 @@ class Trickset:
                 del self.trick_ids[i]
                 if i < len(self.trick_enabled):
                     del self.trick_enabled[i]
+                if i < len(self.trick_keywords):
+                    del self.trick_keywords[i]
                 logger.info("Trickset %s: removed trick %s", self.name, tid)
                 return True
         return False
@@ -193,11 +211,13 @@ class Trickset:
                 tp = self.trick_paths.pop(i)
                 tid2 = self.trick_ids.pop(i)
                 te = self.trick_enabled.pop(i) if i < len(self.trick_enabled) else True
+                tk = self.trick_keywords.pop(i) if i < len(self.trick_keywords) else None
                 new_index = max(0, min(new_index, len(self.tricks)))
                 self.tricks.insert(new_index, t)
                 self.trick_paths.insert(new_index, tp)
                 self.trick_ids.insert(new_index, tid2)
                 self.trick_enabled.insert(new_index, te)
+                self.trick_keywords.insert(new_index, tk)
                 return True
         return False
 

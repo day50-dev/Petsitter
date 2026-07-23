@@ -182,7 +182,16 @@ def create_app(
         cfg["first_run"] = True
         save_config(cfg)
 
-    app = Starlette()
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def lifespan(app):
+        yield
+        handler.shutdown_all()
+        if _agent_manager is not None:
+            _agent_manager.unregister_all()
+
+    app = Starlette(lifespan=lifespan)
 
     async def stream_chat_completions(handler: ProxyHandler, payload: dict, x_title: str):
         try:
@@ -432,14 +441,7 @@ def create_app(
         return JSONResponse({"success": True, "message": "Shutting down"})
     app.add_route("/api/shutdown", shutdown_server, methods=["POST"])
 
-    async def shutdown_event():
-        handler.shutdown_all()
-        if _agent_manager is not None:
-            _agent_manager.unregister_all()
-
-    #import ipdb
-    #ipdb.set_trace()
-    #app.add_event_handler("shutdown", shutdown_event)
+    atexit.register(lambda: handler.shutdown_all())
 
     return app
 

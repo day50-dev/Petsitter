@@ -15,6 +15,7 @@ file even when no request is running.
 
 import contextvars
 import logging
+import threading
 import uuid
 from pathlib import Path
 from typing import Any
@@ -54,7 +55,9 @@ _trace: contextvars.ContextVar[Any] = contextvars.ContextVar("petsitter_trace", 
 def start_trace() -> contextvars.Token:
     """Begin collecting a structured trace of hook activity for this request.
 
-    Only the playground turns this on.  When no trace is active
+    The playground turns this on to collect a trace it returns with the reply.
+    It is not the only way events flow: see ``subscribe`` for observers that
+    want them live.  When no trace is active and nothing has subscribed,
     ``trace_event`` is a no-op, so the normal request path is unaffected.
     """
     return _trace.set([])
@@ -68,18 +71,103 @@ def get_trace() -> list[dict] | None:
     return _trace.get()
 
 
+_subscribers: list = []
+_subscribers_lock = threading.Lock()
+_dispatching: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "petsitter_trace_dispatching", default=False
+)
+
+
+def subscribe(callback) -> Any:
+    """Receive every pipeline event, for as long as the callback stays registered.
+
+    A hook only ever sees its own slice of a request: ``pre_hook`` is handed the
+    messages and the payload, and learns nothing about what the tricks ahead of
+    it did to either.  A trick that exists to *report* on the pipeline - a tool
+    monitor, an inspector - needs the rest, so it subscribes here and is called
+    with each event as the proxy records it.
+
+    The callback receives one dict per event: ``stage``, usually ``trick`` (the
+    class name of whichever trick the stage belongs to), ``request_id``, and
+    whatever detail that stage carries.  It is called synchronously on the
+    request's own task, so it must be quick and must not block; anything slow or
+    failure-prone belongs behind a queue the callback only feeds.  Exceptions
+    raised by a callback are logged and swallowed - a broken observer must never
+    take down the request it was watching.
+
+    Tricks normally subscribe in ``startup()`` and unsubscribe in ``shutdown()``.
+    Returns the callback, so it can be used as a decorator.
+    """
+    with _subscribers_lock:
+        if callback not in _subscribers:
+            _subscribers.append(callback)
+    return callback
+
+
+def unsubscribe(callback) -> bool:
+    """Stop delivering events to a callback. True if it was registered."""
+    with _subscribers_lock:
+        try:
+            _subscribers.remove(callback)
+            return True
+        except ValueError:
+            return False
+
+
+def tracing_active() -> bool:
+    """Whether anything is collecting events right now.
+
+    Building the detail for an event is not always free, so the proxy checks
+    this before assembling anything beyond the basics.  When no trace is running
+    and nothing has subscribed, ``trace_event`` is a no-op and the pipeline pays
+    nothing for being observable.
+    """
+    if _trace.get() is not None:
+        return True
+    with _subscribers_lock:
+        return bool(_subscribers)
+
+
 def trace_event(stage: str, trick: Any = None, **detail) -> None:
-    """Record one pipeline step: which stage, which trick, what changed."""
+    """Record one pipeline step: which stage, which trick, what changed.
+
+    Tricks may call this too, and should when they do something a viewer could
+    not otherwise infer.  A trick that narrows the tool list can report *what*
+    it removed simply by removing it, but only the trick itself knows *why*::
+
+        trace_event("gate", self, withheld=dropped, reason=f"phase={phase}")
+    """
     events = _trace.get()
-    if events is None:
+    with _subscribers_lock:
+        subscribers = list(_subscribers)
+    if events is None and not subscribers:
         return
+
     entry: dict[str, Any] = {"stage": stage}
     if trick is not None:
         # The class name is what the dashboard puts in data-name, so it is
         # enough to light up the right row without threading ids through.
         entry["trick"] = trick if isinstance(trick, str) else type(trick).__name__
     entry.update(detail)
-    events.append(entry)
+
+    if events is not None:
+        events.append(entry)
+
+    if not subscribers or _dispatching.get():
+        # A subscriber that emits its own events would otherwise recurse.
+        return
+
+    delivered = dict(entry)
+    delivered.setdefault("request_id", _request_id.get())
+    token = _dispatching.set(True)
+    try:
+        for callback in subscribers:
+            try:
+                callback(delivered)
+            except Exception:
+                _base.exception("trace subscriber %r failed", callback)
+    finally:
+        _dispatching.reset(token)
 
 
 _request_meta: contextvars.ContextVar[dict | None] = contextvars.ContextVar(

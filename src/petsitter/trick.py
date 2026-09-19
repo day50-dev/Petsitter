@@ -186,6 +186,23 @@ class Trick:
             (see ``Trick.configure`` for the schema). Tricks with config
             fields get a gear icon in the dashboard to edit them.
 
+    Observing and reporting:
+        Hooks only see their own slice of a request. A trick that wants the
+        rest — what the tricks ahead of it changed, which ones went dormant —
+        subscribes to the pipeline with
+        ``petsitter.observability.subscribe(callback)``, conventionally in
+        ``startup()``, and drops it again in ``shutdown()``.
+
+        A trick should also *report* anything a viewer could not otherwise
+        infer, with ``petsitter.observability.trace_event``. Removing a tool
+        from the payload is visible on its own; the reason for removing it is
+        not, so say it::
+
+            trace_event("gate", self, withheld=dropped, reason=f"phase={phase}")
+
+        Both directions are inert when nothing is watching, so instrumenting a
+        trick costs nothing until someone turns an observer on.
+
     Lifecycle hooks (called automatically by the framework):
         install()    — when the trick is first added to a trickset
         startup()    — when the first concurrent request uses this trick (0→1)

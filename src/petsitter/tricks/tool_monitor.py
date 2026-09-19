@@ -15,9 +15,16 @@ walked through a flow chart rather than turned loose.  When another trick does
 that gating, this trick reports the difference between the list the client sent
 and the list that actually went upstream.
 
-Note that it reports *what* was withheld, not *why* -- only the gating trick
-knows the reason.  Pipeline events are currently discarded unless a trace is
-running, so there is nothing here to read; see ``observability.trace_event``.
+It reports *which* trick withheld each tool, not just that it vanished.  The
+framework only says that a given trick's ``pre_hook`` has run; this trick
+subscribes to that event and samples the tool list itself each time one
+arrives, so a change is attributed to whichever trick had just finished.  All of
+that lives here rather than in the pipeline, because only a trick that cares
+about tools has any reason to look at them.
+
+A gating trick that also wants to explain *why* can say so itself with
+``trace_event("gate", self, reason=...)``; anything a trick emits that way is
+forwarded to the viewer as a note.
 
 **Position this trick first in the trickset.**  ``pre_hook`` snapshots the
 incoming tool list before any other trick has rewritten it, and ``post_hook``
@@ -39,7 +46,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
-from petsitter.observability import LOG_DIR, request_meta
+from petsitter.observability import LOG_DIR, request_meta, subscribe, unsubscribe
 from petsitter.trick import Trick
 
 DEFAULT_SOCKET_PATH = LOG_DIR / "toolmon.sock"
@@ -48,6 +55,15 @@ SCHEMA_VERSION = 1
 MAX_DATAGRAM = 60_000
 DESCRIPTION_LIMIT = 200
 ARGUMENTS_LIMIT = 400
+MAX_ATTRIBUTIONS = 40
+MAX_NOTES = 40
+
+# Stages the proxy itself records.  Anything else on the wire was emitted by a
+# trick that had something to say, and is passed through to the viewer as a note.
+PIPELINE_STAGES = frozenset({
+    "system_prompt", "pre_hook", "post_hook", "active", "dormant",
+    "keyword", "prompt_keyword", "trickset", "upstream",
+})
 
 
 def _now() -> str:
@@ -154,7 +170,17 @@ class ToolMonitorTrick(Trick):
         if not self.socket_path:
             self.socket_path = str(DEFAULT_SOCKET_PATH)
 
+    def startup(self) -> None:
+        """Start listening to the pipeline for as long as requests are in flight.
+
+        Subscribing here rather than at import time is what keeps the monitor an
+        opt-in diagnostic: with nothing subscribed the proxy skips assembling
+        event detail entirely.
+        """
+        subscribe(self._on_pipeline_event)
+
     def shutdown(self) -> None:
+        unsubscribe(self._on_pipeline_event)
         with self._lock:
             if self._sock is not None:
                 try:
@@ -162,6 +188,43 @@ class ToolMonitorTrick(Trick):
                 except OSError:
                     pass
                 self._sock = None
+
+    def _on_pipeline_event(self, event: dict) -> None:
+        """Record what the other tricks did, attributed to whichever one did it.
+
+        Called on the request's own task, so ``request_meta`` here is the meta of
+        the request the event belongs to.  Events from requests this trick is not
+        part of land in a meta whose hooks never fire, and are simply discarded.
+        """
+        meta = request_meta()
+        if not meta:
+            return
+        stage = event.get("stage")
+        if stage == "pre_hook":
+            # The event says only that this trick's pre_hook just returned.
+            # Sampling the payload now, before the next trick runs, is what
+            # makes the change attributable - every pre_hook edits the same
+            # dict, so a moment later it no longer belongs to anyone.
+            seen = meta.get("toolmon_seen")
+            if seen is None:
+                return
+            current = _tool_names((meta.get("payload") or {}).get("tools"))
+            if current == seen:
+                return
+            meta["toolmon_seen"] = current
+            attribution = meta.setdefault("toolmon_attribution", [])
+            if len(attribution) < MAX_ATTRIBUTIONS:
+                attribution.append({
+                    "trick": event.get("trick", "?"),
+                    "withheld": [n for n in seen if n not in current],
+                    "added": [n for n in current if n not in seen],
+                })
+        elif stage not in PIPELINE_STAGES:
+            notes = meta.setdefault("toolmon_notes", [])
+            if len(notes) < MAX_NOTES:
+                notes.append({
+                    k: v for k, v in event.items() if k != "request_id"
+                })
 
     # -- hooking -------------------------------------------------------------
 
@@ -175,6 +238,7 @@ class ToolMonitorTrick(Trick):
         # Per-request scratch space: the instance is shared across concurrent
         # requests, so the baseline has to travel with the request.
         meta["toolmon_offered"] = _tool_names(incoming)
+        meta["toolmon_seen"] = _tool_names(incoming)
 
         self._emit({
             "event": "request",
@@ -225,6 +289,8 @@ class ToolMonitorTrick(Trick):
             "added": [n for n in final if n not in offered],
             "fired": fired,
             "finish": "tool_calls" if fired else "content",
+            "by_trick": meta.get("toolmon_attribution") or [],
+            "notes": meta.get("toolmon_notes") or [],
         })
         return context
 

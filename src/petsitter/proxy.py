@@ -1,5 +1,6 @@
 """OpenAI API proxy handling for petsitter."""
 
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -39,6 +40,16 @@ from petsitter.trickset import Trickset
 logger = logging.getLogger("petsitter")
 
 CONFIG_MAGIC = "__petsitter_config__"
+
+# A 502 from a broker upstream (dyva, litellm) means it raced its pool of
+# backends and every one of them was down or missing the model -- a condition
+# that usually clears on its own within a second or two as a host comes back.
+# Retrying costs one more round trip; not retrying drops a request that would
+# have succeeded. Other 5xx codes are left alone: a 500 is the upstream itself
+# breaking, and replaying the prompt at it just breaks it again.
+UPSTREAM_RETRY_STATUSES = frozenset({502})
+UPSTREAM_RETRY_ATTEMPTS = 3
+UPSTREAM_RETRY_BACKOFF = 0.5
 
 
 class ProxyHandler:
@@ -711,16 +722,34 @@ class ProxyHandler:
             trace_event("upstream", url=target, model=upstream_payload.get("model", ""))
             log.debug("%supstream payload: %s", request_tag(), json.dumps(upstream_payload, indent=2))
 
-            try:
-                async with httpx.AsyncClient() as client:
-                    response = await client.post(
-                        target,
-                        json=upstream_payload,
-                        headers=upstream_headers,
-                        timeout=120.0,
-                    )
-            except httpx.TransportError as e:
-                raise ValueError(f"Error: {target} can't be reached: {e}") from e
+            attempts = 0
+            for attempt in range(1, UPSTREAM_RETRY_ATTEMPTS + 1):
+                attempts = attempt
+                try:
+                    async with httpx.AsyncClient() as client:
+                        response = await client.post(
+                            target,
+                            json=upstream_payload,
+                            headers=upstream_headers,
+                            timeout=120.0,
+                        )
+                except httpx.TransportError as e:
+                    raise ValueError(f"Error: {target} can't be reached: {e}") from e
+
+                if (response.status_code not in UPSTREAM_RETRY_STATUSES
+                        or attempt == UPSTREAM_RETRY_ATTEMPTS):
+                    break
+
+                delay = UPSTREAM_RETRY_BACKOFF * (2 ** (attempt - 1))
+                log.warning(
+                    "%supstream %s from %s (attempt %d/%d), retrying in %.1fs: %s",
+                    request_tag(), response.status_code, target, attempt,
+                    UPSTREAM_RETRY_ATTEMPTS, delay,
+                    (response.text or "").strip()[:200] or "(empty body)",
+                )
+                trace_event("upstream_retry", url=target,
+                            status=response.status_code, attempt=attempt)
+                await asyncio.sleep(delay)
 
             log.info("%supstream response status: %s", request_tag(), response.status_code)
             log.debug("%supstream response headers: %s", request_tag(), dict(response.headers))
@@ -731,12 +760,13 @@ class ProxyHandler:
             # it tried, which model was missing, what the box said back. The
             # status line alone just says "502 Bad Gateway", which is true of
             # every one of those causes and tells you nothing about which.
-            if response.is_error:
+            if response.status_code >= 400:
                 detail = (response.text or "").strip()
                 log.error("%supstream %s from %s: %s", request_tag(),
                           response.status_code, target, detail[:2000] or "(empty body)")
+                tried = f" after {attempts} attempts" if attempts > 1 else ""
                 raise ValueError(
-                    f"Upstream {target} returned {response.status_code}: "
+                    f"Upstream {target} returned {response.status_code}{tried}: "
                     f"{detail[:2000] or '(empty body)'}"
                 )
 

@@ -726,7 +726,19 @@ class ProxyHandler:
             log.debug("%supstream response headers: %s", request_tag(), dict(response.headers))
             log.debug("%supstream response body: %s", request_tag(), response.text[:500] if response.text else "(empty)")
 
-            response.raise_for_status()
+            # An upstream that is itself a gateway (dyva, litellm, openrouter)
+            # puts the only useful part of the failure in the body -- which host
+            # it tried, which model was missing, what the box said back. The
+            # status line alone just says "502 Bad Gateway", which is true of
+            # every one of those causes and tells you nothing about which.
+            if response.is_error:
+                detail = (response.text or "").strip()
+                log.error("%supstream %s from %s: %s", request_tag(),
+                          response.status_code, target, detail[:2000] or "(empty body)")
+                raise ValueError(
+                    f"Upstream {target} returned {response.status_code}: "
+                    f"{detail[:2000] or '(empty body)'}"
+                )
 
             if not response.content:
                 log.error("%supstream returned empty response (status %s)", request_tag(), response.status_code)

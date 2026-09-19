@@ -539,6 +539,7 @@ Available Tricks list instead.
  * [Reference Check](#reference-check) - Challenge answers that cite no valid reference from a retrieval tool
  * [Recommender List](#recommender-list) - Make the model pick software from your preferred list
  * [Export It](#export-it) - Export conversation as llcat-compatible JSON
+ * [Traffic Logger](#traffic-logger) - Log every request/response as timestamped JSONL to a file
 
 ---
 
@@ -982,6 +983,45 @@ This is a heuristic, and it buys a large reduction rather than a guarantee. A mo
 It is rarer than it sounds, though, and for a structural reason. To cite an id at all the model has to have attended to that span, since the id exists nowhere else; hallucination is largely what happens when generation runs off parametric memory without looking at the context. Misattribution requires reading the chunk closely enough to lift its id and ignoring it closely enough to say something unrelated. So the main effect is less "we caught a liar" than "we forced attention onto the source."
 
 The corollary is worth keeping in mind: the residual errors that survive this check are *more* dangerous per unit than the ones you started with, because they now read as sourced. Catching those needs a per-claim entailment check against the cited chunk — a model call per claim, a different cost class entirely.
+
+### Traffic Logger
+
+[tricks/logger.py](tricks/logger.py)
+
+Appends one timestamped JSON line to a JSONL file for every request and every response that passes through the trick — the debugging view into whatever harness is misbehaving. Point it at a file, reproduce the problem, and you have the full traffic in both directions: payloads, tools, and messages on the way out; the message list and model answer on the way back.
+
+```bash
+pet add mine logger            # writes ~/.cache/petsitter/traffic.jsonl
+```
+
+Each request produces two records:
+
+```jsonl
+{"timestamp":"2026-08-29T12:00:00.000+00:00","trick":"LoggerTrick","event":"request","direction":"out","request_id":"ab12cd34","x_title":"opencode*","model":"qwen3:8b","stream":false,"tools":[],"payload":{"model":"qwen3:8b","messages":[{"role":"user","content":"hello"}]},"messages":[{"role":"user","content":"hello"}]}
+{"timestamp":"2026-08-29T12:00:00.150+00:00","trick":"LoggerTrick","event":"response","direction":"in","request_id":"ab12cd34","x_title":"opencode*","model":"qwen3:8b","messages":[...],"answer":{"role":"assistant","content":"hi!"}}
+```
+
+Records come straight off the hooks:
+
+- **`request`** fires in `pre_hook` and carries the full payload and message list heading up — whatever the tricks before it have already done to the conversation.
+- **`response`** fires in `post_hook` with the message list including the model's answer.
+
+The trick is passive — both hooks return the context untouched, so nothing it logs changes what the model sees.
+
+#### Ordering matters
+
+Hooks run in trickset order, so where the logger sits decides what it sees:
+
+- **First in the trickset** it records traffic as it arrives from the client.
+- **Last in the trickset** it sees the messages after every other trick has rewritten them.
+
+A trick that short-circuits the pipeline (a prompt-keyword handler, or a `post_hook` that replaces the answer) prevents everything after it from running — so add the logger first (or `pet reorder mine logger 0`) to guarantee a record.
+
+#### Configuration
+
+| Field | Default | What it does |
+|---|---|---|
+| `path` | `~/.cache/petsitter/traffic.jsonl` | Where the JSONL file is written. A directory path (or one ending in `/`) writes `traffic.jsonl` inside it. Parent directories are created on demand. |
 
 
 

@@ -61,8 +61,8 @@ class KennelTrick(Trick):
         cfg = get_model_config("thinker")
         result = callmodel_sync(
             context,
-            model_url=cfg["model_url"],
-            model_name=cfg["model_name"],
+            model_url=cfg["url"],
+            model_name=cfg["model"],
         )
         return result[-1].get("content", "").strip() if result else None
 
@@ -81,8 +81,8 @@ class KennelTrick(Trick):
 
         result = callmodel_sync(
             ctx,
-            model_url=cfg["model_url"],
-            model_name=cfg["model_name"],
+            model_url=cfg["url"],
+            model_name=cfg["model"],
         )
         content = result[-1].get("content", "").strip() if result else ""
 

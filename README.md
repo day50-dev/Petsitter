@@ -1,6 +1,8 @@
 <p align="center">
 <img width="480" alt="logo" src="https://github.com/user-attachments/assets/d2fd4fd3-52b3-4bb2-9c41-6623a07251a5" /><br/>
 <a href=https://pypi.org/project/petsitter><img src=https://badge.fury.io/py/petsitter.svg/?2></a>
+<br/><br/><b>Try it now</b><br/>
+  <code>uvx petsitter</code><br/>
 </p>
 
 ## Intro

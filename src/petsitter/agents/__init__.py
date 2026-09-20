@@ -87,6 +87,9 @@ class Agent:
     # Who this tool talks to when petsitter is not in the way. Used to say
     # plainly what turning it on changes.
     provider_name: str = "its AI provider"
+    # Filters for the trickset created when this agent is connected, so its
+    # traffic lands in its own trickset instead of everybody's default.
+    trickset_filters: dict[str, str] = {"X-Title": "*", "Model": "*"}
     config_paths: list[str] = []
     tricks: list[str] = []
     model_config: dict[str, Any] = {}

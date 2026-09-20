@@ -24,6 +24,8 @@ class OpenCodeAgent(Agent):
     description = "Open-source AI coding agent for the terminal"
     icon = "https://opencode.ai/favicon.ico"
     required_env: list[str] = []
+    provider_name = "its AI provider"
+    trickset_filters = {"X-Title": "opencode*", "Model": "*"}
     config_paths = ["~/.config/opencode/opencode.json"]
     # What a newly connected tool gets out of the box: see the traffic, keep
     # secrets out of it, carry your house rules, and be able to export a

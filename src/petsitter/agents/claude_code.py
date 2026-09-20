@@ -28,6 +28,7 @@ class ClaudeCodeAgent(Agent):
     icon = "https://claude.ai/favicon.ico"
     required_env = ["ANTHROPIC_API_KEY"]
     provider_name = "Anthropic"
+    trickset_filters = {"X-Title": "*", "Model": "claude*"}
     config_paths = ["~/.claude/settings.json"]
     # What a newly connected tool gets out of the box: see the traffic, keep
     # secrets out of it, carry your house rules, and be able to export a

@@ -34,6 +34,7 @@ class CodexAgent(Agent):
     icon = "https://chatgpt.com/favicon.ico"
     required_env = ["OPENAI_API_KEY"]
     provider_name = "OpenAI"
+    trickset_filters = {"X-Title": "*", "Model": "gpt*"}
     config_paths = ["~/.codex/config.toml", "$CODEX_HOME/config.toml"]
     # What a newly connected tool gets out of the box: see the traffic, keep
     # secrets out of it, carry your house rules, and be able to export a

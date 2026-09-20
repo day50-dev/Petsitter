@@ -7,8 +7,10 @@ import logging
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
+import threading
 from collections import deque
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
@@ -1041,7 +1043,12 @@ def _get_version() -> str:
     default="localhost:8080",
     help="Host:port to listen on (default: localhost:8080)",
 )
-def cli(config_arg: str | None, listen_on: str) -> None:
+@click.option(
+    "--no-browser",
+    is_flag=True,
+    help="Don't open the dashboard in a browser on startup.",
+)
+def cli(config_arg: str | None, listen_on: str, no_browser: bool) -> None:
     """Petsitter - OpenAI-compatible proxy with tricks.
 
     https://github.com/day50-dev/Petsitter
@@ -1140,6 +1147,37 @@ def cli(config_arg: str | None, listen_on: str) -> None:
     global _uvicorn_server
     config = uvicorn.Config(app, host=host, port=port, timeout_graceful_shutdown=5)
     _uvicorn_server = uvicorn.Server(config)
+
+    # uvicorn only installs its own handler for SIGINT/SIGTERM (see its
+    # HANDLED_SIGNALS). A closed terminal or an exiting login shell sends
+    # SIGHUP instead, whose default disposition is an immediate kill -- no
+    # unwind, no atexit, nothing restored. Route it through the same
+    # should_exit flag so a dropped terminal shuts down exactly as cleanly
+    # as Ctrl-C. SIGKILL can never be caught this way; that's what the
+    # standalone `pet agents restore` command is for.
+    if hasattr(signal, "SIGHUP"):
+        def _handle_sighup(signum, frame):
+            _uvicorn_server.should_exit = True
+        signal.signal(signal.SIGHUP, _handle_sighup)
+
+    if not no_browser:
+        dashboard_url = f"http://{host if host != '0.0.0.0' else 'localhost'}:{port}/"
+
+        def _open_when_ready():
+            import time
+            import webbrowser
+            # uvicorn.Server sets .started only once it's actually accepting
+            # connections; opening before that races the browser against the
+            # bind and shows a connection-refused page instead of the dashboard.
+            for _ in range(100):  # ~10s
+                if getattr(_uvicorn_server, "started", False) or _uvicorn_server.should_exit:
+                    break
+                time.sleep(0.1)
+            if _uvicorn_server.started and not _uvicorn_server.should_exit:
+                webbrowser.open(dashboard_url)
+
+        threading.Thread(target=_open_when_ready, daemon=True).start()
+
     try:
         _uvicorn_server.run()
     except KeyboardInterrupt:

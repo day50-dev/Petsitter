@@ -247,9 +247,17 @@ class AgentManager:
         return True, log
 
     def unregister_all(self) -> list[dict[str, str]]:
-        """Unregister all registered agents. Called on shutdown."""
+        """Unregister every agent the registry says is registered.
+
+        Only touches agents actually marked "registered" -- unlike looping
+        over every discovered agent type, which would print a spurious
+        "not registered" warning for each one that was never set up.
+        """
         all_log: list[dict[str, str]] = []
-        for agent_id in list(self._agents):
+        registry = load_registry(self.config_dir)
+        registered = [aid for aid, e in (registry.get("agents") or {}).items()
+                      if e.get("status") == "registered"]
+        for agent_id in registered:
             success, log = self.unregister(agent_id)
             all_log.extend(log)
         return all_log

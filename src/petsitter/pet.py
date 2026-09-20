@@ -1287,6 +1287,27 @@ def agents_unregister(agent_id: str) -> None:
     click.echo(f"Unregistered agent '{agent_id}'")
 
 
+@agents.command("restore")
+def agents_restore() -> None:
+    """Put every registered agent's config back, without a running proxy.
+
+    The server restores agents on its way out (SIGINT, SIGTERM, SIGHUP, or a
+    clean exit), but a SIGKILL, an OOM kill, or a crash skips all of that and
+    leaves a tool like Claude Code pointed at a proxy that is no longer
+    listening. This reads the same registry.json the server would and undoes
+    every "registered" entry by hand -- safe to run any time, whether or not
+    petsitter is running, and a no-op if everything is already restored.
+    """
+    mgr = _install_agent_manager()
+    log = mgr.unregister_all()
+    if not log:
+        click.echo("Nothing to restore.")
+        return
+    for entry in log:
+        lvl = entry.get("level", "INFO")
+        click.echo(f"[{lvl}] {entry.get('message', '')}")
+
+
 @cli.command("status")
 def status_cmd() -> None:
     """Show a summary of the current configuration."""

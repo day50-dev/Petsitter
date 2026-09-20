@@ -134,17 +134,67 @@ class ProxyHandler:
         return headers
 
     @staticmethod
-    def _is_config_request(messages: list) -> bool:
+    def _message_text(msg: dict) -> str | None:
+        """The human-readable text of a message, whatever shape its content is.
+
+        Message content arrives in two shapes.  The OpenAI-style one is a plain
+        string; the Anthropic-style one (what Claude Code and most block-based
+        clients send) is a list of typed blocks.  Anything that wants to read
+        what the user actually typed has to cope with both, so it reads it
+        here rather than testing ``isinstance(content, str)`` for itself.
+
+        Returns None when the message carries no text at all -- a tool_result
+        or image-only turn -- which is different from an empty string.
+        """
+        content = msg.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts = [
+                b.get("text") or ""
+                for b in content
+                if isinstance(b, dict) and b.get("type") == "text"
+            ]
+            if not parts:
+                return None
+            return "".join(parts)
+        return None
+
+    @staticmethod
+    def _set_message_text(msg: dict, text: str) -> None:
+        """Write text back into a message, preserving its original shape.
+
+        For block content the text lands in the first text block and any
+        further text blocks are dropped, so that a rewrite of the joined text
+        does not get duplicated across blocks.  Non-text blocks are untouched.
+        """
+        content = msg.get("content")
+        if isinstance(content, str):
+            msg["content"] = text
+            return
+        if isinstance(content, list):
+            new_blocks = []
+            seen_text = False
+            for b in content:
+                if isinstance(b, dict) and b.get("type") == "text":
+                    if seen_text:
+                        continue
+                    seen_text = True
+                    new_blocks.append({**b, "text": text})
+                else:
+                    new_blocks.append(b)
+            msg["content"] = new_blocks
+
+    @classmethod
+    def _is_config_request(cls, messages: list) -> bool:
         """True when the last message is exactly the config diagnostic magic string."""
         if not messages:
             return False
         last = messages[-1]
-        return (
-            isinstance(last, dict)
-            and last.get("role") == "user"
-            and isinstance(last.get("content"), str)
-            and last["content"].strip() == CONFIG_MAGIC
-        )
+        if not isinstance(last, dict) or last.get("role") != "user":
+            return False
+        text = cls._message_text(last)
+        return text is not None and text.strip() == CONFIG_MAGIC
 
     @staticmethod
     def _trick_diag_entry(trick: Trick) -> dict:
@@ -348,9 +398,11 @@ class ProxyHandler:
 
         modified = list(messages)
         for msg in reversed(modified):
-            if msg.get("role") != "user" or not isinstance(msg.get("content"), str):
+            if msg.get("role") != "user":
                 continue
-            content = msg["content"]
+            content = self._message_text(msg)
+            if content is None:
+                continue
 
             patterns = self._find_prompt_keyword_patterns(content)
             if not patterns:
@@ -385,7 +437,7 @@ class ProxyHandler:
                 content = content[:p["start"]] + content[p["end"]:]
             content = content.strip()
             content = re.sub(r' +', " ", content).strip()
-            msg["content"] = content
+            self._set_message_text(msg, content)
 
             # Inject notices for unrecognized keywords
             if unrecognized:
@@ -431,23 +483,26 @@ class ProxyHandler:
         non_kw_tricks = [t for t in tricks if not t.keywords]
 
         for msg in reversed(modified):
-            if msg.get("role") == "user" and isinstance(msg.get("content"), str):
-                content = msg["content"]
-                for trick in kw_tricks:
-                    for kw in trick.keywords:
-                        pattern = re.compile(r'\b' + re.escape(kw) + r'\b', re.IGNORECASE)
-                        if pattern.search(content):
-                            content = pattern.sub("", content)
-                            if trick not in active:
-                                active.append(trick)
-                                get_logger().info(
-                                    "%skeyword %r activated %s",
-                                    request_tag(), kw, type(trick).__name__,
-                                )
-                                trace_event("keyword", trick, keyword=kw)
-                content = re.sub(r' +', ' ', content).strip()
-                msg["content"] = content
-                break
+            if msg.get("role") != "user":
+                continue
+            content = self._message_text(msg)
+            if content is None:
+                continue
+            for trick in kw_tricks:
+                for kw in trick.keywords:
+                    pattern = re.compile(r'\b' + re.escape(kw) + r'\b', re.IGNORECASE)
+                    if pattern.search(content):
+                        content = pattern.sub("", content)
+                        if trick not in active:
+                            active.append(trick)
+                            get_logger().info(
+                                "%skeyword %r activated %s",
+                                request_tag(), kw, type(trick).__name__,
+                            )
+                            trace_event("keyword", trick, keyword=kw)
+            content = re.sub(r' +', ' ', content).strip()
+            self._set_message_text(msg, content)
+            break
 
         result = non_kw_tricks + active
         get_logger().info(

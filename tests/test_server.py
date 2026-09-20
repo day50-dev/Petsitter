@@ -473,11 +473,15 @@ class TestCLI:
         from click.testing import CliRunner
 
         runner = CliRunner()
-        with patch("petsitter.server.uvicorn.run") as mock_run, \
+        # The CLI builds a uvicorn.Server and runs it, so that is the seam to
+        # intercept; patching uvicorn.run would let a real server start.
+        with patch("petsitter.server.uvicorn.Server") as mock_server, \
+             patch("petsitter.server.uvicorn.Config") as mock_config, \
              patch("petsitter.server.create_app") as mock_create:
             mock_create.return_value = None
+            mock_server.return_value.started = True
             result = runner.invoke(cli, list(args))
-        return result, mock_run, mock_create
+        return result, mock_config, mock_create
 
     def test_cli_parse_host_port(self, tmp_path):
         """-c points at a config dir and -l parses host:port."""

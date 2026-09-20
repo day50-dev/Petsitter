@@ -52,6 +52,24 @@ UPSTREAM_RETRY_ATTEMPTS = 3
 UPSTREAM_RETRY_BACKOFF = 0.5
 
 
+ANTHROPIC_UPSTREAM = "https://api.anthropic.com"
+
+# Headers Anthropic needs, and the client's own credentials. Petsitter never
+# supplies a key here: whatever the caller authenticated with goes upstream.
+_ANTHROPIC_PASSTHROUGH = ("x-api-key", "authorization", "anthropic-version",
+                          "anthropic-beta", "user-agent")
+
+
+def _anthropic_headers(incoming: dict) -> dict[str, str]:
+    lowered = {k.lower(): v for k, v in (incoming or {}).items()}
+    headers = {"content-type": "application/json"}
+    for name in _ANTHROPIC_PASSTHROUGH:
+        if lowered.get(name):
+            headers[name] = lowered[name]
+    headers.setdefault("anthropic-version", "2023-06-01")
+    return headers
+
+
 class ProxyHandler:
 
     def __init__(
@@ -798,6 +816,95 @@ class ProxyHandler:
             if capabilities:
                 result["capabilities"] = capabilities
 
+            return result
+        finally:
+            self._stop_tricks(tricks)
+            if ts_token is not None:
+                reset_current_trickset(ts_token)
+            reset_request_meta(meta_token)
+            reset_request_id(rid_token)
+
+    async def messages(self, payload: dict, x_title: str = "",
+                       forward_headers: dict | None = None) -> dict:
+        """Serve Anthropic's /v1/messages through the ordinary trick pipeline.
+
+        The request is translated into the OpenAI shape the tricks are written
+        against, run through the same trickset matching and hooks as any other
+        request, then translated back and sent to Anthropic. The caller's own
+        credentials are forwarded, so petsitter never needs a key of its own.
+        """
+        from petsitter import anthropic_compat as ac
+
+        rid = new_request_id()
+        rid_token = set_request_id(rid)
+        messages, tools = ac.to_openai_messages(payload)
+        # The pipeline reads and writes this dict, so tricks that gate tools see
+        # and edit exactly the list that will be sent.
+        shadow: dict[str, Any] = {
+            "model": payload.get("model", ""),
+            "messages": messages,
+            "tools": tools,
+            "stream": bool(payload.get("stream", False)),
+            "temperature": payload.get("temperature"),
+        }
+        meta_token = start_request_meta(
+            request_id=rid,
+            payload=shadow,
+            x_title=x_title,
+            tools=list(tools),
+            model=payload.get("model", ""),
+            stream=bool(payload.get("stream", False)),
+            api="anthropic",
+        )
+        ts_token = None
+        tricks: list[Trick] = []
+        log = get_logger()
+        try:
+            model = payload.get("model", "")
+            tricks, matched_ts = self._matching_tricks(x_title, model)
+            if matched_ts is not None:
+                ts_token = set_current_trickset(matched_ts)
+                log = get_logger()
+                log.info("%s/v1/messages -> trickset '%s' (%d tricks)",
+                         request_tag(), matched_ts.name, len(tricks))
+                trace_event("trickset", trickset=matched_ts.name, via="filters")
+            elif not tricks:
+                log.info("%s/v1/messages: no trickset matched", request_tag())
+
+            tricks, messages = self._filter_tricks_by_keywords(tricks, messages)
+            self._start_tricks(tricks)
+
+            system_prompt = ""
+            if messages and messages[0].get("role") == "system":
+                system_prompt = messages[0].get("content", "")
+                messages = messages[1:]
+            new_system_prompt = self._apply_system_prompt_tricks(system_prompt, tricks)
+            if new_system_prompt:
+                messages = [{"role": "system", "content": new_system_prompt}] + messages
+
+            shadow["messages"] = messages
+            messages = self._apply_pre_hooks(messages, shadow, tricks)
+
+            upstream = ANTHROPIC_UPSTREAM.rstrip("/")
+            body = ac.to_anthropic_payload(messages, shadow.get("tools") or [], payload)
+            headers = _anthropic_headers(forward_headers or {})
+            target = f"{upstream}/v1/messages"
+
+            log.info("%scalling upstream: %s", request_tag(), target)
+            trace_event("upstream", url=target, model=body.get("model", ""))
+            async with httpx.AsyncClient() as client:
+                response = await client.post(target, json=body, headers=headers, timeout=600.0)
+
+            if response.status_code >= 400:
+                detail = (response.text or "").strip()[:500]
+                log.error("%supstream %s: %s", request_tag(), response.status_code, detail)
+                raise ValueError(f"Anthropic returned {response.status_code}: {detail}")
+
+            result = response.json()
+            assistant = ac.response_to_assistant_message(result)
+            context = self._apply_post_hooks(messages + [assistant], tricks)
+            if context:
+                result = ac.apply_assistant_message(result, context[-1])
             return result
         finally:
             self._stop_tricks(tricks)

@@ -1564,3 +1564,23 @@ header .nav .nav-start:hover { color: #cfe2ff; }
 .agent-card { cursor: default; }
 .btn-configure { background: #16203a; color: #a9ccff; border-color: #2f4d75; }
 .btn-configure:hover { background: #1e3054; color: #fff; border-color: #3b82f6; }
+
+/* Arriving from a Connect card lands you in vocabulary you haven't met. */
+.tricks-context {
+  position: relative;
+  background: #16203a;
+  border: 1px solid #2f4d75;
+  border-radius: 8px;
+  padding: 14px 40px 14px 16px;
+  margin-bottom: 14px;
+}
+.tricks-context .tc-head { font-size: 14px; font-weight: 600; color: #cfe2ff; margin-bottom: 6px; }
+.tricks-context p { font-size: 12.5px; line-height: 1.62; color: #9fb6cc; margin: 0 0 6px; max-width: 78ch; }
+.tricks-context .tc-hint { color: #6b8299; margin-bottom: 0; }
+.tricks-context .tc-close {
+  position: absolute; top: 8px; right: 10px;
+  background: none; border: none; color: #6b8299;
+  font-size: 18px; line-height: 1; cursor: pointer; padding: 2px 6px; border-radius: 4px;
+}
+.tricks-context .tc-close:hover { color: #fff; background: #24304a; }
+.tricks-context .tc-close:focus-visible { outline: 2px solid #8ab4ff; outline-offset: 2px; }

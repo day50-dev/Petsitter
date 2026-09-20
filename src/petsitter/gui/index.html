@@ -120,6 +120,7 @@
 
 <!-- === TRICKS TAB === -->
 <div class="tab-pane" id="tab-tricks">
+<div class="tricks-context" id="tricks-context" hidden></div>
 <div class="two-col">
 <div class="card">
 <h2>Loaded Tricks</h2>
@@ -284,6 +285,7 @@ function html(strings, ...vals) {
 let currentTab = 'intro';
 
 function switchTab(name) {
+  if (name !== 'tricks') dismissTricksContext();
   currentTab = name;
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'tab-'+name));
@@ -1056,6 +1058,7 @@ async function fetchTricksets() {
 }
 
 async function switchTrickset(name) {
+  if (name !== selectedTrickset) dismissTricksContext();
   selectedTrickset = name;
   if (_newTricksets.delete(name)) {
     const pill = document.querySelector('#ts-pills .pill[data-name="' + name + '"]');
@@ -1529,6 +1532,8 @@ async function fetchAgents() {
     const ordered = ids.slice().sort((x, y) =>
       rankOf(x) - rankOf(y) ||
       String(agents[x].display_name || x).localeCompare(String(agents[y].display_name || y)));
+    window._agentNames = {};
+    ids.forEach(i => { window._agentNames[i] = agents[i].display_name || i; });
     el.innerHTML = ordered.map(id => {
       const a = agents[id];
       const d = a.detect || {};
@@ -1626,11 +1631,50 @@ function _appendAgentLog(entries) {
   el.scrollTop = el.scrollHeight;
 }
 
-// Show what petsitter is actually doing to this tool's traffic: its own
-// trickset if registering made one, otherwise the trick list in general.
-function configureAgent(id) {
+// Show what petsitter is actually doing to this tool's traffic. If the tool
+// has no trickset yet -- connected before petsitter made them, or its trickset
+// was deleted -- make one now rather than sending the user away to do it.
+// Arriving here from a card is a jump into unfamiliar vocabulary, so the banner
+// says where you've landed and what these things are.
+async function configureAgent(id) {
+  const name = (window._agentNames && window._agentNames[id]) || id;
   switchTab('tricks');
+  const box = document.getElementById('tricks-context');
+
+  if (!(loadedTricksets && loadedTricksets[id])) {
+    if (box) {
+      box.innerHTML = `<div class="tc-head">Setting up ${escapeHtml(name)}&rsquo;s tricks&hellip;</div>`;
+      box.hidden = false;
+    }
+    try {
+      await fetchJSON('/api/agents/' + encodeURIComponent(id) + '/trickset', { method: 'POST' });
+      await fetchTricksets();
+    } catch (e) {
+      if (box) {
+        box.innerHTML = `<div class="tc-head">Couldn&rsquo;t set up ${escapeHtml(name)}&rsquo;s tricks</div>`
+          + `<p>${escapeHtml(e.message || String(e))}</p>`
+          + `<button class="tc-close" onclick="dismissTricksContext()" aria-label="Dismiss">&times;</button>`;
+        box.hidden = false;
+      }
+      return;
+    }
+  }
+
   if (loadedTricksets && loadedTricksets[id]) switchTrickset(id);
+  if (!box) return;
+  box.innerHTML =
+      `<div class="tc-head">These run on every request from <strong>${escapeHtml(name)}</strong></div>`
+    + `<p>A <em>trick</em> is one small step applied to a request on its way to the model, or to the`
+    + ` reply on its way back. This is ${escapeHtml(name)}'s own set &mdash; changing it affects`
+    + ` ${escapeHtml(name)} and nothing else you have connected.</p>`
+    + `<p class="tc-hint">Toggle any of them off to see what changes. Nothing here is permanent.</p>`
+    + `<button class="tc-close" onclick="dismissTricksContext()" aria-label="Dismiss">&times;</button>`;
+  box.hidden = false;
+}
+
+function dismissTricksContext() {
+  const box = document.getElementById('tricks-context');
+  if (box) box.hidden = true;
 }
 
 async function toggleAgent(id, enable) {

@@ -416,14 +416,25 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
                     if level and entry["level"] != level.upper():
                         continue
                     yield f"data: {json.dumps(entry)}\n\n"
+                # Poll in short steps rather than blocking for 30s, so that a
+                # Ctrl-C is noticed while uvicorn is still waiting politely.
+                from petsitter.server import is_shutting_down
+                idle = 0.0
                 while True:
+                    if is_shutting_down() or await request.is_disconnected():
+                        break
                     try:
-                        entry = await asyncio.wait_for(q.get(), timeout=30)
-                        if level and entry["level"] != level.upper():
-                            continue
-                        yield f"data: {json.dumps(entry)}\n\n"
+                        entry = await asyncio.wait_for(q.get(), timeout=1.0)
                     except asyncio.TimeoutError:
-                        yield ": keepalive\n\n"
+                        idle += 1.0
+                        if idle >= 30:
+                            idle = 0.0
+                            yield ": keepalive\n\n"
+                        continue
+                    idle = 0.0
+                    if level and entry["level"] != level.upper():
+                        continue
+                    yield f"data: {json.dumps(entry)}\n\n"
             except asyncio.CancelledError:
                 pass
             finally:

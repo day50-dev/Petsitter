@@ -154,6 +154,139 @@ def _print_startup(listen_on: str, model_url: str, model_name: str,
     click.echo(click.style("-" * BANNER_WIDTH, fg="bright_black"))
 
 
+_uvicorn_server = None
+_restored_agents: list[str] = []
+
+
+def is_shutting_down() -> bool:
+    """True once the server has begun stopping.
+
+    Long-running responses poll this so they can end on their own terms during
+    the graceful window, instead of being cancelled after it.
+    """
+    server = _uvicorn_server
+    return bool(server is not None and server.should_exit)
+
+
+def _is_petsitter(host: str, port: int) -> bool:
+    """Whether the thing on that port is another petsitter.
+
+    Checks more than one endpoint on purpose: an older or unhealthy petsitter
+    may fail one of them, and it is still more useful to say "that's petsitter"
+    than "that's something else".
+    """
+    for path, marker in (("/health", None), ("/api/info", "version")):
+        try:
+            r = httpx.get(f"http://{host}:{port}{path}", timeout=1.0)
+        except Exception:
+            continue
+        if r.status_code != 200:
+            continue
+        if marker is None:
+            return True
+        try:
+            if marker in r.json():
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _print_port_busy(host: str, port: int) -> None:
+    """Explain the clash and what to do, rather than a raw bind traceback."""
+    display = "localhost" if host in ("127.0.0.1", "0.0.0.0", "::1") else host
+    mine = _is_petsitter(host, port)
+
+    click.echo("")
+    if mine:
+        click.echo(click.style(f"  petsitter is already running on {display}:{port}.", bold=True))
+        click.echo("")
+        click.echo("  You can just open it:")
+        click.echo("  " + _hyperlink(f"http://{display}:{port}",
+                                     click.style(f"http://{display}:{port}",
+                                                 fg="bright_cyan", bold=True, underline=True)))
+        click.echo("")
+        click.echo("  Or run a second one alongside it on another port:")
+    else:
+        click.echo(click.style(
+            f"  Port {port} is already being used by something else.", bold=True))
+        click.echo("")
+        click.echo("  petsitter can run on a different port instead:")
+    click.echo("")
+    click.echo(click.style(f"    petsitter -l {display}:{port + 1}", fg="bright_white"))
+    click.echo("")
+    click.echo(click.style(f"  ({display}:{port + 1} is just a suggestion \u2014 any free port works.)",
+                           fg="bright_black"))
+    click.echo("")
+
+
+ISSUES_URL = "https://github.com/day50-dev/Petsitter/issues"
+
+
+def _restore_agents() -> list[str]:
+    """Put every connected tool's config back before petsitter goes away.
+
+    A tool pointed at a proxy that is no longer listening is simply broken --
+    Claude Code with ANTHROPIC_BASE_URL set to a dead port cannot reach
+    Anthropic at all. Leaving that behind on exit would be the rudest thing
+    petsitter could do, so connections last exactly as long as the process.
+
+    Returns the display names of whatever was disconnected. The names are
+    remembered because this runs from two places -- the CLI on its way out, and
+    an atexit backstop for the exits that skip it -- and whichever goes second
+    finds nothing left to restore but still has to be able to say what happened.
+    """
+    global _restored_agents
+    if _agent_manager is None:
+        return _restored_agents
+    try:
+        registered = [aid for aid, e in (_agent_manager.get_registered().get("agents") or {}).items()
+                      if e.get("status") == "registered"]
+    except Exception:
+        return _restored_agents
+    if not registered:
+        return _restored_agents
+    names = list(_restored_agents)
+    for agent_id in registered:
+        try:
+            _agent_manager.unregister(agent_id)
+        except Exception:
+            logging.getLogger("petsitter").exception("could not restore %s", agent_id)
+            continue
+        try:
+            names.append(_agent_manager._get(agent_id).display_name)
+        except Exception:
+            names.append(agent_id)
+    _restored_agents = names
+    return names
+
+
+def _print_goodbye(restored: list[str] | None = None) -> None:
+    """A last word on the way out, with somewhere to send the complaints.
+
+    Printed after the server has actually stopped, so it is the final thing on
+    screen rather than something scrolled away by shutdown logging.
+    """
+    click.echo("")
+    if restored:
+        tools = ", ".join(restored)
+        one = len(restored) == 1
+        click.echo(click.style(
+            f"  Put {tools} back the way {'it was' if one else 'they were'}.", bold=True))
+        # The env var is read once at startup, so a session that was already
+        # running is still pointed at a port nothing is listening on.
+        click.echo(f"  Restart {'it' if one else 'them'} if {'it was' if one else 'they were'}"
+                   f" already open \u2014 {'it is' if one else 'they are'} still pointed here.")
+        click.echo("")
+    click.echo(click.style("  Thanks for using petsitter.", bold=True))
+    click.echo("")
+    click.echo("  Anything broken, confusing, or missing? That's worth an issue \u2014")
+    click.echo("  the confusing ones especially. Bug reports and ideas both welcome:")
+    click.echo("")
+    click.echo("  " + _hyperlink(ISSUES_URL, click.style(ISSUES_URL, fg="bright_cyan", underline=True)))
+    click.echo("")
+
+
 def _parse_p_path(path: str) -> tuple[str, str] | None:
     """Parse a ``/p/`` proxy path into ``(host, subpath)``.
 
@@ -391,7 +524,7 @@ def create_app(
     handler = ProxyHandler(model_url, model_name, api_key, tricksets=tricksets)
 
     global _log_capture, _agent_manager
-    _agent_manager = AgentManager(config_dir=str(CONFIG_DIR))
+    _agent_manager = AgentManager(config_dir=str(CONFIG_DIR), handler=handler)
     log_level = getattr(logging, os.getenv("LOGLEVEL", "INFO").upper(), logging.INFO)
     logging.getLogger().setLevel(log_level)
     _log_capture = LogCaptureHandler()
@@ -417,8 +550,10 @@ def create_app(
     async def lifespan(app):
         yield
         handler.shutdown_all()
-        if _agent_manager is not None:
-            _agent_manager.unregister_all()
+        # Tools are disconnected here, while the app is still shutting down
+        # cleanly. _restore_agents records what it undid so the CLI can tell
+        # the user on its way out.
+        _restore_agents()
 
     app = Starlette(lifespan=lifespan)
 
@@ -497,6 +632,45 @@ def create_app(
             logging.getLogger("petsitter").error(f"Error in models: {e}\n{traceback.format_exc()}")
             return JSONResponse({"error": str(e), "type": "proxy_error"}, status_code=500)
     app.add_route("/v1/models", models, methods=["GET"])
+
+    async def anthropic_messages(request: Request) -> Response:
+        """Anthropic's Messages API, which is what ANTHROPIC_BASE_URL points at."""
+        from petsitter import anthropic_compat as ac
+        try:
+            payload = await request.json()
+        except Exception:
+            return JSONResponse(
+                {"type": "error", "error": {"type": "invalid_request_error",
+                                            "message": "body is not valid JSON"}},
+                status_code=400)
+
+        x_title = request.headers.get("X-Title", "")
+        forward = dict(request.headers)
+        streaming = bool(payload.get("stream", False))
+
+        if streaming:
+            async def event_stream():
+                try:
+                    result = await handler.messages(payload, x_title=x_title,
+                                                    forward_headers=forward)
+                except Exception as e:
+                    logging.getLogger("petsitter").exception("/v1/messages failed")
+                    yield ac.error_event(str(e))
+                    return
+                for chunk in ac.stream_events(result):
+                    yield chunk
+            return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+        try:
+            result = await handler.messages(payload, x_title=x_title, forward_headers=forward)
+        except Exception as e:
+            logging.getLogger("petsitter").exception("/v1/messages failed")
+            return JSONResponse(
+                {"type": "error", "error": {"type": "api_error", "message": str(e)}},
+                status_code=502)
+        return JSONResponse(result)
+
+    app.add_route("/v1/messages", anthropic_messages, methods=["POST"])
 
     async def health(request: Request) -> Response:
         return JSONResponse({"status": "ok"})
@@ -770,15 +944,35 @@ def create_app(
             return JSONResponse({"success": False, "error": str(e), "log": []}, status_code=500)
     app.add_route("/api/agents/{id}/unregister", unregister_agent, methods=["POST"])
 
+    async def agent_trickset(request: Request) -> Response:
+        """Create this agent's trickset if it doesn't have one yet."""
+        if _agent_manager is None:
+            return JSONResponse({"error": "Agent manager not initialized"}, status_code=500)
+        agent_id = request.path_params.get("id")
+        try:
+            name, log = _agent_manager.ensure_trickset(agent_id)
+            return JSONResponse({"success": True, "name": name, "log": log})
+        except KeyError as e:
+            return JSONResponse({"success": False, "error": str(e), "log": []}, status_code=404)
+        except Exception as e:
+            return JSONResponse({"success": False, "error": str(e), "log": []}, status_code=500)
+    app.add_route("/api/agents/{id}/trickset", agent_trickset, methods=["POST"])
+
     async def shutdown_server(request: Request) -> Response:
-        if _agent_manager is not None:
-            _agent_manager.unregister_all()
+        _restore_agents()
         handler.shutdown_all()
         asyncio.create_task(_delayed_exit(0.5))
         return JSONResponse({"success": True, "message": "Shutting down"})
     app.add_route("/api/shutdown", shutdown_server, methods=["POST"])
 
-    atexit.register(lambda: handler.shutdown_all())
+    def _on_exit():
+        handler.shutdown_all()
+        # A backstop for exits that never reach the CLI's own cleanup: kill -TERM,
+        # an unhandled error, the dashboard's shutdown button. unregister is
+        # idempotent, so doing it twice is harmless.
+        _restore_agents()
+
+    atexit.register(_on_exit)
 
     return app
 
@@ -939,7 +1133,29 @@ def cli(config_arg: str | None, listen_on: str) -> None:
         format="%(levelname)s: %(message)s"
     )
 
-    uvicorn.run(app, host=host, port=port, timeout_graceful_shutdown=3)
+    # Run the server object rather than uvicorn.run() so long-lived responses
+    # can see should_exit and finish themselves. Without that, an open SSE
+    # stream keeps uvicorn waiting until the graceful timeout expires, and
+    # every force-cancelled response prints a full traceback on Ctrl-C.
+    global _uvicorn_server
+    config = uvicorn.Config(app, host=host, port=port, timeout_graceful_shutdown=5)
+    _uvicorn_server = uvicorn.Server(config)
+    try:
+        _uvicorn_server.run()
+    except KeyboardInterrupt:
+        pass
+    except SystemExit:
+        # uvicorn calls sys.exit(1) from inside the loop when it cannot bind;
+        # swallow it so the reason can be explained in words below.
+        pass
+
+    # uvicorn logs a bind failure and returns without raising, so "did it ever
+    # start" is the only honest signal that the port was taken.
+    if getattr(_uvicorn_server, "started", True) is False:
+        _print_port_busy(host, port)
+        raise SystemExit(1)
+
+    _print_goodbye(_restore_agents())
 
 
 if __name__ == "__main__":

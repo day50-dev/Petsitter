@@ -51,9 +51,72 @@ class AgentManager:
     registration state to a JSON file in the config directory.
     """
 
-    def __init__(self, config_dir: str, agents_dir: str | Path | None = None):
+    def __init__(self, config_dir: str, agents_dir: str | Path | None = None, handler=None):
         self.config_dir = config_dir
         self._agents = _discover_agents(agents_dir or Path(__file__).resolve().parent / "agents")
+        # Needed to make a new trickset live immediately, rather than only on
+        # the next restart.
+        self.handler = handler
+
+    def _tricksets_dir(self) -> Path:
+        return Path(self.config_dir) / "tricksets"
+
+    def _create_trickset(self, agent: Agent) -> tuple[str, list[dict[str, str]]]:
+        """Give the agent its own trickset so its traffic isn't in everyone's default.
+
+        Returns (name, log). Existing tricksets are left alone: the point is to
+        set one up for you, not to overwrite one you've been editing.
+        """
+        from petsitter.trickset import SCHEMA, Trickset
+
+        name = agent.id
+        log: list[dict[str, str]] = []
+        path = self._tricksets_dir() / f"{name}.json"
+
+        if (self.handler and name in self.handler.tricksets) or path.exists():
+            log.append({"level": "INFO", "message": f"Trickset '{name}' already exists; leaving it as it is"})
+            return name, log
+
+        ts = Trickset(name, SCHEMA, dict(agent.trickset_filters), [])
+        ts.file_path = str(path)
+        for trick_path in agent.tricks:
+            try:
+                ts.add_trick(trick_path)
+            except Exception as e:
+                log.append({"level": "WARNING", "message": f"Could not add {trick_path}: {e}"})
+        ts.save()
+        if self.handler is not None:
+            self.handler.tricksets[name] = ts
+        filters = ", ".join(f"{k}={v}" for k, v in agent.trickset_filters.items())
+        log.append({"level": "INFO", "message": f"Created trickset '{name}' ({filters})"})
+        log.append({"level": "INFO",
+                    "message": "Tricks: " + ", ".join(t.split("/")[-1].replace(".py", "") for t in agent.tricks)})
+        return name, log
+
+    def _remove_trickset(self, agent: Agent, expected: list[str]) -> list[dict[str, str]]:
+        """Remove the trickset we made, unless it has been changed since.
+
+        A trickset someone has edited is their work, not ours to delete.
+        """
+        name = agent.id
+        log: list[dict[str, str]] = []
+        path = self._tricksets_dir() / f"{name}.json"
+        ts = (self.handler.tricksets.get(name) if self.handler else None)
+
+        current = list(getattr(ts, "trick_paths", None) or [])
+        if ts is not None and current and sorted(current) != sorted(expected):
+            log.append({"level": "INFO",
+                        "message": f"Kept trickset '{name}' \u2014 its tricks have changed since it was created"})
+            return log
+        if self.handler is not None:
+            self.handler.tricksets.pop(name, None)
+        if path.exists():
+            try:
+                path.unlink()
+                log.append({"level": "INFO", "message": f"Removed trickset '{name}'"})
+            except OSError:
+                log.append({"level": "WARNING", "message": f"Could not remove trickset '{name}'"})
+        return log
 
     def get_agents(self) -> dict[str, dict[str, Any]]:
         """Return all agents with their current detect status."""
@@ -113,6 +176,15 @@ class AgentManager:
             log.append({"level": "ERROR", "message": f"Registration failed: {e}"})
             return False, log
 
+        try:
+            ts_name, ts_log = self._create_trickset(agent)
+            log.extend(ts_log)
+            ctx.backup["trickset_created"] = ts_name
+            ctx.backup["trickset_tricks"] = list(agent.tricks)
+        except Exception as e:
+            logger.exception("Agent %s trickset setup failed", agent_id)
+            log.append({"level": "WARNING", "message": f"Could not set up a trickset: {e}"})
+
         # Persist registry
         registry = load_registry(self.config_dir)
         registry.setdefault("agents", {})[agent_id] = {
@@ -123,6 +195,23 @@ class AgentManager:
 
         log.append({"level": "INFO", "message": "Configuration saved"})
         return True, log
+
+    def ensure_trickset(self, agent_id: str) -> tuple[str, list[dict[str, str]]]:
+        """Make sure this agent has a trickset, creating it if it doesn't.
+
+        Registering creates one, but an agent connected before that existed --
+        or one whose trickset was deleted -- would otherwise have nowhere for
+        "Configure" to go. Idempotent: an existing trickset is left alone.
+        """
+        agent = self._get(agent_id)
+        name, log = self._create_trickset(agent)
+        registry = load_registry(self.config_dir)
+        entry = registry.get("agents", {}).get(agent_id)
+        if entry is not None:
+            entry.setdefault("backup", {})["trickset_created"] = name
+            entry["backup"]["trickset_tricks"] = list(agent.tricks)
+            save_registry(self.config_dir, registry)
+        return name, log
 
     def unregister(self, agent_id: str) -> tuple[bool, list[dict[str, str]]]:
         """Unregister a specific agent and restore its configuration."""
@@ -146,6 +235,8 @@ class AgentManager:
         try:
             agent_log = agent.unregister(ctx)
             log.extend(agent_log)
+            if backup.get("trickset_created"):
+                log.extend(self._remove_trickset(agent, backup.get("trickset_tricks") or []))
         except Exception as e:
             logger.exception("Agent %s unregister failed", agent_id)
             log.append({"level": "ERROR", "message": f"Restore failed: {e}"})

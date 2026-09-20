@@ -5,7 +5,7 @@
   <code>uvx petsitter</code><br/>
 </p>
 
-## Intro
+----
 
 Petsitter sits between the tools you already use and the AI provider they talk to.
 

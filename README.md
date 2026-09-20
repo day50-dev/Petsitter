@@ -3,6 +3,43 @@
 <a href=https://pypi.org/project/petsitter><img src=https://badge.fury.io/py/petsitter.svg/?2></a>
 </p>
 
+## Intro
+
+Petsitter sits between the tools you already use and the AI provider they talk to.
+
+That's really all it is: a small thing running on your own machine that requests
+pass through on their way out, and replies pass through on their way back. Your
+tools don't need to know it's there, and nothing about the way you work has to
+change.
+
+Once something is sitting in the middle, a few things become possible:
+
+- **You can see what's actually being sent.** Every request and every reply, as
+  it happens. Most of the time you'll never think about this — right up until
+  something behaves oddly and you'd really like to look. *([see how](#traffic-logger))*
+
+- **You can help a model along.** Some models are shaky at tool calling, or hand
+  back JSON that doesn't quite parse. Petsitter can smooth that over in the
+  middle, so you don't have to change your tools or go find a bigger model.
+  *([see how](#tool-calling))*
+
+- **You can keep private things private.** API keys and personal details can be
+  taken out before anything leaves your machine. *([see how](#secrets-protector))*
+
+None of it is on until you turn it on, and you can take it back out whenever you
+like — point your tool back where it was and it's as if petsitter had never been
+there.
+
+```bash
+uvx petsitter
+```
+
+Nothing else to set up. Have a look around, and if none of it is useful, no harm
+done.
+
+
+## A bit more precisely
+
 **Petsitter** is an OpenAI-compatible proxy that layers smart harnesses on top of language models to give them capabilities they don't natively have. It also makes finicky behaviors reliable and dependable.
 
 You install it, point it at a model, load a few example tricks, and suddenly things that model couldn't do before such as tool calling, structured JSON, multi-step reasoning start working. You can also protect secrets, have memory, share server instances across harnesses, and extend the tool trivially.

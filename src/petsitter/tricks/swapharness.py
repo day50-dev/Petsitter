@@ -9,6 +9,8 @@ until a different file is chosen or the trick is uninstalled.
 """
 
 import logging
+import subprocess
+import threading
 from pathlib import Path
 
 from petsitter.trick import Trick
@@ -18,6 +20,74 @@ logger = logging.getLogger("petsitter")
 REPO_URL = "https://github.com/x1xhlol/system-prompts-and-models-of-ai-tools"
 CACHE_DIR = Path.home() / ".config" / "petsitter" / "harnesses"
 
+# The clone is the one part of this trick that can fail, take a while, or never
+# have been attempted at all -- `install()` only runs when the trick is added,
+# and the caller logs its exception rather than surfacing it. The keyword is
+# where a person actually finds out, so it has to be able to say which of those
+# happened instead of an unconditional "not cloned yet".
+_clone_lock = threading.Lock()
+_clone_status = "idle"      # idle | running | failed
+_clone_error = ""
+
+
+def _clone_repo() -> None:
+    """Clone the harness repo into CACHE_DIR. Raises on failure."""
+    CACHE_DIR.parent.mkdir(parents=True, exist_ok=True)
+    logger.info("Cloning %s into %s ...", REPO_URL, CACHE_DIR)
+    subprocess.run(
+        ["git", "clone", "--depth", "1", REPO_URL, str(CACHE_DIR)],
+        capture_output=True, text=True, timeout=300, check=True,
+    )
+    logger.info("Cloned harness repo (%d entries)", len(list(CACHE_DIR.iterdir())))
+
+
+def _describe_failure(exc: Exception) -> str:
+    if isinstance(exc, FileNotFoundError):
+        return "git is not installed, or is not on PATH."
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return "git clone timed out after 5 minutes."
+    if isinstance(exc, subprocess.CalledProcessError):
+        return (exc.stderr or "").strip() or f"git clone exited {exc.returncode}."
+    return f"{type(exc).__name__}: {exc}"
+
+
+def _ensure_clone() -> tuple[str, str]:
+    """Make sure a clone exists or is on its way. Returns (status, error).
+
+    Status is "ready", "running", or "failed". A failed clone is retried the
+    next time someone asks, so a transient network problem is not permanent.
+    """
+    global _clone_status, _clone_error
+    if CACHE_DIR.exists():
+        return "ready", ""
+    with _clone_lock:
+        if _clone_status == "running":
+            return "running", ""
+        if _clone_status == "failed":
+            # Report the failure once, then go back to idle so the next ask
+            # retries. Restarting it here instead would mean the message below
+            # is never reachable and the user only ever sees "downloading".
+            error = _clone_error
+            _clone_status, _clone_error = "idle", ""
+            return "failed", error
+        _clone_status, _clone_error = "running", ""
+
+    def worker():
+        global _clone_status, _clone_error
+        try:
+            _clone_repo()
+        except Exception as e:
+            message = _describe_failure(e)
+            logger.error("harness clone failed: %s", message)
+            with _clone_lock:
+                _clone_status, _clone_error = "failed", message
+        else:
+            with _clone_lock:
+                _clone_status, _clone_error = "idle", ""
+
+    threading.Thread(target=worker, name="swapharness-clone", daemon=True).start()
+    return "running", ""
+
 
 class SwapHarnessTrick(Trick):
     prompt_keyword = "swapharness"
@@ -26,25 +96,14 @@ class SwapHarnessTrick(Trick):
     __display_name__ = "Swap Harness"
 
     def install(self) -> None:
-        import subprocess
-
+        """Clone up front, synchronously: adding a trick is allowed to take a moment."""
         if CACHE_DIR.exists():
             logger.info("Harness repo already cloned at %s", CACHE_DIR)
             return
-        CACHE_DIR.parent.mkdir(parents=True, exist_ok=True)
-        logger.info("Cloning %s into %s ...", REPO_URL, CACHE_DIR)
         try:
-            subprocess.run(
-                ["git", "clone", "--depth", "1", REPO_URL, str(CACHE_DIR)],
-                capture_output=True, text=True, timeout=120,
-                check=True,
-            )
-            logger.info("Cloned harness repo (%d entries)", len(list(CACHE_DIR.iterdir())))
-        except subprocess.CalledProcessError as e:
-            logger.error("git clone failed: %s", e.stderr)
-            raise
-        except FileNotFoundError:
-            logger.error("git not found — install git to use SwapHarnessTrick")
+            _clone_repo()
+        except Exception as e:
+            logger.error("git clone failed: %s", _describe_failure(e))
             raise
 
     def handle_prompt_keyword(self, request: str, messages: list | None = None, payload: dict | None = None) -> dict | None:
@@ -52,13 +111,21 @@ class SwapHarnessTrick(Trick):
         base = CACHE_DIR
 
         if not base.exists():
-            return {
-                "role": "assistant",
-                "content": (
-                    "Harness repo not cloned yet.  "
-                    "Run (swapharness: ) again once the clone completes."
-                ),
-            }
+            status, error = _ensure_clone()
+            if status == "failed":
+                content = (
+                    f"Couldn't download the harness library.\n\n{error}\n\n"
+                    "Run (swapharness: ) again to retry."
+                )
+            elif status == "running":
+                content = (
+                    "Downloading the harness library now \u2014 it's a few hundred "
+                    "prompts, so give it a moment.\n\n"
+                    "Run (swapharness: ) again shortly and they'll be here."
+                )
+            else:
+                content = "Harness library is ready. Run (swapharness: ) again."
+            return {"role": "assistant", "content": content}
 
         target = base / path if path else base
 

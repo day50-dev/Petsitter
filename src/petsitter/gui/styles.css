@@ -1163,3 +1163,339 @@ header .nav a:hover { background: #1a2a4d; }
 
   .toast { right: 10px; bottom: 10px; left: 10px; text-align: center; }
 }
+
+/* ---- start here ------------------------------------------------------- */
+/* The landing tab is the one screen a visitor sees before they know any of
+   this vocabulary, so it stays quiet: no trickset chrome, no jargon, and a
+   diagram that only animates once real traffic is moving through. */
+
+.intro { max-width: 860px; margin: 0 auto; padding: 8px 0 24px; }
+
+.intro-lead {
+  font-size: 22px;
+  line-height: 1.38;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 12px;
+}
+
+.intro-sub {
+  font-size: 14px;
+  line-height: 1.65;
+  color: #8fa6bd;
+  max-width: 62ch;
+  margin-bottom: 26px;
+}
+
+/* the diagram */
+.intro-flow {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.inode {
+  flex: 1 1 150px;
+  min-width: 0;
+  background: #16162a;
+  border: 1px solid #1e2a3a;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.inode-self {
+  border-color: #2a4a6a;
+  background: #16203a;
+}
+
+.inode-name { font-size: 13px; font-weight: 600; color: #c8d6e5; margin-bottom: 3px; }
+.inode-self .inode-name { color: #8ab4ff; }
+
+.inode-sub {
+  font-size: 11px;
+  color: #5a7a8a;
+  overflow-wrap: anywhere;
+}
+
+/* the connecting wire: three dots that drift only while traffic is live */
+.iwire {
+  flex: 0 1 52px;
+  min-width: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.iwire i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #24344a;
+  display: block;
+}
+
+.intro-flow.live .iwire i { animation: iflow 1.4s ease-in-out infinite; }
+.intro-flow.live .iwire i:nth-child(2) { animation-delay: .18s; }
+.intro-flow.live .iwire i:nth-child(3) { animation-delay: .36s; }
+
+@keyframes iflow {
+  0%, 100% { background: #24344a; transform: translateX(-4px); }
+  50%      { background: #8ab4ff; transform: translateX(4px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .intro-flow.live .iwire i { animation: none; background: #8ab4ff; }
+}
+
+/* status line */
+.intro-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: #6b8299;
+  margin-bottom: 22px;
+  min-height: 18px;
+}
+
+.intro-status .idot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #2a3a4a;
+  flex: none;
+}
+
+.intro-status.live .idot { background: #4ade80; }
+.intro-status.live { color: #9fd4b0; }
+
+.intro-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+.intro-actions .btn { padding: 7px 14px; font-size: 13px; }
+
+.intro-note {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #5a7a8a;
+  max-width: 64ch;
+  margin-bottom: 28px;
+  padding-top: 16px;
+  border-top: 1px solid #1a2333;
+}
+
+/* the three things it's for */
+.intro-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+}
+
+.intro-card {
+  background: #16162a;
+  border: 1px solid #1e2a3a;
+  border-radius: 8px;
+  padding: 14px 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.intro-card h3 { color: #c8d6e5; margin-bottom: 0; font-size: 13px; }
+.intro-card p { font-size: 12.5px; line-height: 1.6; color: #7a93aa; margin: 0; flex: 1; }
+.intro-card a { color: #8ab4ff; font-size: 12.5px; text-decoration: none; }
+.intro-card a:hover { text-decoration: underline; }
+
+@media (max-width: 620px) {
+  .intro-lead { font-size: 18px; }
+  .iwire { flex-basis: 100%; min-height: 22px; transform: rotate(90deg); }
+}
+
+/* Trickset chrome is meaningless before anyone knows what a trickset is.
+   !important because switchTrickset() clears ts-bar's inline display. */
+body.on-intro #ts-bar,
+body.on-intro .ts-pills { display: none !important; }
+
+/* the explanation detect() already produced, which the card used to discard */
+.agent-why {
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: #5a7a8a;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+.agent-path-label { font-size: 10.5px; color: #4a6572; margin-right: 5px; }
+
+.status-muted { color: #5a7a8a; }
+/* paths sit on their own line under a label, so the label needs its own row */
+.agent-paths { flex-direction: row; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+
+/* One agent per row. The card now carries a name, a description, a status
+   sentence, the reason behind it and the file it will touch -- three of those
+   side by side in a 1fr column just wraps everything into noise. */
+.agents-grid { grid-template-columns: 1fr; }
+
+.agent-card { align-items: flex-start; }
+.agent-card .agent-icon { margin-top: 1px; }
+.agent-body { min-width: 0; flex: 1; }
+
+/* each path on its own line, under a label of its own */
+.agent-paths { flex-direction: column; gap: 2px; align-items: flex-start; }
+.agent-path-label { display: block; margin-right: 0; }
+
+/* the card leads with what flipping the switch does, not with status codes */
+.agent-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 5px; }
+.agent-name { font-size: 14px; font-weight: 600; color: #fff; }
+
+.agent-chip {
+  font-size: 10.5px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: #16203a;
+  border: 1px solid #1e2a3a;
+}
+
+.agent-story {
+  font-size: 12.5px;
+  line-height: 1.62;
+  color: #8fa6bd;
+  max-width: 68ch;
+}
+
+.agent-diag { margin-top: 7px; }
+.agent-diag summary {
+  font-size: 11px;
+  color: #4a6572;
+  cursor: pointer;
+  list-style: none;
+  width: max-content;
+}
+.agent-diag summary::-webkit-details-marker { display: none; }
+.agent-diag summary::before { content: "\25B8  "; }
+.agent-diag[open] summary::before { content: "\25BE  "; }
+.agent-diag summary:hover { color: #8ab4ff; }
+.agent-diag > div {
+  font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #4a6572;
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+}
+
+/* the whole card is the switch */
+.agent-clickable { cursor: pointer; }
+.agent-clickable:hover { border-color: #2a4a6a; background: #1d1d3d; }
+.agent-clickable:focus-visible { outline: 2px solid #8ab4ff; outline-offset: 2px; }
+.agent-clickable .agent-diag summary { cursor: pointer; }
+/* nothing to connect: don't pretend it is pressable */
+.agent-inert { opacity: .72; }
+
+/* the route, not a paragraph about the route */
+.agent-route {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin-top: 3px;
+}
+
+.agent-route .hop {
+  font-size: 11.5px;
+  padding: 3px 9px;
+  border-radius: 4px;
+  background: #11112a;
+  border: 1px solid #1e2a3a;
+  color: #8fa6bd;
+  white-space: nowrap;
+}
+
+.agent-route .hop-self {
+  border-color: #2a4a6a;
+  background: #16203a;
+  color: #8ab4ff;
+  font-weight: 600;
+}
+
+.agent-route .hop-arrow { color: #3a4a5a; font-size: 12px; }
+.route-on .hop-arrow { color: #8ab4ff; }
+
+/* the card is a button, so hovering previews where petsitter would sit */
+.agent-clickable:not(.route-on-card) .agent-route { transition: opacity .12s; }
+
+.agent-note { font-size: 11.5px; color: #6b8299; }
+.agent-inert .agent-route .hop { opacity: .65; }
+
+/* Start here needs one action that actually looks like the action. The shared
+   .btn-primary / .btn-neutral are both blue-on-blue, so neither reads as
+   primary and the pair looks like two of the same thing. */
+.btn-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border: none;
+  border-radius: 6px;
+  background: #1d4ed8;   /* white on #3b82f6 is only 3.7:1 */
+  color: #fff;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .13s, transform .13s;
+}
+.btn-cta:hover { background: #2563eb; }
+.btn-cta:active { transform: translateY(1px); }
+.btn-cta:focus-visible { outline: 2px solid #8ab4ff; outline-offset: 3px; }
+.btn-cta .cta-arrow { font-size: 15px; line-height: 1; }
+
+.btn-ghost {
+  padding: 10px 14px;
+  border: none;
+  background: none;
+  color: #6b8299;
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: #2a3a4a;
+}
+.btn-ghost:hover { color: #8ab4ff; text-decoration-color: #8ab4ff; }
+.btn-ghost:focus-visible { outline: 2px solid #8ab4ff; outline-offset: 2px; border-radius: 4px; }
+
+/* the whole card is the link */
+.intro-card { cursor: pointer; transition: border-color .12s, background .12s, transform .12s; }
+.intro-card:hover { border-color: #2a4a6a; background: #1b1b34; transform: translateY(-1px); }
+.intro-card:focus-visible { outline: 2px solid #8ab4ff; outline-offset: 2px; }
+.intro-go { font-size: 12.5px; color: #8ab4ff; font-weight: 500; }
+.intro-card:hover .intro-go { text-decoration: underline; }
+
+/* Blue text on a dark card does not read as something you can click. Give the
+   card's action a real edge and fill so it is visible without hovering. */
+.intro-go {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: max-content;
+  padding: 6px 12px;
+  border: 1px solid #2f4d75;
+  border-radius: 5px;
+  background: #16203a;
+  color: #a9ccff;
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: background .12s, border-color .12s, color .12s;
+}
+.intro-card:hover .intro-go,
+.intro-card:focus-visible .intro-go {
+  background: #1e3054;
+  border-color: #3b82f6;
+  color: #fff;
+  text-decoration: none;
+}
+
+/* the diagnostics fold was #4a6572 on #1a1a33 -- effectively invisible */
+.agent-diag summary { color: #7a93aa; font-size: 11.5px; }
+.agent-diag summary:hover { color: #a9ccff; }

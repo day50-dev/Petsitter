@@ -37,7 +37,8 @@
 <div class="ts-pills" id="ts-pills"></div>
 
 <div class="tabs">
-<div class="tab active" data-tab="tricks" onclick="switchTab('tricks')">Tricks</div>
+<div class="tab active" data-tab="intro" onclick="switchTab('intro')">Start here</div>
+<div class="tab" data-tab="tricks" onclick="switchTab('tricks')">Tricks</div>
 <div class="tab" data-tab="models" onclick="switchTab('models')">Models</div>
 <div class="tab" data-tab="agents" onclick="switchTab('agents')">Agents</div>
 <div class="tab" data-tab="logs" onclick="switchTab('logs')">Logs</div>
@@ -53,8 +54,72 @@
 </div>
 </div>
 
+<!-- === START HERE TAB === -->
+<div class="tab-pane active" id="tab-intro">
+<div class="intro">
+
+  <p class="intro-lead">Petsitter sits between the tools you already use<br>and the AI provider they talk to.</p>
+  <p class="intro-sub">Everything passes through here on its way out, and again on its way back.
+  Your tools don&rsquo;t need to know it&rsquo;s there, and nothing about the way you work has to change.</p>
+
+  <div class="intro-flow">
+    <div class="inode">
+      <div class="inode-name">your tools</div>
+      <div class="inode-sub" id="intro-tools">editor, CLI, scripts&hellip;</div>
+    </div>
+    <div class="iwire"><i></i><i></i><i></i></div>
+    <div class="inode inode-self">
+      <div class="inode-name">petsitter</div>
+      <div class="inode-sub" id="intro-listen">&mdash;</div>
+    </div>
+    <div class="iwire"><i></i><i></i><i></i></div>
+    <div class="inode">
+      <div class="inode-name">your AI provider</div>
+      <div class="inode-sub" id="intro-model">not set yet</div>
+    </div>
+  </div>
+
+  <div class="intro-status" id="intro-status">
+    <span class="idot"></span><span id="intro-status-text">Nothing has come through yet &mdash; that&rsquo;s normal.</span>
+  </div>
+
+  <div class="intro-actions">
+    <button class="btn-cta" onclick="switchTab('agents')">Connect a tool<span class="cta-arrow">&rarr;</span></button>
+    <button class="btn-ghost" onclick="togglePlayground()">or send a test message</button>
+  </div>
+
+  <p class="intro-note">None of it is on until you turn it on, and you can take it back out whenever you
+  like &mdash; point your tool back where it was and it&rsquo;s as if petsitter had never been here.</p>
+
+  <div class="intro-cards">
+    <div class="intro-card" role="button" tabindex="0" onclick="switchTab('logs')"
+         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('logs');}">
+      <h3>See what&rsquo;s actually being sent</h3>
+      <p>Every request and every reply, as it happens. Most of the time you&rsquo;ll never think about
+      this &mdash; right up until something behaves oddly and you&rsquo;d really like to look.</p>
+      <span class="intro-go">Watch it live <span aria-hidden="true">&rarr;</span></span>
+    </div>
+    <div class="intro-card" role="button" tabindex="0" onclick="switchTab('tricks')"
+         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('tricks');}">
+      <h3>Help a model along</h3>
+      <p>Some models are shaky at tool calling, or hand back JSON that doesn&rsquo;t quite parse.
+      That can be smoothed over in the middle, without changing your tools or finding a bigger model.</p>
+      <span class="intro-go">See what&rsquo;s available <span aria-hidden="true">&rarr;</span></span>
+    </div>
+    <div class="intro-card" role="button" tabindex="0" onclick="switchTab('tricks')"
+         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('tricks');}">
+      <h3>Keep private things private</h3>
+      <p>API keys and personal details can be taken out of a message before it ever leaves
+      your machine, and put back in the reply.</p>
+      <span class="intro-go">See what&rsquo;s available <span aria-hidden="true">&rarr;</span></span>
+    </div>
+  </div>
+
+</div>
+</div>
+
 <!-- === TRICKS TAB === -->
-<div class="tab-pane active" id="tab-tricks">
+<div class="tab-pane" id="tab-tricks">
 <div class="two-col">
 <div class="card">
 <h2>Loaded Tricks</h2>
@@ -107,8 +172,10 @@
 <!-- === AGENTS TAB === -->
 <div class="tab-pane" id="tab-agents">
 <div class="card">
-<div class="card-title"><h2>Harness Agents</h2></div>
-<div class="agent-description">Harness agents automatically configure popular coding tools to route through petsitter. Toggle an agent on to patch its config file &mdash; toggle off to restore the original.</div>
+<div class="card-title"><h2>Your coding tools</h2></div>
+<div class="agent-description">These are AI coding tools petsitter knows how to set up for you. Turning one on
+edits that tool&rsquo;s own settings file so its requests come here first, and turning it back off puts the
+file back exactly as it was. Your tool keeps using its own account &mdash; petsitter never needs your API key.</div>
 <div id="agent-setup-panel" style="display:none">
 <div class="agent-log-panel" id="agent-log-panel">
 <div class="agent-log-header">
@@ -217,6 +284,12 @@ function html(strings, ...vals) {
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'tab-'+name));
+  // The trickset picker and filter bar belong to a trickset; on the intro they
+  // are vocabulary nobody has met yet. This is a body class rather than an
+  // inline style because switchTrickset() clears ts-bar's inline display
+  // whenever it runs, which on boot happens after this.
+  document.body.classList.toggle('on-intro', name === 'intro');
+  if (name === 'intro') refreshIntro();
   if (name === 'help') loadHelpContent();
   if (name === 'models') renderModels(selectedTrickset, _cachedConfiguredModels);
   if (name === 'logs') {
@@ -236,12 +309,12 @@ function updateHash() {
 }
 
 function parseHash() {
-  var raw = location.hash.replace('#', '') || 'tricks/_default';
+  var raw = location.hash.replace('#', '') || 'intro/_default';
   var parts = raw.split('/');
-  var tab = parts[0] || 'tricks';
+  var tab = parts[0] || 'intro';
   var ts = parts[1] || '_default';
-  if (tab === 'help') ts = '_default';
-  if (!document.querySelector('.tab[data-tab="' + tab + '"]')) { tab = 'tricks'; ts = '_default'; }
+  if (tab === 'help' || tab === 'intro') ts = '_default';
+  if (!document.querySelector('.tab[data-tab="' + tab + '"]')) { tab = 'intro'; ts = '_default'; }
   return {tab, ts};
 }
 
@@ -299,6 +372,75 @@ window.addEventListener('hashchange', function() {
     if (document.querySelector('#ts-pills .pill[data-name="' + p.ts + '"]')) switchTrickset(p.ts);
   }
 });
+
+// ---- start here ----
+let _introSeen = 0;
+let _introLastAt = 0;
+let _introSource = null;
+
+async function refreshIntro() {
+  try {
+    const d = await fetchJSON('/api/info');
+    const listen = document.getElementById('intro-listen');
+    const model = document.getElementById('intro-model');
+    if (listen) listen.textContent = d.listen_on || '--';
+    if (model) {
+      model.textContent = d.model_url
+        ? (d.model_name ? d.model_name + ' @ ' + d.model_url : d.model_url)
+        : 'not set yet';
+    }
+  } catch (e) {
+    // The intro is decoration; it must never take the rest of the page with it.
+    console.warn('intro refresh failed:', e);
+  }
+  paintIntroTraffic();
+}
+
+// A visitor needs to see the thing react to their own traffic, so the intro
+// watches the same log stream the Logs tab uses and counts requests going by.
+function startIntroTraffic() {
+  if (_introSource) return;
+  try {
+    _introSource = new EventSource('/api/logs');
+    _introSource.onmessage = function(e) {
+      let msg = '';
+      try { msg = (JSON.parse(e.data) || {}).message || ''; } catch (err) { return; }
+      if (msg.indexOf('active tricks (') === -1) return;
+      _introSeen++;
+      _introLastAt = Date.now();
+      paintIntroTraffic();
+    };
+    _introSource.onerror = function() {
+      if (_introSource) { _introSource.close(); _introSource = null; }
+      setTimeout(startIntroTraffic, 5000);
+    };
+  } catch (e) {
+    console.warn('intro traffic stream unavailable:', e);
+  }
+}
+
+function paintIntroTraffic() {
+  const status = document.getElementById('intro-status');
+  const text = document.getElementById('intro-status-text');
+  const flow = document.querySelector('.intro-flow');
+  const tools = document.getElementById('intro-tools');
+  if (!status || !text) return;
+
+  const recent = _introLastAt && (Date.now() - _introLastAt < 10000);
+  status.classList.toggle('live', !!_introSeen);
+  if (flow) flow.classList.toggle('live', !!recent);
+
+  if (!_introSeen) {
+    text.textContent = "Nothing has come through yet \u2014 that's normal.";
+    return;
+  }
+  const plural = _introSeen === 1 ? 'request has' : 'requests have';
+  text.textContent = _introSeen + ' ' + plural + ' passed through'
+    + (recent ? ' \u2014 just now.' : '.');
+  if (tools && _introSeen) tools.textContent = 'something is connected';
+}
+
+setInterval(paintIntroTraffic, 4000);
 
 // ---- info ----
 async function fetchInfo() {
@@ -1354,19 +1496,78 @@ async function fetchAgents() {
     const el = document.getElementById('agents-grid');
     const ids = Object.keys(agents);
     if (!ids.length) { el.innerHTML = '<div class="empty">No agent harnesses found.</div>'; return; }
-    el.innerHTML = ids.map(id => {
+    // Things you can act on come first; tools that aren't even installed sink
+    // to the bottom rather than taking up the top of the list.
+    const rankOf = id => {
+      const a = agents[id], d = a.detect || {};
+      if (regAgents[id] && regAgents[id].status === 'registered') return 0;
+      if (d.status === 'ready') return 1;
+      if (d.installed === false) return 3;
+      if (d.status === 'missing_creds') return 2;
+      return 4;
+    };
+    const ordered = ids.slice().sort((x, y) =>
+      rankOf(x) - rankOf(y) ||
+      String(agents[x].display_name || x).localeCompare(String(agents[y].display_name || y)));
+    el.innerHTML = ordered.map(id => {
       const a = agents[id];
       const d = a.detect || {};
       const isReg = regAgents[id] && regAgents[id].status === 'registered';
-      const statusIcon = d.status === 'ready' ? '\u2705' : (d.status === 'missing_creds' ? '\u26A0\uFE0F' : '\u274C');
-      const statusClass = d.status === 'ready' ? 'status-ready' : (d.status === 'missing_creds' ? 'status-warn' : 'status-err');
+      // Show the route instead of describing it: where this tool's requests go
+      // now, and where they'd go if it were on. The picture says what two
+      // sentences of prose were saying, and it changes when you flip the switch.
+      const who = escapeHtml(a.provider_name || 'its AI provider');
+      const name = escapeHtml(a.display_name || id);
+      const hop = n => `<span class="hop">${n}</span>`;
+      const self = `<span class="hop hop-self">petsitter</span>`;
+      const arrow = '<span class="hop-arrow">\u2192</span>';
+      let statusLabel = '', statusClass = '', route, note = '';
+      if (isReg) {
+        route = [hop(name), arrow, self, arrow, hop(who)].join('');
+      } else if (d.installed === false) {
+        statusClass = 'status-muted'; statusLabel = 'not installed';
+        route = [hop(name), arrow, hop(who)].join('');
+        note = 'Install it and this lights up.';
+      } else if (d.status === 'missing_creds') {
+        statusClass = 'status-warn'; statusLabel = 'not signed in';
+        route = [hop(name), arrow, hop(who)].join('');
+        note = `Sign in to ${name} first.`;
+      } else if (d.status === 'ready') {
+        route = [hop(name), arrow, hop(who)].join('');
+      } else {
+        statusClass = 'status-err'; statusLabel = "couldn't check";
+        route = hop(name);
+      }
+      const chipHtml = statusLabel
+        ? `<span class="agent-chip ${statusClass}">${escapeHtml(statusLabel)}</span>` : '';
+      const noteHtml = note ? `<span class="agent-note">${escapeHtml(note)}</span>` : '';
       const idEsc = escapeHtml(id);
-      const actionHtml = `<label class="toggle-switch" title="${isReg ? 'Restore config' : 'Route through petsitter'}"><input type="checkbox" ${isReg ? 'checked' : ''} onchange="toggleAgent('${idEsc}', this.checked)"><span class="toggle-slider"></span></label>`;
+      const actionHtml = `<label class="toggle-switch" title="${isReg ? 'Turn off to put the settings file back' : 'Turn on to route this tool through petsitter'}"><input type="checkbox" ${isReg ? 'checked' : ''} onchange="toggleAgent('${idEsc}', this.checked)"><span class="toggle-slider"></span></label>`;
       var iconHtml = a.icon && a.icon.indexOf('http') === 0
         ? `<img src="${escapeHtml(a.icon)}" alt="" class="agent-favicon" onerror="defaultImage(this)">`
         : (a.icon || '\u{1F916}');
       const configPaths = a.config_paths || [];
-      return `<div class="agent-card${isReg ? ' agent-registered' : ''}"><div class="agent-icon">${iconHtml}</div><div class="agent-body"><div class="agent-name">${escapeHtml(a.display_name || id)}</div><div class="agent-desc">${escapeHtml(a.description || '')}</div><div class="agent-detect"><span class="${statusClass}">${statusIcon} ${escapeHtml(d.status || '')}</span></div><div class="agent-paths">${configPaths.map(function(p) { return `<span class="agent-path">${escapeHtml(p)}</span>`; }).join('')}</div></div><div class="agent-actions">${actionHtml}</div></div>`;
+      // The detected paths and the raw detect message are diagnostics: useful
+      // when something is wrong, noise when it isn't. They live behind a fold.
+      const diag = [];
+      if (d.message) diag.push(escapeHtml(d.message));
+      if (configPaths.length) {
+        diag.push((isReg ? 'Editing: ' : 'Would edit: ')
+          + configPaths.map(escapeHtml).join('<br>' + (isReg ? 'Editing: ' : 'Would edit: ')));
+      }
+      const detailHtml = diag.length
+        ? `<details class="agent-diag"><summary>details</summary><div>${diag.join('<br>')}</div></details>`
+        : '';
+      // Only offer the click where it would actually do something: a tool that
+      // isn't installed, or isn't signed in, has nothing to connect.
+      const actionable = isReg || d.status === 'ready';
+      const cardAttrs = actionable
+        ? ` class="agent-card agent-clickable${isReg ? ' agent-registered' : ''}" role="button" tabindex="0"`
+          + ` aria-pressed="${isReg}"`
+          + ` onclick="agentCardClick(event, '${idEsc}', ${!isReg})"`
+          + ` onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();agentCardClick(event,'${idEsc}',${!isReg});}"`
+        : ` class="agent-card agent-inert${isReg ? ' agent-registered' : ''}"`;
+      return `<div${cardAttrs}><div class="agent-icon">${iconHtml}</div><div class="agent-body"><div class="agent-head"><span class="agent-name">${name}</span>${chipHtml}${noteHtml}</div><div class="agent-route${isReg ? ' route-on' : ''}">${route}</div>${detailHtml}</div><div class="agent-actions">${actionHtml}</div></div>`;
     }).join('');
   } catch(e) { document.getElementById('agents-grid').innerHTML = '<div class="loader">Error loading agents</div>'; }
 }
@@ -1391,6 +1592,16 @@ function _appendAgentLog(entries) {
     el.appendChild(d);
   });
   el.scrollTop = el.scrollHeight;
+}
+
+// The card is the hit target, but the switch and the details fold are real
+// controls inside it -- letting the card handle those clicks too would toggle
+// twice, or toggle when someone only wanted to read the diagnostics.
+function agentCardClick(event, id, enable) {
+  if (event.target.closest('.toggle-switch, .agent-diag')) return;
+  const box = event.currentTarget.querySelector('.toggle-switch input');
+  if (box) box.checked = enable;      // reflect it now; fetchAgents() confirms
+  toggleAgent(id, enable);
 }
 
 async function toggleAgent(id, enable) {
@@ -1431,6 +1642,7 @@ if (initHash.ts !== '_default') selectedTrickset = initHash.ts;
 trickSearch = (document.getElementById('trick-search').value || '').toLowerCase();
 fetchInfo(); fetchTricksets(); fetchAvailable(); fetchModels(); fetchAgents();
 startLogStream();
+startIntroTraffic(); refreshIntro();
 </script>
 
 <div id="config-modal" class="modal-overlay" style="display:none">

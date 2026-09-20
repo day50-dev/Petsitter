@@ -15,6 +15,8 @@ from petsitter.agents import Agent, AgentContext, AgentResult
 
 
 SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
+CREDENTIALS_PATH = Path.home() / ".claude" / ".credentials.json"
+ANTHROPIC_API_KEY = "ANTHROPIC_API_KEY"
 ANTHROPIC_BASE_URL = "ANTHROPIC_BASE_URL"
 PETSITTER_URL = "http://localhost:8080"
 
@@ -25,6 +27,7 @@ class ClaudeCodeAgent(Agent):
     description = "Anthropic official CLI coding agent"
     icon = "https://claude.ai/favicon.ico"
     required_env = ["ANTHROPIC_API_KEY"]
+    provider_name = "Anthropic"
     config_paths = ["~/.claude/settings.json"]
     tricks = [
         "tricks/json_mode.py",
@@ -37,31 +40,59 @@ class ClaudeCodeAgent(Agent):
     }
 
     def detect(self) -> AgentResult:
+        """Report whether Claude Code can authenticate, by any of its means.
+
+        An ``ANTHROPIC_API_KEY`` environment variable is only one of them, and
+        not the usual one: signing in with a Claude account writes an OAuth
+        blob to ``~/.claude/.credentials.json`` and never touches the
+        environment. Requiring the env var marks an ordinary, fully working
+        install as missing credentials.
+
+        Petsitter does not need the credential itself either way - registering
+        only points ``ANTHROPIC_BASE_URL`` at the proxy, and Claude Code keeps
+        presenting whatever auth it already had.
+        """
         result = super().detect()
         found = dict(result.found_env)
         notes = []
+        authenticated = bool(found)
+        if found:
+            notes.append(f"Found ${', '.join(found.keys())}")
 
         if SETTINGS_PATH.exists():
             try:
                 data = json.loads(SETTINGS_PATH.read_text())
-                env_block = data.get("env", {})
+                env_block = data.get("env", {}) or {}
                 existing_url = env_block.get(ANTHROPIC_BASE_URL, "")
                 if existing_url:
                     notes.append(f"Found {ANTHROPIC_BASE_URL}={existing_url} in settings.json")
                 else:
                     notes.append("Found ~/.claude/settings.json")
+                if env_block.get(ANTHROPIC_API_KEY):
+                    authenticated = True
+                    notes.append(f"Found {ANTHROPIC_API_KEY} in settings.json")
             except (json.JSONDecodeError, OSError):
                 notes.append("Found ~/.claude/settings.json (unreadable)")
 
-        if found:
-            notes.append(f"Found ${', '.join(found.keys())}")
+        if CREDENTIALS_PATH.exists():
+            try:
+                creds = json.loads(CREDENTIALS_PATH.read_text())
+            except (json.JSONDecodeError, OSError):
+                creds = {}
+            if creds.get("claudeAiOauth"):
+                authenticated = True
+                notes.append("Signed in with a Claude account")
+            elif creds.get("api_key"):
+                authenticated = True
+                notes.append("Found a stored API key")
 
-        if result.missing_env:
+        if not authenticated:
             return AgentResult(
                 status="missing_creds",
                 found_env=found,
                 missing_env=result.missing_env,
-                message="; ".join(notes) if notes else f"Missing: {', '.join(result.missing_env)}",
+                message="; ".join(notes) if notes else
+                        "No Claude Code credentials found - run `claude` and sign in",
             )
         return AgentResult(
             status="ready",

@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from collections import deque
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
@@ -78,6 +79,79 @@ _SOURCE_TRICKSETS = Path(__file__).resolve().parent / "tricksets"
 DEFAULT_TRICKS = ["tricks/conversational_tool.py", "tricks/secrets_protector.py"]
 
 _PROXY_HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*(?::\d+)?$")
+
+
+BANNER = """██████  ███████ ████████ ███████ ██ ████████ ████████ ███████ ██████
+██   ██ ██         ██    ██      ██    ██       ██    ██      ██   ██
+██████  █████      ██    ███████ ██    ██       ██    █████   ██████
+██      ██         ██         ██ ██    ██       ██    ██      ██   ██
+██      ███████    ██    ███████ ██    ██       ██    ███████ ██   ██"""
+
+# start.txt is the reference for this layout: the banner, then one obvious
+# place to go, then the details, then a rule with the logs below it.
+BANNER_WIDTH = 70
+BANNER_INDENT = " " * 18
+
+
+def _hyperlink(url: str, label: str = "") -> str:
+    """Wrap a URL in an OSC 8 escape so the terminal makes it clickable.
+
+    Emitted only for an interactive terminal: piping the output (into a log,
+    a pager, or a file) should yield the plain URL, and a dumb terminal would
+    print the escape as garbage rather than swallow it.
+    """
+    label = label or url
+    try:
+        if not sys.stdout.isatty():
+            return label
+    except (AttributeError, ValueError):
+        return label
+    if os.environ.get("TERM", "dumb") in ("", "dumb"):
+        return label
+    return f"\033]8;;{url}\033\\{label}\033]8;;\033\\"
+
+
+
+def _print_startup(listen_on: str, model_url: str, model_name: str,
+                   config_path: str, trickset_labels: list[str]) -> None:
+    """Announce the one thing a person needs -- the web interface -- first.
+
+    The details underneath matter when something is wrong; the link matters
+    every time, so it gets the space and nothing competes with it.
+    """
+    # 0.0.0.0 is not something anyone can click; offer a URL that works.
+    display_host = listen_on
+    for wildcard in ("0.0.0.0", "[::]"):
+        if listen_on.startswith(wildcard + ":"):
+            display_host = "localhost:" + listen_on.rsplit(":", 1)[1]
+            break
+    url = "http://" + display_host
+
+    click.echo("")
+    click.echo(click.style(BANNER, fg="cyan"))
+    click.echo("")
+    click.echo(BANNER_INDENT + click.style("WEB INTERFACE ( START HERE )", bold=True))
+    click.echo("")
+    click.echo(BANNER_INDENT + _hyperlink(
+        url, click.style(url, fg="bright_cyan", bold=True, underline=True)))
+    click.echo("")
+    click.echo("")
+
+    rows = []
+    if model_url:
+        rows.append(("upstream", model_url + ("  (" + model_name + ")" if model_name else "")))
+    else:
+        rows.append(("upstream", click.style("not set yet \u2014 set one in the web interface", fg="yellow")))
+    if trickset_labels:
+        rows.append(("tricksets", ", ".join(trickset_labels)))
+    rows.append(("config", config_path))
+    for key, value in rows:
+        if key == "config":
+            value = _hyperlink("file://" + config_path, value)
+        click.echo("  " + click.style(key.ljust(10), fg="bright_black") + value)
+
+    click.echo("")
+    click.echo(click.style("-" * BANNER_WIDTH, fg="bright_black"))
 
 
 def _parse_p_path(path: str) -> tuple[str, str] | None:
@@ -853,18 +927,8 @@ def cli(config_arg: str | None, listen_on: str) -> None:
     })
     save_config(cfg)
 
-    if not model_url:
-        click.echo("Starting petsitter dashboard with no upstream model configured.")
-        click.echo(f"Configure a model via the dashboard at http://{listen_on} or 'pet model default ...'")
-    else:
-        click.echo(f"Starting petsitter on {host}:{port}")
-        click.echo(f"Upstream: {model_url}")
-    if model_name:
-        click.echo(f"Model: {model_name}")
-    if cfg_tricksets:
-        labels = [e if isinstance(e, str) else e.get("name", "<inline>") for e in cfg_tricksets]
-        click.echo(f"Trick configs: {', '.join(labels)}")
-    click.echo(f"Config: {CONFIG_PATH}")
+    labels = [e if isinstance(e, str) else e.get("name", "<inline>") for e in cfg_tricksets]
+    _print_startup(listen_on, model_url, model_name or "", str(CONFIG_PATH), labels)
 
     log_level = os.getenv("LOGLEVEL", "INFO").upper()
     logging.basicConfig(

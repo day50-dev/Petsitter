@@ -7,6 +7,15 @@ from pathlib import Path
 from typing import Any
 
 
+def mask_secret(value: str) -> str:
+    """Enough of a credential to recognise it, never enough to use it."""
+    if not value:
+        return ""
+    if len(value) <= 8:
+        return "*" * len(value)
+    return f"{value[:4]}\u2026{value[-4:]}"
+
+
 @dataclass
 class AgentResult:
     status: str                        # "ready" | "missing_creds" | "error"
@@ -59,9 +68,29 @@ class Agent:
     description: str = ""
     icon: str = ""
     required_env: list[str] = []
+    # Who this tool talks to when petsitter is not in the way. Used to say
+    # plainly what turning it on changes.
+    provider_name: str = "its AI provider"
     config_paths: list[str] = []
     tricks: list[str] = []
     model_config: dict[str, Any] = {}
+
+    def installed(self) -> bool:
+        """Whether this tool appears to be on the machine at all.
+
+        Deliberately separate from whether it has credentials. The status enum
+        cannot tell those apart -- an agent reports ``missing_creds`` when its
+        env var is unset whether or not the tool exists -- and telling someone
+        to sign in to something they have never installed is worse than saying
+        nothing.
+        """
+        for raw in self.config_paths:
+            expanded = os.path.expandvars(os.path.expanduser(raw))
+            if "$" in expanded:
+                continue          # an unset variable, not a real path
+            if Path(expanded).exists():
+                return True
+        return False
 
     def detect(self) -> AgentResult:
         """Scan the system and return what credentials were found."""
@@ -70,7 +99,9 @@ class Agent:
         for key in self.required_env:
             val = os.environ.get(key)
             if val:
-                found[key] = val
+                # Only the fact that it is set is anyone's business: this dict
+                # is serialized to /api/agents and rendered in the dashboard.
+                found[key] = mask_secret(val)
             else:
                 missing.append(key)
         if missing:

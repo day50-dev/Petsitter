@@ -927,6 +927,9 @@ def cli(config_arg: str | None, listen_on: str) -> None:
     })
     save_config(cfg)
 
+    from petsitter.agents import set_petsitter_url
+    set_petsitter_url(f"http://{listen_on}")
+
     labels = [e if isinstance(e, str) else e.get("name", "<inline>") for e in cfg_tricksets]
     _print_startup(listen_on, model_url, model_name or "", str(CONFIG_PATH), labels)
 

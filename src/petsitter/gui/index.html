@@ -18,6 +18,7 @@
 <img src="/static/petsitter-type.avif" alt="PetSitter">
 </div>
 <div class="nav">
+<a href="#" class="nav-start" onclick="switchTab('intro');return false">Start here</a>
 <a href="https://github.com/day50-dev/Petsitter" target="_blank">GitHub</a>
 <a href="/docs">API</a>
 <a href="#" onclick="switchTab('help');return false">Help</a>
@@ -37,8 +38,7 @@
 <div class="ts-pills" id="ts-pills"></div>
 
 <div class="tabs">
-<div class="tab active" data-tab="intro" onclick="switchTab('intro')">Start here</div>
-<div class="tab" data-tab="tricks" onclick="switchTab('tricks')">Tricks</div>
+<div class="tab active" data-tab="tricks" onclick="switchTab('tricks')">Tricks</div>
 <div class="tab" data-tab="models" onclick="switchTab('models')">Models</div>
 <div class="tab" data-tab="agents" onclick="switchTab('agents')">Agents</div>
 <div class="tab" data-tab="logs" onclick="switchTab('logs')">Logs</div>
@@ -281,7 +281,10 @@ function html(strings, ...vals) {
 }
 
 // ---- tabs ----
+let currentTab = 'intro';
+
 function switchTab(name) {
+  currentTab = name;
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'tab-'+name));
   // The trickset picker and filter bar belong to a trickset; on the intro they
@@ -303,9 +306,7 @@ function switchTab(name) {
 }
 
 function updateHash() {
-  var tabEl = document.querySelector('.tab.active');
-  var tab = tabEl ? tabEl.dataset.tab : 'tricks';
-  location.hash = tab + '/' + selectedTrickset;
+  location.hash = currentTab + '/' + selectedTrickset;
 }
 
 function parseHash() {
@@ -314,7 +315,8 @@ function parseHash() {
   var tab = parts[0] || 'intro';
   var ts = parts[1] || '_default';
   if (tab === 'help' || tab === 'intro') ts = '_default';
-  if (!document.querySelector('.tab[data-tab="' + tab + '"]')) { tab = 'intro'; ts = '_default'; }
+  var hasPane = !!document.getElementById('tab-' + tab);
+  if (!hasPane) { tab = 'intro'; ts = '_default'; }
   return {tab, ts};
 }
 
@@ -1014,12 +1016,25 @@ async function unloadTrick(id, name) {
 let selectedTrickset = '_default';
 let loadedTricksets = {};
 
+// A trickset can appear while you're looking at another tab -- registering an
+// agent creates one, for instance -- so a new pill announces itself instead of
+// quietly showing up in a row of things that all look the same.
+let _seenTricksets = null;      // null until the first load, so nothing pulses on boot
+let _newTricksets = new Set();
+
+function _markNewTricksets(names) {
+  if (_seenTricksets === null) { _seenTricksets = new Set(names); return; }
+  names.forEach(n => { if (!_seenTricksets.has(n)) _newTricksets.add(n); });
+  _seenTricksets = new Set(names);
+}
+
 function _sharedPills(loaded, avail, selected, onSwitch, showAdd) {
   const loadedNames = new Set(loaded.map(ts => ts.name));
   const names = [...new Set(['_default', ...loadedNames, ...avail.map(ts => ts.name)])];
   const el = document.getElementById('ts-pills');
   el.innerHTML = names.map(n => {
-    const cls = 'pill' + (n === selected ? ' active' : '') + (!loadedNames.has(n) ? ' pill-unloaded' : '');
+    const cls = 'pill' + (n === selected ? ' active' : '') + (!loadedNames.has(n) ? ' pill-unloaded' : '')
+      + (_newTricksets.has(n) ? ' pill-new' : '');
     return `<span class="${cls}" data-name="${escapeHtml(n)}" onclick="${onSwitch}(this.dataset.name)">${escapeHtml(n)}</span>`;
   }).join('') + (showAdd ? '<span class="pill pill-add" onclick="addTrickset()" title="Create a new trickset">+ Add</span>' : '');
 }
@@ -1032,6 +1047,7 @@ async function fetchTricksets() {
     ]);
     loadedTricksets = {};
     loaded.forEach(ts => loadedTricksets[ts.name] = ts);
+    _markNewTricksets(loaded.map(ts => ts.name));
     _sharedPills(loaded, avail, selectedTrickset, 'switchTrickset', true);
     const loadedNames = new Set(loaded.map(ts => ts.name));
     if (!loadedNames.has(selectedTrickset) && loaded.length) selectedTrickset = loaded[0].name;
@@ -1041,6 +1057,10 @@ async function fetchTricksets() {
 
 async function switchTrickset(name) {
   selectedTrickset = name;
+  if (_newTricksets.delete(name)) {
+    const pill = document.querySelector('#ts-pills .pill[data-name="' + name + '"]');
+    if (pill) pill.classList.remove('pill-new');
+  }
   updateHash();
   updatePgTarget();
   document.querySelectorAll('#ts-pills .pill[data-name]').forEach(p => p.classList.toggle('active', p.dataset.name === name));
@@ -1070,7 +1090,7 @@ async function switchTrickset(name) {
     document.getElementById('ts-settings-scope').textContent = ts.name;
     document.getElementById('ts-logfile').value = ts.logfile || '';
     document.getElementById('ts-loglevel').value = ts.loglevel || 'INFO';
-    if (document.querySelector('.tab.active')?.dataset.tab === 'logs') {
+    if (currentTab === 'logs') {
       populateTsLogSelect();
       document.getElementById('tslog-select').value = name;
       refreshTricksetLog();
@@ -1519,7 +1539,11 @@ async function fetchAgents() {
       const who = escapeHtml(a.provider_name || 'its AI provider');
       const name = escapeHtml(a.display_name || id);
       const hop = n => `<span class="hop">${n}</span>`;
-      const self = `<span class="hop hop-self">petsitter</span>`;
+      const self = `<span class="hop hop-self hop-link" role="button" tabindex="0"`
+        + ` title="Configure what petsitter does with this traffic"`
+        + ` onclick="configureAgent('${escapeHtml(id)}')"`
+        + ` onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();configureAgent('${escapeHtml(id)}');}"`
+        + `>petsitter</span>`;
       const arrow = '<span class="hop-arrow">\u2192</span>';
       let statusLabel = '', statusClass = '', route, note = '';
       if (isReg) {
@@ -1542,7 +1566,24 @@ async function fetchAgents() {
         ? `<span class="agent-chip ${statusClass}">${escapeHtml(statusLabel)}</span>` : '';
       const noteHtml = note ? `<span class="agent-note">${escapeHtml(note)}</span>` : '';
       const idEsc = escapeHtml(id);
-      const actionHtml = `<label class="toggle-switch" title="${isReg ? 'Turn off to put the settings file back' : 'Turn on to route this tool through petsitter'}"><input type="checkbox" ${isReg ? 'checked' : ''} onchange="toggleAgent('${idEsc}', this.checked)"><span class="toggle-slider"></span></label>`;
+      // The card is not itself a switch. Making it one meant a click anywhere
+      // -- on the route, on the way to the details -- flipped the tool on or
+      // off, and left nothing else on the card clickable.
+      const actionable = isReg || d.status === 'ready';
+      const cardAttrs = ` class="agent-card${isReg ? ' agent-registered' : ''}${actionable ? '' : ' agent-inert'}"`;
+      // Once it's connected, turning it off is not the interesting next step --
+      // seeing what petsitter is doing to the traffic is.
+      const primary = isReg
+        ? `<button class="agent-btn btn-configure" onclick="configureAgent('${idEsc}')"`
+          + ` title="See and change the tricks applied to this tool">Configure</button>`
+        : `<button class="agent-btn btn-connect" onclick="toggleAgent('${idEsc}', true)"`
+          + ` title="Route this tool through petsitter">Connect</button>`;
+      const actionHtml = actionable
+        ? primary
+          + `<label class="toggle-switch" title="${isReg ? 'Disconnect' : 'Connect'}">`
+          + `<input type="checkbox" ${isReg ? 'checked' : ''} onchange="toggleAgent('${idEsc}', this.checked)">`
+          + `<span class="toggle-slider"></span></label>`
+        : '';
       var iconHtml = a.icon && a.icon.indexOf('http') === 0
         ? `<img src="${escapeHtml(a.icon)}" alt="" class="agent-favicon" onerror="defaultImage(this)">`
         : (a.icon || '\u{1F916}');
@@ -1558,15 +1599,6 @@ async function fetchAgents() {
       const detailHtml = diag.length
         ? `<details class="agent-diag"><summary>details</summary><div>${diag.join('<br>')}</div></details>`
         : '';
-      // Only offer the click where it would actually do something: a tool that
-      // isn't installed, or isn't signed in, has nothing to connect.
-      const actionable = isReg || d.status === 'ready';
-      const cardAttrs = actionable
-        ? ` class="agent-card agent-clickable${isReg ? ' agent-registered' : ''}" role="button" tabindex="0"`
-          + ` aria-pressed="${isReg}"`
-          + ` onclick="agentCardClick(event, '${idEsc}', ${!isReg})"`
-          + ` onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();agentCardClick(event,'${idEsc}',${!isReg});}"`
-        : ` class="agent-card agent-inert${isReg ? ' agent-registered' : ''}"`;
       return `<div${cardAttrs}><div class="agent-icon">${iconHtml}</div><div class="agent-body"><div class="agent-head"><span class="agent-name">${name}</span>${chipHtml}${noteHtml}</div><div class="agent-route${isReg ? ' route-on' : ''}">${route}</div>${detailHtml}</div><div class="agent-actions">${actionHtml}</div></div>`;
     }).join('');
   } catch(e) { document.getElementById('agents-grid').innerHTML = '<div class="loader">Error loading agents</div>'; }
@@ -1594,14 +1626,11 @@ function _appendAgentLog(entries) {
   el.scrollTop = el.scrollHeight;
 }
 
-// The card is the hit target, but the switch and the details fold are real
-// controls inside it -- letting the card handle those clicks too would toggle
-// twice, or toggle when someone only wanted to read the diagnostics.
-function agentCardClick(event, id, enable) {
-  if (event.target.closest('.toggle-switch, .agent-diag')) return;
-  const box = event.currentTarget.querySelector('.toggle-switch input');
-  if (box) box.checked = enable;      // reflect it now; fetchAgents() confirms
-  toggleAgent(id, enable);
+// Show what petsitter is actually doing to this tool's traffic: its own
+// trickset if registering made one, otherwise the trick list in general.
+function configureAgent(id) {
+  switchTab('tricks');
+  if (loadedTricksets && loadedTricksets[id]) switchTrickset(id);
 }
 
 async function toggleAgent(id, enable) {

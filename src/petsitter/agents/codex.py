@@ -16,7 +16,7 @@ from petsitter.agents import Agent, AgentContext, AgentResult
 
 CODEX_HOME_VAR = "CODEX_HOME"
 GLOBAL_CONFIG = Path.home() / ".codex" / "config.toml"
-PETSITTER_URL = "http://localhost:8080"
+from petsitter.agents import petsitter_url
 OPENAI_BASE_URL_KEY = "openai_base_url"
 
 
@@ -35,9 +35,14 @@ class CodexAgent(Agent):
     required_env = ["OPENAI_API_KEY"]
     provider_name = "OpenAI"
     config_paths = ["~/.codex/config.toml", "$CODEX_HOME/config.toml"]
+    # What a newly connected tool gets out of the box: see the traffic, keep
+    # secrets out of it, carry your house rules, and be able to export a
+    # conversation. Nothing here changes what the model is asked to do.
     tricks = [
-        "tricks/json_mode.py",
-        "tricks/tool_call.py",
+        "tricks/secrets_protector.py",
+        "tricks/rules_file.py",
+        "tricks/exportit.py",
+        "tricks/tool_monitor.py",
     ]
     model_config: dict[str, Any] = {
         "url": "",
@@ -80,7 +85,7 @@ class CodexAgent(Agent):
         backup.setdefault("files", {})[f"file::{config}"] = original
 
         # Find and replace openai_base_url, or append it
-        new_value = f'{OPENAI_BASE_URL_KEY} = "{PETSITTER_URL}/v1"'
+        new_value = f'{OPENAI_BASE_URL_KEY} = "{petsitter_url()}/v1"'
         if original.strip():
             lines = original.splitlines(keepends=True)
             replaced = False
@@ -103,7 +108,7 @@ class CodexAgent(Agent):
 
         config.parent.mkdir(parents=True, exist_ok=True)
         config.write_text(content)
-        log.append({"level": "INFO", "message": f"Set {OPENAI_BASE_URL_KEY}={PETSITTER_URL}/v1 in ~/.codex/config.toml"})
+        log.append({"level": "INFO", "message": f"Set {OPENAI_BASE_URL_KEY}={petsitter_url()}/v1 in ~/.codex/config.toml"})
 
         log.append({"level": "INFO", "message": "Codex is now routed through petsitter"})
         return log

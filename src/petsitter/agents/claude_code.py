@@ -18,7 +18,7 @@ SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 CREDENTIALS_PATH = Path.home() / ".claude" / ".credentials.json"
 ANTHROPIC_API_KEY = "ANTHROPIC_API_KEY"
 ANTHROPIC_BASE_URL = "ANTHROPIC_BASE_URL"
-PETSITTER_URL = "http://localhost:8080"
+from petsitter.agents import petsitter_url
 
 
 class ClaudeCodeAgent(Agent):
@@ -29,9 +29,14 @@ class ClaudeCodeAgent(Agent):
     required_env = ["ANTHROPIC_API_KEY"]
     provider_name = "Anthropic"
     config_paths = ["~/.claude/settings.json"]
+    # What a newly connected tool gets out of the box: see the traffic, keep
+    # secrets out of it, carry your house rules, and be able to export a
+    # conversation. Nothing here changes what the model is asked to do.
     tricks = [
-        "tricks/json_mode.py",
-        "tricks/tool_call.py",
+        "tricks/secrets_protector.py",
+        "tricks/rules_file.py",
+        "tricks/exportit.py",
+        "tricks/tool_monitor.py",
     ]
     model_config: dict[str, Any] = {
         "url": "",
@@ -101,55 +106,96 @@ class ClaudeCodeAgent(Agent):
         )
 
     def register(self, ctx: AgentContext) -> list[dict[str, str]]:
+        """Point Claude Code at petsitter by setting one key in its settings.
+
+        Only the single key is recorded for undo, not a snapshot of the whole
+        file. Claude Code and the person using it both keep editing that file
+        while petsitter is registered, and restoring a whole-file snapshot
+        later would silently throw those edits away.
+        """
         log: list[dict[str, str]] = []
         backup: dict = ctx.backup
 
-        # Read existing settings file (or start fresh)
         existing: dict = {}
         if SETTINGS_PATH.exists():
             try:
                 existing = json.loads(SETTINGS_PATH.read_text())
             except (json.JSONDecodeError, OSError):
-                pass
+                log.append({"level": "WARNING",
+                            "message": "~/.claude/settings.json is unreadable; leaving it alone"})
+                return log
 
-        # Save original into backup
-        backup.setdefault("files", {})[f"file::{SETTINGS_PATH}"] = json.dumps(existing, indent=2) + "\n" if existing else ""
+        env_block = dict(existing.get("env") or {})
+        undo = backup.setdefault("undo", {})
+        undo["file"] = str(SETTINGS_PATH)
+        undo["file_existed"] = SETTINGS_PATH.exists()
+        undo["had_env_block"] = "env" in existing
+        undo["had_key"] = ANTHROPIC_BASE_URL in env_block
+        undo["previous"] = env_block.get(ANTHROPIC_BASE_URL)
 
-        # Merge the env block
-        env_block = existing.get("env", {})
-        existing_url = env_block.get(ANTHROPIC_BASE_URL, "")
-        if existing_url:
-            log.append({"level": "INFO", "message": f"Saved existing {ANTHROPIC_BASE_URL}={existing_url}"})
-        env_block[ANTHROPIC_BASE_URL] = PETSITTER_URL
+        if undo["previous"]:
+            log.append({"level": "INFO",
+                        "message": f"Saved existing {ANTHROPIC_BASE_URL}={undo['previous']}"})
+
+        env_block[ANTHROPIC_BASE_URL] = petsitter_url()
         existing["env"] = env_block
 
-        # Write back
         SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
         SETTINGS_PATH.write_text(json.dumps(existing, indent=2) + "\n")
-        log.append({"level": "INFO", "message": f"Set {ANTHROPIC_BASE_URL}={PETSITTER_URL} in ~/.claude/settings.json"})
-
+        log.append({"level": "INFO",
+                    "message": f"Set {ANTHROPIC_BASE_URL}={petsitter_url()} in ~/.claude/settings.json"})
         log.append({"level": "INFO", "message": "Claude Code is now routed through petsitter"})
         return log
 
     def unregister(self, ctx: AgentContext) -> list[dict[str, str]]:
+        """Undo exactly the key we set, leaving every other edit in place."""
         log: list[dict[str, str]] = []
-        backup = ctx.backup
+        undo = (ctx.backup or {}).get("undo") or {}
 
-        key = f"file::{SETTINGS_PATH}"
-        original = backup.get("files", {}).get(key)
-        if original:
-            try:
-                SETTINGS_PATH.write_text(original)
-                log.append({"level": "INFO", "message": "Restored ~/.claude/settings.json"})
-            except OSError:
-                log.append({"level": "WARNING", "message": "Could not restore ~/.claude/settings.json"})
-        elif SETTINGS_PATH.exists():
-            # No backup means we created it — remove the file entirely
-            try:
-                SETTINGS_PATH.unlink()
-                log.append({"level": "INFO", "message": "Removed ~/.claude/settings.json (created by petsitter)"})
-            except OSError:
-                pass
+        if not SETTINGS_PATH.exists():
+            log.append({"level": "INFO", "message": "~/.claude/settings.json is already gone"})
+            return log
+        try:
+            current = json.loads(SETTINGS_PATH.read_text())
+        except (json.JSONDecodeError, OSError):
+            log.append({"level": "WARNING",
+                        "message": "~/.claude/settings.json is unreadable; not touching it"})
+            return log
 
-        log.append({"level": "INFO", "message": "Configuration restored"})
+        env_block = dict(current.get("env") or {})
+        present = env_block.get(ANTHROPIC_BASE_URL)
+
+        if undo.get("had_key") and undo.get("previous"):
+            env_block[ANTHROPIC_BASE_URL] = undo["previous"]
+            log.append({"level": "INFO",
+                        "message": f"Put {ANTHROPIC_BASE_URL} back to {undo['previous']}"})
+        elif present is not None:
+            # Only remove a value we are responsible for; if the user pointed it
+            # somewhere else in the meantime, that is their setting, not ours.
+            if present == petsitter_url() or not undo:
+                env_block.pop(ANTHROPIC_BASE_URL, None)
+                log.append({"level": "INFO",
+                            "message": f"Removed {ANTHROPIC_BASE_URL} from ~/.claude/settings.json"})
+            else:
+                log.append({"level": "WARNING",
+                            "message": f"Left {ANTHROPIC_BASE_URL}={present} alone (changed since registering)"})
+        else:
+            log.append({"level": "INFO", "message": f"{ANTHROPIC_BASE_URL} was already unset"})
+
+        if env_block:
+            current["env"] = env_block
+        else:
+            # don't leave an empty env block behind if we introduced it
+            if undo.get("had_env_block"):
+                current["env"] = {}
+            else:
+                current.pop("env", None)
+
+        try:
+            SETTINGS_PATH.write_text(json.dumps(current, indent=2) + "\n")
+        except OSError:
+            log.append({"level": "WARNING", "message": "Could not write ~/.claude/settings.json"})
+            return log
+
+        log.append({"level": "INFO", "message": "Claude Code is talking to Anthropic directly again"})
         return log

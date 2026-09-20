@@ -84,9 +84,14 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
     gui_dir = Path(__file__).parent / "gui"
     app.mount("/static", StaticFiles(directory=str(gui_dir)), name="static")
 
+    # The dashboard is read from disk on every request so edits show up on a
+    # reload. Without this header a browser caches it heuristically and serves
+    # stale markup and stale JS, which looks exactly like a broken page.
+    NO_STORE = {"Cache-Control": "no-store, must-revalidate"}
+
     async def gui_page(request: Request) -> Response:
         content = (gui_dir / "index.html").read_text()
-        return Response(content=content, media_type="text/html")
+        return Response(content=content, media_type="text/html", headers=NO_STORE)
     app.add_route("/gui", gui_page, methods=["GET"])
     app.add_route("/", gui_page, methods=["GET"])
 

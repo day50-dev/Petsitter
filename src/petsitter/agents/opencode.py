@@ -15,7 +15,7 @@ from petsitter.agents import Agent, AgentContext, AgentResult
 
 
 GLOBAL_CONFIG = Path.home() / ".config" / "opencode" / "opencode.json"
-PETSITTER_URL = "http://localhost:8080"
+from petsitter.agents import petsitter_url
 
 
 class OpenCodeAgent(Agent):
@@ -25,9 +25,14 @@ class OpenCodeAgent(Agent):
     icon = "https://opencode.ai/favicon.ico"
     required_env: list[str] = []
     config_paths = ["~/.config/opencode/opencode.json"]
+    # What a newly connected tool gets out of the box: see the traffic, keep
+    # secrets out of it, carry your house rules, and be able to export a
+    # conversation. Nothing here changes what the model is asked to do.
     tricks = [
-        "tricks/json_mode.py",
-        "tricks/tool_call.py",
+        "tricks/secrets_protector.py",
+        "tricks/rules_file.py",
+        "tricks/exportit.py",
+        "tricks/tool_monitor.py",
     ]
     model_config: dict[str, Any] = {
         "url": "",
@@ -102,14 +107,14 @@ class OpenCodeAgent(Agent):
         options = provider_cfg.get("options", {})
         if not isinstance(options, dict):
             options = {}
-        options["baseURL"] = f"{PETSITTER_URL}/v1"
+        options["baseURL"] = f"{petsitter_url()}/v1"
         provider_cfg["options"] = options
         providers[provider_id] = provider_cfg
         existing["provider"] = providers
 
         GLOBAL_CONFIG.parent.mkdir(parents=True, exist_ok=True)
         GLOBAL_CONFIG.write_text(json.dumps(existing, indent=2) + "\n")
-        log.append({"level": "INFO", "message": f"Set {provider_id} baseURL → {PETSITTER_URL}/v1 in opencode.json"})
+        log.append({"level": "INFO", "message": f"Set {provider_id} baseURL → {petsitter_url()}/v1 in opencode.json"})
 
         log.append({"level": "INFO", "message": "OpenCode is now routed through petsitter"})
         return log

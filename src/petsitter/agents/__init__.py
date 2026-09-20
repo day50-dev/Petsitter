@@ -7,6 +7,22 @@ from pathlib import Path
 from typing import Any
 
 
+# Agents write petsitter's address into other tools' config files, so it has to
+# be the address petsitter is actually listening on, not an assumption.
+_PETSITTER_URL = "http://localhost:8080"
+
+
+def set_petsitter_url(url: str) -> None:
+    """Record where petsitter is reachable. Called once, at startup."""
+    global _PETSITTER_URL
+    if url:
+        _PETSITTER_URL = url.rstrip("/")
+
+
+def petsitter_url() -> str:
+    return _PETSITTER_URL
+
+
 def mask_secret(value: str) -> str:
     """Enough of a credential to recognise it, never enough to use it."""
     if not value:

@@ -1312,10 +1312,11 @@ header .nav a:hover { background: #1a2a4d; }
   .iwire { flex-basis: 100%; min-height: 22px; transform: rotate(90deg); }
 }
 
-/* Trickset chrome is meaningless before anyone knows what a trickset is.
-   !important because switchTrickset() clears ts-bar's inline display. */
-body.on-intro #ts-bar,
-body.on-intro .ts-pills { display: none !important; }
+/* The pills stay on the intro so the page doesn't change height when you move
+   between tabs -- a landing screen that jumps as soon as you click anything
+   reads as broken. The filter bar underneath is trickset vocabulary, so it
+   keeps its box but not its contents. */
+body.on-intro #ts-bar { visibility: hidden; }
 
 /* the explanation detect() already produced, which the card used to discard */
 .agent-why {
@@ -1499,3 +1500,67 @@ body.on-intro .ts-pills { display: none !important; }
 /* the diagnostics fold was #4a6572 on #1a1a33 -- effectively invisible */
 .agent-diag summary { color: #7a93aa; font-size: 11.5px; }
 .agent-diag summary:hover { color: #a9ccff; }
+
+/* A trickset that appeared while you were elsewhere. It pulses a few times to
+   catch the eye, then holds a quiet marker so it still reads as new a minute
+   later -- an indefinite blink is just noise. Clicking it clears the mark. */
+.pill-new {
+  position: relative;
+  border-color: #3b82f6 !important;
+  color: #cfe2ff !important;
+  animation: pillNew 1.15s ease-in-out 5;
+}
+
+.pill-new::after {
+  content: "";
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #3b82f6;
+  box-shadow: 0 0 0 2px #0f0f1a;
+}
+
+@keyframes pillNew {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+  50%      { box-shadow: 0 0 0 4px rgba(59, 130, 246, .35); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pill-new { animation: none; }
+}
+
+/* Start here is the way in, not a peer of the management tabs */
+header .nav .nav-start { color: #8ab4ff; font-weight: 600; }
+header .nav .nav-start:hover { color: #cfe2ff; }
+
+/* A labelled control beats an unlabelled switch: the word says what will
+   happen, the switch shows what is true now. */
+.agent-btn {
+  padding: 6px 14px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .12s, border-color .12s, color .12s;
+}
+.btn-connect { background: #1d4ed8; color: #fff; }
+.btn-connect:hover { background: #2563eb; }
+.btn-disconnect { background: none; color: #9fb6cc; border-color: #2f4d75; }
+.btn-disconnect:hover { background: #24304a; color: #fff; border-color: #3b82f6; }
+.agent-btn:focus-visible { outline: 2px solid #8ab4ff; outline-offset: 2px; }
+
+.agent-actions { display: flex; align-items: center; gap: 10px; }
+
+/* the petsitter hop goes somewhere */
+.hop-link { cursor: pointer; }
+.hop-link:hover { background: #1e3054; border-color: #3b82f6; color: #cfe2ff; }
+.hop-link:focus-visible { outline: 2px solid #8ab4ff; outline-offset: 2px; }
+
+/* the card itself is no longer a button */
+.agent-card { cursor: default; }
+.btn-configure { background: #16203a; color: #a9ccff; border-color: #2f4d75; }
+.btn-configure:hover { background: #1e3054; color: #fff; border-color: #3b82f6; }

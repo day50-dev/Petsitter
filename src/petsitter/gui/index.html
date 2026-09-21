@@ -380,7 +380,6 @@ window.addEventListener('hashchange', function() {
 // ---- start here ----
 let _introSeen = 0;
 let _introLastAt = 0;
-let _introSource = null;
 
 async function refreshIntro() {
   try {
@@ -400,27 +399,22 @@ async function refreshIntro() {
   paintIntroTraffic();
 }
 
-// A visitor needs to see the thing react to their own traffic, so the intro
-// watches the same log stream the Logs tab uses and counts requests going by.
-function startIntroTraffic() {
-  if (_introSource) return;
-  try {
-    _introSource = new EventSource('/api/logs');
-    _introSource.onmessage = function(e) {
-      let msg = '';
-      try { msg = (JSON.parse(e.data) || {}).message || ''; } catch (err) { return; }
-      if (msg.indexOf('active tricks (') === -1) return;
-      _introSeen++;
-      _introLastAt = Date.now();
-      paintIntroTraffic();
-    };
-    _introSource.onerror = function() {
-      if (_introSource) { _introSource.close(); _introSource = null; }
-      setTimeout(startIntroTraffic, 5000);
-    };
-  } catch (e) {
-    console.warn('intro traffic stream unavailable:', e);
-  }
+// A visitor needs to see the thing react to their own traffic. This used to
+// open its own EventSource to /api/logs -- a second permanent connection to
+// the same endpoint the Logs tab already streams, on top by default whether
+// or not the Logs tab was ever opened. A browser caps how many simultaneous
+// connections it will hold open to one origin (6 for HTTP/1.1, which is all
+// uvicorn speaks here); two tabs of the dashboard open ate 4 of those on
+// nothing but duplicate log streams, three tabs hit the ceiling and every
+// other request -- images, /api/* calls, everything -- queued forever. Fixed
+// by having the intro counter read off the single stream startLogStream()
+// already keeps open, via noteIntroTraffic() below, instead of opening its own.
+function noteIntroTraffic(entry) {
+  const msg = (entry && entry.message) || '';
+  if (msg.indexOf('active tricks (') === -1) return;
+  _introSeen++;
+  _introLastAt = Date.now();
+  paintIntroTraffic();
 }
 
 function paintIntroTraffic() {
@@ -1419,6 +1413,7 @@ function startLogStream() {
     if (e.data && e.data.startsWith('{')) {
       try {
         const entry = JSON.parse(e.data);
+        noteIntroTraffic(entry);
         if (viewer.querySelector('.loader')) viewer.innerHTML = '';
         const atBottom = viewer.scrollHeight - viewer.scrollTop - viewer.clientHeight < 40;
         viewer.insertAdjacentHTML('beforeend', `<div class="log-entry lvl-${entry.level}"><span class="time">${escapeHtml(entry.time)}</span>${escapeHtml(entry.level)}: ${escapeHtml(entry.message)}</div>`);
@@ -1715,7 +1710,7 @@ if (initHash.ts !== '_default') selectedTrickset = initHash.ts;
 trickSearch = (document.getElementById('trick-search').value || '').toLowerCase();
 fetchInfo(); fetchTricksets(); fetchAvailable(); fetchModels(); fetchAgents();
 startLogStream();
-startIntroTraffic(); refreshIntro();
+refreshIntro();
 </script>
 
 <div id="config-modal" class="modal-overlay" style="display:none">

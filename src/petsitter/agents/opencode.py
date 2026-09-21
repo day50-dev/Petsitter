@@ -131,14 +131,17 @@ class OpenCodeAgent(Agent):
             try:
                 GLOBAL_CONFIG.write_text(original)
                 log.append({"level": "INFO", "message": "Restored opencode.json"})
-            except OSError:
-                log.append({"level": "WARNING", "message": "Could not restore opencode.json"})
+            except OSError as e:
+                # baseURL is still pointed at petsitter in the file on disk, so
+                # this must not be reported as done -- propagate so the caller
+                # keeps this agent marked "registered" and retries later.
+                raise RuntimeError("Could not restore opencode.json") from e
         elif GLOBAL_CONFIG.exists():
             try:
                 GLOBAL_CONFIG.unlink()
                 log.append({"level": "INFO", "message": "Removed opencode.json (created by petsitter)"})
-            except OSError:
-                pass
+            except OSError as e:
+                raise RuntimeError("Could not remove opencode.json") from e
 
         log.append({"level": "INFO", "message": "Configuration restored"})
         return log

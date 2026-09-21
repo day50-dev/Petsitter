@@ -158,10 +158,12 @@ class ClaudeCodeAgent(Agent):
             return log
         try:
             current = json.loads(SETTINGS_PATH.read_text())
-        except (json.JSONDecodeError, OSError):
-            log.append({"level": "WARNING",
-                        "message": "~/.claude/settings.json is unreadable; not touching it"})
-            return log
+        except (json.JSONDecodeError, OSError) as e:
+            # Can't tell whether our key is still in there, so this must not be
+            # reported as a successful unregister -- the caller needs to keep
+            # this agent marked "registered" and retry later, or the env stays
+            # pointed at petsitter with no record left to fix it.
+            raise RuntimeError("~/.claude/settings.json is unreadable; not touching it") from e
 
         env_block = dict(current.get("env") or {})
         present = env_block.get(ANTHROPIC_BASE_URL)
@@ -194,9 +196,11 @@ class ClaudeCodeAgent(Agent):
 
         try:
             SETTINGS_PATH.write_text(json.dumps(current, indent=2) + "\n")
-        except OSError:
-            log.append({"level": "WARNING", "message": "Could not write ~/.claude/settings.json"})
-            return log
+        except OSError as e:
+            # The key we set is still in the file. This must propagate so the
+            # registry entry isn't cleared out from under a config that's still
+            # pointed at petsitter.
+            raise RuntimeError("Could not write ~/.claude/settings.json") from e
 
         log.append({"level": "INFO", "message": "Claude Code is talking to Anthropic directly again"})
         return log

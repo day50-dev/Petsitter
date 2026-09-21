@@ -242,6 +242,10 @@ def _restore_agents() -> list[str]:
     if _agent_manager is None:
         return _restored_agents
     try:
+        # get_registered() checks each tool's config file live, not just the
+        # registry's memory of what it did -- so this still finds (and puts
+        # back) an agent whose registry.json write silently failed to land
+        # while its config was in fact left pointed at petsitter.
         registered = [aid for aid, e in (_agent_manager.get_registered().get("agents") or {}).items()
                       if e.get("status") == "registered"]
     except Exception:

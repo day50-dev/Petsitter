@@ -213,18 +213,53 @@ class AgentManager:
             save_registry(self.config_dir, registry)
         return name, log
 
+    def _is_registered(self, agent_id: str, agent: Agent) -> bool:
+        """Live feature-check: does this agent's own config point at petsitter right now?
+
+        Never trust registry.json for this question -- it only records what
+        petsitter last *did*, and can drift from what is actually on disk (a
+        write that silently failed before, a config hand-edited back, a
+        registry.json that never got the write). Each agent knows how to
+        read its own config format; this just calls through and treats an
+        error as "can't confirm it's registered," not as registered.
+        """
+        try:
+            return agent.is_registered()
+        except Exception:
+            logger.exception("Agent %s is_registered() failed", agent_id)
+            return False
+
+    def live_registered_ids(self) -> list[str]:
+        """Ids of every discovered agent whose config currently points at petsitter.
+
+        Computed fresh from each agent's own config file, not from
+        registry.json -- see ``_is_registered``.
+        """
+        return [aid for aid, agent in self._agents.items() if self._is_registered(aid, agent)]
+
     def unregister(self, agent_id: str) -> tuple[bool, list[dict[str, str]]]:
-        """Unregister a specific agent and restore its configuration."""
+        """Unregister a specific agent and restore its configuration.
+
+        Always calls through to the agent's own unregister() when there is
+        anything to restore -- either its config currently points at
+        petsitter, or registry.json has backup data for it -- even if only
+        one of those is true. registry.json can lose track of a
+        registration (a write that landed but was never recorded, a
+        corrupted registry.json) while the config file itself still shows
+        petsitter's address; the only case genuinely safe to skip is neither
+        being true, i.e. there is nothing anywhere to suggest this agent was
+        ever registered.
+        """
         agent = self._get(agent_id)
         log: list[dict[str, str]] = []
 
         registry = load_registry(self.config_dir)
         entry = registry.get("agents", {}).pop(agent_id, None)
-        if entry is None:
+        if entry is None and not self._is_registered(agent_id, agent):
             log.append({"level": "WARNING", "message": f"Agent {agent_id} is not registered"})
             return True, log
 
-        backup = entry.get("backup", {})
+        backup = (entry or {}).get("backup", {})
         ctx = AgentContext(
             trickset_name=agent_id,
             model_config=dict(agent.model_config),
@@ -247,24 +282,58 @@ class AgentManager:
         return True, log
 
     def unregister_all(self) -> list[dict[str, str]]:
-        """Unregister every agent the registry says is registered.
+        """Unregister every agent that is either registry-tracked or live-registered.
 
-        Only touches agents actually marked "registered" -- unlike looping
-        over every discovered agent type, which would print a spurious
-        "not registered" warning for each one that was never set up.
+        The union, not just the registry's list: a registration whose config
+        write landed but whose registry.json write did not (or got
+        corrupted, or was hand-edited) would otherwise be left pointed at
+        petsitter forever with nothing to say it needed restoring. See
+        ``unregister()`` for the same reasoning applied to one agent.
         """
         all_log: list[dict[str, str]] = []
         registry = load_registry(self.config_dir)
-        registered = [aid for aid, e in (registry.get("agents") or {}).items()
-                      if e.get("status") == "registered"]
-        for agent_id in registered:
+        tracked = {aid for aid, e in (registry.get("agents") or {}).items()
+                   if e.get("status") == "registered"}
+        candidates = tracked | set(self.live_registered_ids())
+        for agent_id in candidates:
             success, log = self.unregister(agent_id)
             all_log.extend(log)
         return all_log
 
     def get_registered(self) -> dict[str, Any]:
-        """Return current registry state."""
-        return load_registry(self.config_dir)
+        """Report which agents are registered, checked live against each config file.
+
+        registry.json is demoted to exactly what it's good for: the undo
+        payload (the original value to restore) for whichever agents are, in
+        fact, currently registered. The "registered" boolean itself always
+        comes from ``Agent.is_registered()`` -- a fresh read of the real
+        config file -- never from a stored flag, so this self-corrects if
+        registry.json and reality ever disagree (a failed write, a hand
+        edit, hand-deleting the key) instead of staying stuck on whatever
+        petsitter last believed.
+
+        A registry entry for an agent that is *not* live-registered is kept,
+        not discarded here -- its backup data is still exactly what a future
+        register()/unregister() cycle needs, and it costs nothing to hold
+        onto until something explicitly cleans it up.
+        """
+        registry = load_registry(self.config_dir)
+        agents_entry = dict(registry.get("agents") or {})
+        result: dict[str, Any] = {}
+        for agent_id, agent in self._agents.items():
+            live = self._is_registered(agent_id, agent)
+            entry = agents_entry.get(agent_id, {})
+            merged = dict(entry)
+            merged["status"] = "registered" if live else "unregistered"
+            result[agent_id] = merged
+        # Registry entries for agent ids petsitter no longer discovers (e.g. a
+        # trick/agent file removed since it was registered) have no live
+        # check to run -- surface them as the registry still describes them
+        # rather than silently dropping the only record of their backup data.
+        for agent_id, entry in agents_entry.items():
+            if agent_id not in result:
+                result[agent_id] = entry
+        return {"agents": result}
 
     def _get(self, agent_id: str) -> Agent:
         agent = self._agents.get(agent_id)

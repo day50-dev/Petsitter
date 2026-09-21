@@ -73,6 +73,33 @@ class OpenCodeAgent(Agent):
             message="; ".join(notes) if notes else "Not found",
         )
 
+    def is_registered(self) -> bool:
+        """Read opencode.json and check some provider's baseURL is ours now.
+
+        register() doesn't always patch the same provider id (it follows the
+        default model, or falls back to the first configured provider), so
+        this checks whether any provider currently points at petsitter rather
+        than guessing which one register() would have chosen.
+        """
+        if not GLOBAL_CONFIG.exists():
+            return False
+        try:
+            data = json.loads(GLOBAL_CONFIG.read_text())
+        except (json.JSONDecodeError, OSError):
+            return False
+        wanted = f"{petsitter_url()}/v1"
+        providers = data.get("provider", {})
+        if not isinstance(providers, dict):
+            return False
+        for pcfg in providers.values():
+            if not isinstance(pcfg, dict):
+                continue
+            options = pcfg.get("options", {})
+            burl = options.get("baseURL") if isinstance(options, dict) else None
+            if burl == wanted:
+                return True
+        return False
+
     def register(self, ctx: AgentContext) -> list[dict[str, str]]:
         log: list[dict[str, str]] = []
         backup: dict = ctx.backup
@@ -126,8 +153,10 @@ class OpenCodeAgent(Agent):
         backup = ctx.backup
 
         key = f"file::{GLOBAL_CONFIG}"
-        original = backup.get("files", {}).get(key)
-        if original:
+        files = backup.get("files", {})
+        have_backup = key in files
+        original = files.get(key)
+        if have_backup and original:
             try:
                 GLOBAL_CONFIG.write_text(original)
                 log.append({"level": "INFO", "message": "Restored opencode.json"})
@@ -136,12 +165,45 @@ class OpenCodeAgent(Agent):
                 # this must not be reported as done -- propagate so the caller
                 # keeps this agent marked "registered" and retries later.
                 raise RuntimeError("Could not restore opencode.json") from e
-        elif GLOBAL_CONFIG.exists():
+        elif have_backup and not original and GLOBAL_CONFIG.exists():
+            # We recorded that the file did not exist (or was empty) before
+            # we wrote it, so deleting it is restoring, not destroying.
             try:
                 GLOBAL_CONFIG.unlink()
                 log.append({"level": "INFO", "message": "Removed opencode.json (created by petsitter)"})
             except OSError as e:
                 raise RuntimeError("Could not remove opencode.json") from e
+        elif not have_backup and GLOBAL_CONFIG.exists():
+            # No backup to restore from -- e.g. registry.json lost track of
+            # this registration while the file itself still points at
+            # petsitter. We don't know what was here before, so the only
+            # safe move is to clear the baseURL keys we recognize as ours,
+            # never delete a file we didn't create and can't prove is empty
+            # otherwise.
+            try:
+                data = json.loads(GLOBAL_CONFIG.read_text())
+            except (json.JSONDecodeError, OSError) as e:
+                raise RuntimeError("opencode.json is unreadable; not touching it") from e
+            wanted = f"{petsitter_url()}/v1"
+            providers = data.get("provider", {})
+            removed = False
+            if isinstance(providers, dict):
+                for pcfg in providers.values():
+                    if not isinstance(pcfg, dict):
+                        continue
+                    options = pcfg.get("options", {})
+                    if isinstance(options, dict) and options.get("baseURL") == wanted:
+                        options.pop("baseURL", None)
+                        removed = True
+            if removed:
+                try:
+                    GLOBAL_CONFIG.write_text(json.dumps(data, indent=2) + "\n")
+                except OSError as e:
+                    raise RuntimeError("Could not write opencode.json") from e
+                log.append({"level": "INFO",
+                            "message": "Removed baseURL from opencode.json (no backup on record)"})
+            else:
+                log.append({"level": "INFO", "message": "opencode.json did not point at petsitter"})
 
         log.append({"level": "INFO", "message": "Configuration restored"})
         return log

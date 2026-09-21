@@ -106,6 +106,21 @@ class ClaudeCodeAgent(Agent):
             message="; ".join(notes) if notes else "Ready",
         )
 
+    def is_registered(self) -> bool:
+        """Read ~/.claude/settings.json and check the key is actually set.
+
+        Not a memory of whether we set it -- a live read of whether it is
+        still set now, by us or anyone else with an editor.
+        """
+        if not SETTINGS_PATH.exists():
+            return False
+        try:
+            data = json.loads(SETTINGS_PATH.read_text())
+        except (json.JSONDecodeError, OSError):
+            return False
+        env_block = data.get("env", {}) or {}
+        return env_block.get(ANTHROPIC_BASE_URL) == petsitter_url()
+
     def register(self, ctx: AgentContext) -> list[dict[str, str]]:
         """Point Claude Code at petsitter by setting one key in its settings.
 

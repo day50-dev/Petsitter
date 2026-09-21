@@ -74,6 +74,27 @@ class CodexAgent(Agent):
             message="; ".join(notes) if notes else "Not found",
         )
 
+    def is_registered(self) -> bool:
+        """Read ~/.codex/config.toml and check openai_base_url is ours now.
+
+        A plain-text line scan, matching how ``detect`` and ``register``
+        already parse this file -- no TOML dependency needed for one key.
+        """
+        config = _config_path()
+        if not config.exists():
+            return False
+        try:
+            content = config.read_text()
+        except OSError:
+            return False
+        wanted = f"{petsitter_url()}/v1"
+        for line in content.splitlines():
+            stripped = line.strip()
+            if stripped.startswith(OPENAI_BASE_URL_KEY):
+                val = stripped.split("=", 1)[1].strip().strip('"').strip("'")
+                return val == wanted
+        return False
+
     def register(self, ctx: AgentContext) -> list[dict[str, str]]:
         log: list[dict[str, str]] = []
         backup: dict = ctx.backup
@@ -120,13 +141,43 @@ class CodexAgent(Agent):
 
         config = _config_path()
         key = f"file::{config}"
-        original = backup.get("files", {}).get(key)
-        if original:
+        files = backup.get("files", {})
+        have_backup = key in files
+        original = files.get(key)
+        if have_backup and original:
             config.write_text(original)
             log.append({"level": "INFO", "message": "Restored ~/.codex/config.toml"})
-        elif config.exists():
+        elif have_backup and not original and config.exists():
+            # We recorded that the file did not exist before we wrote it, so
+            # deleting it is restoring, not destroying.
             config.unlink()
             log.append({"level": "INFO", "message": "Removed ~/.codex/config.toml (created by petsitter)"})
+        elif not have_backup and config.exists():
+            # No backup to restore from -- e.g. registry.json lost track of
+            # this registration while the config file itself still points at
+            # petsitter. We don't know what was here before, so the only safe
+            # move is to strip just the key we recognize as ours, never
+            # delete a file we didn't create and can't prove is empty
+            # otherwise.
+            wanted = f"{petsitter_url()}/v1"
+            content = config.read_text()
+            lines = content.splitlines(keepends=True)
+            kept = []
+            removed = False
+            for line in lines:
+                stripped = line.strip()
+                if stripped.startswith(OPENAI_BASE_URL_KEY):
+                    val = stripped.split("=", 1)[1].strip().strip('"').strip("'") if "=" in stripped else ""
+                    if val == wanted:
+                        removed = True
+                        continue
+                kept.append(line)
+            if removed:
+                config.write_text("".join(kept))
+                log.append({"level": "INFO",
+                            "message": f"Removed {OPENAI_BASE_URL_KEY} from ~/.codex/config.toml (no backup on record)"})
+            else:
+                log.append({"level": "INFO", "message": "~/.codex/config.toml did not point at petsitter"})
 
         log.append({"level": "INFO", "message": "Configuration restored"})
         return log

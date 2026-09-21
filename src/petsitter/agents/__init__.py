@@ -136,6 +136,23 @@ class Agent:
             message="All credentials found",
         )
 
+    def is_registered(self) -> bool:
+        """Whether this tool's own config currently points at petsitter.
+
+        A live feature check against the real config file -- never a memory
+        of what petsitter last did. registry.json's "registered" flag is
+        only ever a record of an action taken; it can go stale (a write that
+        silently failed, a file hand-edited back, a registry write that
+        never landed) while the config file itself is the one thing that is
+        actually true. See ``AgentManager.get_registered()``, which treats
+        this as the source of truth and demotes the registry to holding only
+        the undo data needed to restore the original value.
+
+        The default is conservative: report unregistered unless a subclass
+        knows its own config format well enough to check it.
+        """
+        return False
+
     def register(self, ctx: AgentContext) -> list[dict[str, str]]:
         """Swap the tool's config to point through petsitter.
 

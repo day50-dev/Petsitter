@@ -965,9 +965,18 @@ def create_app(
     app.add_route("/api/agents/{id}/trickset", agent_trickset, methods=["POST"])
 
     async def shutdown_server(request: Request) -> Response:
-        _restore_agents()
+        # Same should_exit path as Ctrl-C/SIGTERM/SIGHUP, not a hard os._exit --
+        # this used to kill the process 0.5s after the request regardless of
+        # what was in flight, which severed any live client mid-stream (a
+        # connected Claude Code session reading a response through this proxy
+        # would see the connection die mid-thinking-block and persist that as
+        # a corrupt empty block in its own transcript). Setting should_exit
+        # instead lets uvicorn's existing graceful-shutdown window drain
+        # in-flight requests, and _restore_agents() runs once, naturally,
+        # from the same post-run() cleanup path every other exit uses.
         handler.shutdown_all()
-        asyncio.create_task(_delayed_exit(0.5))
+        if _uvicorn_server is not None:
+            _uvicorn_server.should_exit = True
         return JSONResponse({"success": True, "message": "Shutting down"})
     app.add_route("/api/shutdown", shutdown_server, methods=["POST"])
 
@@ -981,13 +990,6 @@ def create_app(
     atexit.register(_on_exit)
 
     return app
-
-
-async def _delayed_exit(delay: float = 0.5) -> None:
-    """Exit the process after a short delay so the HTTP response can be sent."""
-    await asyncio.sleep(delay)
-    import os
-    os._exit(0)
 
 
 def _get_version() -> str:

@@ -167,9 +167,39 @@ main {
 .meter-label { color: var(--dim); }
 .recent-title { color: var(--title); font-weight: 600; margin-bottom: 4px; }
 .history-row { display: flex; gap: 10px; padding: 2px 0; }
+.history-row.expandable { cursor: pointer; }
+.history-row.expandable:hover .detail { color: var(--text); }
 .history-row .rid { color: var(--dim); min-width: 70px; }
 .history-row .detail { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .history-row.dim { color: var(--dim); }
+.history-args {
+  margin: 2px 0 6px 24px; padding: 8px 10px; background: #0d1320;
+  border: 1px solid var(--border); border-radius: 4px; color: var(--text);
+  max-height: 420px; overflow: auto; font-size: 12px;
+}
+.history-args.raw { white-space: pre-wrap; word-break: break-all; }
+.trunc-flag { color: var(--added); font-size: 11px; }
+.jt-row { padding: 1px 0; }
+.jt-children {
+  margin-left: 13px; padding-left: 9px; border-left: 1px solid var(--border);
+}
+.jt-key { color: var(--title); }
+.jt-punct { color: var(--dim); }
+.jt-toggle {
+  cursor: pointer; color: var(--dim); display: inline-block; width: 12px;
+  user-select: none; text-align: center;
+}
+.jt-toggle:hover { color: var(--accent); }
+.jt-summary { color: var(--dim); font-style: italic; margin-left: 2px; }
+.jt-null { color: var(--dim); }
+.jt-bool { color: var(--added); }
+.jt-num { color: var(--fired); }
+.jt-str { color: var(--text); }
+.jt-str-block {
+  white-space: pre-wrap; word-break: break-word; background: #0a0e17;
+  border: 1px solid var(--border); border-radius: 3px; padding: 6px 8px;
+  margin: 2px 0; color: var(--text); max-height: 240px; overflow: auto;
+}
 #requests-pane .body { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 8px 12px; }
 .req-chip { display: flex; align-items: center; gap: 6px; color: var(--dim); font-size: 12px; }
 .req-chip .rid { color: var(--text); }
@@ -294,7 +324,9 @@ function applyEvent(event) {
 
     const firedArgs = new Map();
     for (const call of event.fired || []) {
-      if (call && call.name && !firedArgs.has(call.name)) firedArgs.set(call.name, call.arguments || "");
+      if (call && call.name && !firedArgs.has(call.name)) {
+        firedArgs.set(call.name, {args: call.arguments || "", truncated: !!call.arguments_truncated});
+      }
     }
 
     const blamed = new Map(), reasons = new Map();
@@ -318,9 +350,11 @@ function applyEvent(event) {
       t[state] += 1;
       t.offered += 1;
       const by = blamed.get(name) || "";
+      const fa = firedArgs.get(name);
       t.history.unshift({
         request_id: rid, at: Date.now(), state, by,
-        reason: reasons.get(by) || "", args: firedArgs.get(name) || "", x_title: request.x_title,
+        reason: reasons.get(by) || "", args: fa ? fa.args : "",
+        argsTruncated: fa ? fa.truncated : false, x_title: request.x_title,
       });
       if (t.history.length > MAX_HISTORY) t.history.length = MAX_HISTORY;
       if (state === "fired") store.firedTotal += 1;
@@ -368,7 +402,79 @@ function collapseUnused(history) {
 
 // -- UI state -----------------------------------------------------------
 
-const ui = {selected: null, order: "seen", query: "", filtering: false, follow: true, raw: false};
+const ui = {selected: null, order: "seen", query: "", filtering: false, follow: true, raw: false, expanded: new Set(), collapsedPaths: new Set()};
+
+// -- argument tree --------------------------------------------------------
+//
+// Tool arguments are JSON, but a flat pretty-print buries the structure a
+// human actually wants to scan: which keys are there, how deep the nesting
+// goes, which value is the one long code blob worth reading in full. This
+// renders a real collapsible tree instead, with long string values (file
+// contents, diffs, scripts) broken out into their own readable block rather
+// than shown as a quoted, \n-escaped JSON string.
+
+const STRING_BLOCK_THRESHOLD = 60; // chars, or any newline, forces a block
+
+function renderScalar(value) {
+  if (value === null) return '<span class="jt-null">null</span>';
+  const t = typeof value;
+  if (t === "boolean") return `<span class="jt-bool">${value}</span>`;
+  if (t === "number") return `<span class="jt-num">${value}</span>`;
+  if (t === "string") {
+    if (value.length > STRING_BLOCK_THRESHOLD || value.includes("\n")) {
+      return `<div class="jt-str-block">${esc(value)}</div>`;
+    }
+    return `<span class="jt-str">"${esc(value)}"</span>`;
+  }
+  return esc(String(value));
+}
+
+function renderTree(value, path, entryKey) {
+  if (value === null || typeof value !== "object") return renderScalar(value);
+  const isArray = Array.isArray(value);
+  const entries = isArray ? value.map((v, i) => [i, v]) : Object.entries(value);
+  const open = isArray ? "[" : "{", close = isArray ? "]" : "}";
+  if (!entries.length) return `<span class="jt-punct">${open}${close}</span>`;
+
+  const fullPath = entryKey + "\u0000" + path;
+  const collapsed = ui.collapsedPaths.has(fullPath);
+  const toggle = `<span class="jt-toggle" data-path="${esc(fullPath)}">${collapsed ? "▸" : "▾"}</span>`;
+
+  if (collapsed) {
+    const label = isArray ? `${entries.length} item${entries.length === 1 ? "" : "s"}` : `${entries.length} key${entries.length === 1 ? "" : "s"}`;
+    return `${toggle}<span class="jt-punct">${open}</span><span class="jt-summary">${label}</span><span class="jt-punct">${close}</span>`;
+  }
+
+  const children = entries.map(([k, v]) => {
+    const childPath = path ? path + "." + k : String(k);
+    const keyLabel = isArray ? "" : `<span class="jt-key">${esc(k)}</span><span class="jt-punct">: </span>`;
+    return `<div class="jt-row">${keyLabel}${renderTree(v, childPath, entryKey)}</div>`;
+  }).join("");
+
+  return `${toggle}<span class="jt-punct">${open}</span>` +
+    `<div class="jt-children">${children}</div>` +
+    `<span class="jt-punct">${close}</span>`;
+}
+
+function renderArgsBlock(entryKey, raw, truncated) {
+  if (!raw) return "";
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    // A trailing cut mid-string/mid-object is expected when the publisher
+    // truncated the payload (it says so via `truncated`) -- say so plainly
+    // instead of an unexplained parse failure.
+    const note = truncated
+      ? "⚠ truncated before it reached this viewer -- not valid JSON as received\n\n"
+      : "";
+    return `<div class="history-args raw">${esc(note + raw)}</div>`;
+  }
+  if (parsed === null || typeof parsed !== "object") {
+    return `<div class="history-args">${renderScalar(parsed)}</div>`;
+  }
+  return `<div class="history-args">${renderTree(parsed, "", entryKey)}</div>`;
+}
 const rawLog = [];
 
 function matches(t, q) {
@@ -488,15 +594,41 @@ function renderDetail(t) {
     }
     const e = row.entry;
     const s = STATES[e.state];
+    const key = e.request_id + ":" + e.at;
+    const expandable = e.state === "fired" && !!e.args;
     let detail;
     if (e.state === "fired") detail = e.args || s.label;
     else if (e.state === "withheld" && e.by) detail = "withheld by " + e.by + (e.reason ? "  (" + e.reason + ")" : "");
     else detail = s.label;
     const dim = e.state === "unused" || e.state === "withheld" ? " dim" : "";
-    return `<div class="history-row${dim}"><span class="glyph ${s.cls}" style="min-width:14px">${s.glyph}</span>` +
-      `<span class="rid">${esc(e.request_id.slice(0, 8))}</span><span class="detail">${esc(detail)}</span></div>`;
+    const expCls = expandable ? " expandable" : "";
+    const caret = expandable ? (ui.expanded.has(key) ? "▾ " : "▸ ") : "";
+    const trunc = e.argsTruncated ? ' <span class="trunc-flag" title="truncated before it reached this viewer">⚠ truncated</span>' : "";
+    let out = `<div class="history-row${dim}${expCls}" data-key="${esc(key)}"><span class="glyph ${s.cls}" style="min-width:14px">${s.glyph}</span>` +
+      `<span class="rid">${esc(e.request_id.slice(0, 8))}</span><span class="detail">${caret}${esc(detail)}${trunc}</span></div>`;
+    if (expandable && ui.expanded.has(key)) {
+      out += renderArgsBlock(key, e.args, e.argsTruncated);
+    }
+    return out;
   }).join("");
   body.innerHTML = html;
+  body.querySelectorAll(".history-row.expandable").forEach(row => {
+    row.addEventListener("click", () => {
+      const key = row.dataset.key;
+      if (ui.expanded.has(key)) ui.expanded.delete(key);
+      else ui.expanded.add(key);
+      render();
+    });
+  });
+  body.querySelectorAll(".jt-toggle").forEach(el => {
+    el.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const path = el.dataset.path;
+      if (ui.collapsedPaths.has(path)) ui.collapsedPaths.delete(path);
+      else ui.collapsedPaths.add(path);
+      render();
+    });
+  });
 }
 
 function renderRequests() {

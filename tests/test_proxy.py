@@ -331,6 +331,50 @@ class TestProxyHandler:
             assert result["choices"][0]["message"]["content"] == "Hello! [modified]"
 
     @pytest.mark.asyncio
+    async def test_paused_forwards_untouched_without_running_tricks(self):
+        """While paused, no trick runs and the request reaches upstream as-is.
+
+        This is the actual kill switch for a client whose ANTHROPIC_BASE_URL
+        is already baked into its process environment: unregistering only
+        edits settings.json, which such a client never re-reads, so pausing
+        the proxy itself is the only thing that can make it stop interfering
+        with that client's traffic without killing the shared server.
+        """
+
+        class LoudTrick(Trick):
+            def pre_hook(self, context: list, params: dict) -> list:
+                raise AssertionError("pre_hook must not run while paused")
+
+            def post_hook(self, context: list) -> list:
+                raise AssertionError("post_hook must not run while paused")
+
+            def system_prompt(self, to_add: str) -> str:
+                raise AssertionError("system_prompt must not run while paused")
+
+        handler = ProxyHandler(
+            model_url="http://localhost:11434",
+            model_name="test-model",
+            tricks=[LoudTrick()],
+        )
+        handler.paused = True
+
+        mock_response = create_mock_response({
+            "choices": [{"message": {"role": "assistant", "content": "Hello!"}}]
+        })
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            payload = {"messages": [{"role": "user", "content": "(exportit:) still here"}]}
+            result = await handler.chat_completions(payload)
+
+        sent = mock_client.post.call_args.kwargs["json"]
+        assert sent["messages"][0]["content"] == "(exportit:) still here"
+        assert result["choices"][0]["message"]["content"] == "Hello!"
+
+    @pytest.mark.asyncio
     async def test_models(self):
         """Models endpoint proxies to upstream."""
         handler = ProxyHandler(

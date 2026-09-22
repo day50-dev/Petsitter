@@ -29,11 +29,19 @@
 <div class="try-btn btn" id="try-btn" onclick="togglePlayground()" title="Try it &mdash; send a message through this trickset">
 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.9 8.9 0 0 1-3.8-.9L3 21l1.9-5.1A8.4 8.4 0 0 1 12 3a8.4 8.4 0 0 1 9 8.5z"/></svg>
 </div>
+<div class="pause-btn btn" id="pause-btn" onclick="togglePause()" title="Pause: forward every request untouched, no tricks, without shutting petsitter down">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+</div>
 <div class="exit-btn btn" onclick="shutdownPetsitter()" title="Shutdown &amp; restore configuration">
 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
 </div>
 </div>
 </header>
+
+<div class="paused-banner" id="paused-banner">
+<span>&#9208; Paused &mdash; every request is being forwarded untouched. No trickset, no prompt keywords, nothing logged.</span>
+<button class="btn btn-sm" onclick="togglePause()">Resume</button>
+</div>
 
 <div class="ts-pills" id="ts-pills"></div>
 
@@ -448,6 +456,44 @@ async function fetchInfo() {
       document.getElementById('info-version').textContent = d.version || '--';
     } catch(e) { console.error(e); }
   }
+
+// ---- pause (kill switch) ----
+// Unregistering a client only edits ~/.claude/settings.json, which a client
+// process already running never re-reads -- so it cannot stop a session that
+// already has ANTHROPIC_BASE_URL baked into its environment from continuing
+// to send requests here. This is the thing that actually works for that
+// case: flip it and every request from every client, no matter what they
+// think their config is, gets forwarded untouched starting immediately.
+// Polled rather than fetched once so the banner stays honest if it's
+// toggled from another tab, the API directly, or another dashboard session.
+function renderPauseState(paused) {
+  const btn = document.getElementById('pause-btn');
+  const banner = document.getElementById('paused-banner');
+  if (btn) btn.classList.toggle('active', !!paused);
+  if (banner) banner.classList.toggle('visible', !!paused);
+}
+
+async function fetchPauseState() {
+  try {
+    const d = await fetchJSON('/api/pause');
+    renderPauseState(d.paused);
+  } catch(e) { console.error(e); }
+}
+
+async function togglePause() {
+  const btn = document.getElementById('pause-btn');
+  const nowPaused = !(btn && btn.classList.contains('active'));
+  try {
+    const d = await fetchJSON('/api/pause', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({paused: nowPaused})
+    });
+    renderPauseState(d.paused);
+    showToast(d.paused ? 'Paused — forwarding everything untouched' : 'Resumed — tricks are active again');
+  } catch(e) { showToast(e.message, true); }
+}
+
+setInterval(fetchPauseState, 5000);
 
 // ---- tricks ----
 let _dragName = null;
@@ -1708,7 +1754,7 @@ var initHash = parseHash();
 switchTab(initHash.tab);
 if (initHash.ts !== '_default') selectedTrickset = initHash.ts;
 trickSearch = (document.getElementById('trick-search').value || '').toLowerCase();
-fetchInfo(); fetchTricksets(); fetchAvailable(); fetchModels(); fetchAgents();
+fetchInfo(); fetchTricksets(); fetchAvailable(); fetchModels(); fetchAgents(); fetchPauseState();
 startLogStream();
 refreshIntro();
 </script>

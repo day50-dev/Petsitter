@@ -48,6 +48,28 @@ header .info .exit-btn {
   border-radius: 3px;
 }
 header .info .exit-btn:hover { color: #ff6b8a; background: #2a1a1a; }
+header .info .pause-btn {
+  color: #4a6572;
+  padding: 2px 5px;
+  border-radius: 3px;
+}
+header .info .pause-btn:hover { color: #ffb84d; background: #2a220f; }
+header .info .pause-btn.active { color: #ffb84d; background: #2a220f; }
+.paused-banner {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  margin-bottom: 14px;
+  background: #2a220f;
+  border: 1px solid #6b4f1a;
+  border-radius: 4px;
+  color: #ffb84d;
+  font-size: 13px;
+  font-weight: 500;
+}
+.paused-banner.visible { display: flex; }
+.paused-banner button { margin-left: auto; }
 header #info-listen { background: #0f1a2a; padding: 1px 6px; border-radius: 3px; color: #5a8ab5; font-family: monospace; }
 header .nav { display: flex; gap: 6px; align-items: center; }
 header .nav a {

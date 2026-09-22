@@ -235,6 +235,27 @@ async def test_prompt_keyword_short_circuits_anthropic_path_without_calling_upst
     assert result["stop_reason"] == "end_turn"
 
 
+@pytest.mark.asyncio
+async def test_paused_forwards_untouched_on_the_anthropic_path_too():
+    """The same kill switch, exercised through /v1/messages (Claude Code's path)."""
+    ts = Trickset("claude-code", SCHEMA, {"X-Title": "*", "Model": "claude*"}, [])
+    trick = ExportItLikeTrick()
+    ts.tricks = [trick]
+    ts.trick_enabled = [True]
+    ts.trick_keywords = [None]
+    handler = ProxyHandler("http://unused", "m", tricksets={"claude-code": ts})
+    handler.paused = True
+    req = _request(messages=[{"role": "user", "content": "(exportit:) please"}])
+    captured = {}
+    reply = {**ANTHROPIC_REPLY, "content": [{"type": "text", "text": "two files"}]}
+    with patch("httpx.AsyncClient", _mock_post(captured, reply=reply)):
+        result = await handler.messages(req, x_title="claude")
+    assert captured, "paused should still forward to upstream, just untouched"
+    sent_text = captured["body"]["messages"][0]["content"]
+    assert sent_text == "(exportit:) please", "prompt keyword must not be stripped while paused"
+    assert result["content"][0]["text"] == "two files"
+
+
 def test_streaming_replays_a_complete_reply_as_events():
     events = list(ac.stream_events(ANTHROPIC_REPLY))
     names = [e.split("event: ", 1)[1].split("\n", 1)[0] for e in events]

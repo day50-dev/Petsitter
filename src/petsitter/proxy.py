@@ -90,6 +90,16 @@ class ProxyHandler:
             ts.trick_enabled = [True] * len(tricks)
             self.tricksets["_default"] = ts
         self._run_counts: dict[str, int] = {}
+        # A live client's ANTHROPIC_BASE_URL is baked into its process
+        # environment at launch and never re-read, so unregistering (editing
+        # settings.json) cannot stop an already-running Claude Code session
+        # from continuing to send requests here. This flag is the actual
+        # kill switch for that case: while set, every request is forwarded
+        # untouched -- no prompt-keyword parsing, no trick pipeline -- so
+        # petsitter is functionally off for already-connected clients without
+        # needing to kill the shared process (which would drop everyone) or
+        # wait for each client to restart.
+        self.paused = False
         configure(self.model_url, self.model_name or "", self.api_key)
 
     @property
@@ -714,63 +724,66 @@ class ProxyHandler:
 
             log.info("%srequest: model=%r x_title=%r", request_tag(), payload.get("model", ""), x_title)
 
-            messages, pk_response = self._filter_prompt_keywords(messages, payload)
-            if pk_response:
-                return {
-                    "id": "chatcmpl-pk-" + str(int(time.time())),
-                    "object": "chat.completion",
-                    "created": int(time.time()),
-                    "model": "petsitter",
-                    "choices": [{
-                        "index": 0,
-                        "message": pk_response,
-                        "finish_reason": "stop",
-                    }],
-                    "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-                }
-
-            model = payload.get("model", "")
-            if model.startswith("trickset/"):
-                ts_name = model.split("/", 1)[1]
-                ts = self.tricksets.get(ts_name)
-                if ts:
-                    tricks = list(ts.tricks)
-                    matched_ts_name = ts.name
-                    ts_token = set_current_trickset(ts)
-                    log = get_logger()
-                    log.info(
-                        "%strickset '%s' selected via model %r -> %d tricks",
-                        request_tag(), ts.name, model, len(tricks),
-                    )
-                    trace_event("trickset", trickset=ts.name, via="model")
-                else:
-                    log.warning(
-                        "%smodel %r requested but trickset '%s' not loaded",
-                        request_tag(), model, ts_name,
-                    )
+            if self.paused:
+                log.info("%spetsitter paused; forwarding untouched, no tricks applied", request_tag())
             else:
-                tricks, matched_ts = self._matching_tricks(x_title, model)
-                if matched_ts is not None:
-                    matched_ts_name = matched_ts.name
-                    ts_token = set_current_trickset(matched_ts)
-                    log = get_logger()
-                    trace_event("trickset", trickset=matched_ts.name, via="filters")
-                elif not tricks:
-                    log.info("%sno trickset matched; no tricks active", request_tag())
+                messages, pk_response = self._filter_prompt_keywords(messages, payload)
+                if pk_response:
+                    return {
+                        "id": "chatcmpl-pk-" + str(int(time.time())),
+                        "object": "chat.completion",
+                        "created": int(time.time()),
+                        "model": "petsitter",
+                        "choices": [{
+                            "index": 0,
+                            "message": pk_response,
+                            "finish_reason": "stop",
+                        }],
+                        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                    }
 
-            tricks, messages = self._filter_tricks_by_keywords(tricks, messages)
-            self._start_tricks(tricks)
+                model = payload.get("model", "")
+                if model.startswith("trickset/"):
+                    ts_name = model.split("/", 1)[1]
+                    ts = self.tricksets.get(ts_name)
+                    if ts:
+                        tricks = list(ts.tricks)
+                        matched_ts_name = ts.name
+                        ts_token = set_current_trickset(ts)
+                        log = get_logger()
+                        log.info(
+                            "%strickset '%s' selected via model %r -> %d tricks",
+                            request_tag(), ts.name, model, len(tricks),
+                        )
+                        trace_event("trickset", trickset=ts.name, via="model")
+                    else:
+                        log.warning(
+                            "%smodel %r requested but trickset '%s' not loaded",
+                            request_tag(), model, ts_name,
+                        )
+                else:
+                    tricks, matched_ts = self._matching_tricks(x_title, model)
+                    if matched_ts is not None:
+                        matched_ts_name = matched_ts.name
+                        ts_token = set_current_trickset(matched_ts)
+                        log = get_logger()
+                        trace_event("trickset", trickset=matched_ts.name, via="filters")
+                    elif not tricks:
+                        log.info("%sno trickset matched; no tricks active", request_tag())
 
-            system_prompt = ""
-            if messages and messages[0].get("role") == "system":
-                system_prompt = messages[0].get("content", "")
-                messages = messages[1:]
+                tricks, messages = self._filter_tricks_by_keywords(tricks, messages)
+                self._start_tricks(tricks)
 
-            new_system_prompt = self._apply_system_prompt_tricks(system_prompt, tricks)
-            if new_system_prompt:
-                messages = [{"role": "system", "content": new_system_prompt}] + messages
+                system_prompt = ""
+                if messages and messages[0].get("role") == "system":
+                    system_prompt = messages[0].get("content", "")
+                    messages = messages[1:]
 
-            messages = self._apply_pre_hooks(messages, payload, tricks)
+                new_system_prompt = self._apply_system_prompt_tricks(system_prompt, tricks)
+                if new_system_prompt:
+                    messages = [{"role": "system", "content": new_system_prompt}] + messages
+
+                messages = self._apply_pre_hooks(messages, payload, tricks)
 
             if upstream_request_url:
                 upstream_payload = build_upstream_payload(
@@ -898,20 +911,22 @@ class ProxyHandler:
         # OpenAI path. This was missing here, so a prompt keyword like
         # (exportit:) typed in Claude Code -- which talks to /v1/messages,
         # not /v1/chat/completions -- arrived as literal text and never
-        # dispatched to any trick.
-        messages, pk_response = self._filter_prompt_keywords(messages, payload)
-        if pk_response:
-            text = pk_response.get("content") or ""
-            return {
-                "id": "msg_pk-" + str(int(time.time())),
-                "type": "message",
-                "role": "assistant",
-                "model": payload.get("model", ""),
-                "content": [{"type": "text", "text": text}],
-                "stop_reason": "end_turn",
-                "stop_sequence": None,
-                "usage": {"input_tokens": 0, "output_tokens": 0},
-            }
+        # dispatched to any trick. Skipped entirely while paused, same as
+        # every other trick mechanism below.
+        if not self.paused:
+            messages, pk_response = self._filter_prompt_keywords(messages, payload)
+            if pk_response:
+                text = pk_response.get("content") or ""
+                return {
+                    "id": "msg_pk-" + str(int(time.time())),
+                    "type": "message",
+                    "role": "assistant",
+                    "model": payload.get("model", ""),
+                    "content": [{"type": "text", "text": text}],
+                    "stop_reason": "end_turn",
+                    "stop_sequence": None,
+                    "usage": {"input_tokens": 0, "output_tokens": 0},
+                }
 
         # The pipeline reads and writes this dict, so tricks that gate tools see
         # and edit exactly the list that will be sent.
@@ -935,30 +950,33 @@ class ProxyHandler:
         tricks: list[Trick] = []
         log = get_logger()
         try:
-            model = payload.get("model", "")
-            tricks, matched_ts = self._matching_tricks(x_title, model)
-            if matched_ts is not None:
-                ts_token = set_current_trickset(matched_ts)
-                log = get_logger()
-                log.info("%s/v1/messages -> trickset '%s' (%d tricks)",
-                         request_tag(), matched_ts.name, len(tricks))
-                trace_event("trickset", trickset=matched_ts.name, via="filters")
-            elif not tricks:
-                log.info("%s/v1/messages: no trickset matched", request_tag())
+            if self.paused:
+                log.info("%s/v1/messages: petsitter paused; forwarding untouched, no tricks applied", request_tag())
+            else:
+                model = payload.get("model", "")
+                tricks, matched_ts = self._matching_tricks(x_title, model)
+                if matched_ts is not None:
+                    ts_token = set_current_trickset(matched_ts)
+                    log = get_logger()
+                    log.info("%s/v1/messages -> trickset '%s' (%d tricks)",
+                             request_tag(), matched_ts.name, len(tricks))
+                    trace_event("trickset", trickset=matched_ts.name, via="filters")
+                elif not tricks:
+                    log.info("%s/v1/messages: no trickset matched", request_tag())
 
-            tricks, messages = self._filter_tricks_by_keywords(tricks, messages)
-            self._start_tricks(tricks)
+                tricks, messages = self._filter_tricks_by_keywords(tricks, messages)
+                self._start_tricks(tricks)
 
-            system_prompt = ""
-            if messages and messages[0].get("role") == "system":
-                system_prompt = messages[0].get("content", "")
-                messages = messages[1:]
-            new_system_prompt = self._apply_system_prompt_tricks(system_prompt, tricks)
-            if new_system_prompt:
-                messages = [{"role": "system", "content": new_system_prompt}] + messages
+                system_prompt = ""
+                if messages and messages[0].get("role") == "system":
+                    system_prompt = messages[0].get("content", "")
+                    messages = messages[1:]
+                new_system_prompt = self._apply_system_prompt_tricks(system_prompt, tricks)
+                if new_system_prompt:
+                    messages = [{"role": "system", "content": new_system_prompt}] + messages
 
-            shadow["messages"] = messages
-            messages = self._apply_pre_hooks(messages, shadow, tricks)
+                shadow["messages"] = messages
+                messages = self._apply_pre_hooks(messages, shadow, tricks)
 
             upstream = ANTHROPIC_UPSTREAM.rstrip("/")
             body = ac.to_anthropic_payload(messages, shadow.get("tools") or [], payload)

@@ -54,7 +54,9 @@ DEFAULT_SOCKET_PATH = LOG_DIR / "toolmon.sock"
 SCHEMA_VERSION = 1
 MAX_DATAGRAM = 60_000
 DESCRIPTION_LIMIT = 200
-ARGUMENTS_LIMIT = 400
+# Generous: this is what the viewer expands into when you click a fired call.
+# 400 chars was too short to show a real tool invocation's arguments.
+ARGUMENTS_LIMIT = 4000
 MAX_ATTRIBUTIONS = 40
 MAX_NOTES = 40
 
@@ -272,11 +274,19 @@ class ToolMonitorTrick(Trick):
                 if not isinstance(call, dict):
                     continue
                 function = call.get("function") or {}
-                fired.append({
+                arguments = str(function.get("arguments", ""))
+                entry = {
                     "name": function.get("name", ""),
                     "id": call.get("id", ""),
-                    "arguments": str(function.get("arguments", ""))[:ARGUMENTS_LIMIT],
-                })
+                    "arguments": arguments[:ARGUMENTS_LIMIT],
+                }
+                # Cutting a JSON string at a fixed length almost always leaves it
+                # unparseable. Say so explicitly rather than let the viewer guess
+                # from a JSON.parse failure whether this was truncation or a
+                # genuinely malformed payload.
+                if len(arguments) > ARGUMENTS_LIMIT:
+                    entry["arguments_truncated"] = True
+                fired.append(entry)
 
         self._emit({
             "event": "response",

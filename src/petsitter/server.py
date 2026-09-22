@@ -679,8 +679,29 @@ def create_app(
     app.add_route("/v1/messages", anthropic_messages, methods=["POST"])
 
     async def health(request: Request) -> Response:
-        return JSONResponse({"status": "ok"})
+        return JSONResponse({"status": "ok", "paused": handler.paused})
     app.add_route("/health", health, methods=["GET"])
+
+    async def get_pause_state(request: Request) -> Response:
+        return JSONResponse({"paused": handler.paused})
+    app.add_route("/api/pause", get_pause_state, methods=["GET"])
+
+    async def set_pause_state(request: Request) -> Response:
+        # The real kill switch for an already-running client: unregistering
+        # only edits settings.json, which a live process never re-reads, so
+        # it cannot stop a session that already has ANTHROPIC_BASE_URL baked
+        # into its environment from continuing to send requests here. This
+        # flips a flag the proxy checks on every request instead, so it takes
+        # effect immediately for every client already pointed at petsitter,
+        # without killing the shared server process.
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        paused = bool(body.get("paused", True))
+        handler.paused = paused
+        return JSONResponse({"paused": handler.paused})
+    app.add_route("/api/pause", set_pause_state, methods=["POST"])
 
     # ----- /p/ path-prefix transparent proxy -----
     # http://localhost:8080/p/<host>/<rest> proxies to https://<host>/<rest>

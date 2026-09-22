@@ -142,7 +142,37 @@ class TestServerEndpoints:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             response = await ac.get("/health")
             assert response.status_code == 200
-            assert response.json() == {"status": "ok"}
+            assert response.json() == {"status": "ok", "paused": False}
+
+    @pytest.mark.asyncio
+    async def test_pause_endpoint_toggles_and_takes_effect_immediately(self):
+        """/api/pause is the kill switch for a client whose env is already baked in.
+
+        Unregistering only edits settings.json, which a live client process
+        never re-reads, so this flag -- flipped over HTTP and checked on
+        every request -- is what actually stops such a client's traffic from
+        being touched, without killing the shared server.
+        """
+        from httpx import AsyncClient, ASGITransport
+
+        app = create_app(
+            model_url="http://localhost:11434",
+            model_name="test-model",
+            api_key="",
+            trick_paths=[],
+        )
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            assert (await ac.get("/api/pause")).json() == {"paused": False}
+
+            response = await ac.post("/api/pause", json={"paused": True})
+            assert response.status_code == 200
+            assert response.json() == {"paused": True}
+            assert (await ac.get("/health")).json()["paused"] is True
+
+            response = await ac.post("/api/pause", json={"paused": False})
+            assert response.json() == {"paused": False}
+            assert (await ac.get("/health")).json()["paused"] is False
 
     @pytest.mark.asyncio
     async def test_loaded_trick_persists_across_restart(self, monkeypatch, tmp_path):

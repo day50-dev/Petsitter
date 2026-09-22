@@ -207,6 +207,34 @@ async def test_trickset_filters_route_anthropic_traffic():
     assert trick.seen_messages is not None, "the claude* trickset should have matched"
 
 
+class ExportItLikeTrick(Trick):
+    """Stands in for exportit.py: short-circuits via a prompt keyword."""
+
+    prompt_keyword = "exportit"
+
+    def handle_prompt_keyword(self, request, messages=None, payload=None):
+        return {"role": "assistant", "content": f"exported ({len(messages or [])} messages)"}
+
+
+@pytest.mark.asyncio
+async def test_prompt_keyword_short_circuits_anthropic_path_without_calling_upstream():
+    ts = Trickset("claude-code", SCHEMA, {"X-Title": "*", "Model": "claude*"}, [])
+    trick = ExportItLikeTrick()
+    ts.tricks = [trick]
+    ts.trick_enabled = [True]
+    ts.trick_keywords = [None]
+    handler = ProxyHandler("http://unused", "m", tricksets={"claude-code": ts})
+    req = _request(messages=[{"role": "user", "content": "(exportit:) please"}])
+    captured = {}
+    with patch("httpx.AsyncClient", _mock_post(captured)):
+        result = await handler.messages(req, x_title="claude")
+    assert not captured, "upstream should never be called when a prompt keyword short-circuits"
+    assert result["type"] == "message"
+    assert result["role"] == "assistant"
+    assert "exported" in result["content"][0]["text"]
+    assert result["stop_reason"] == "end_turn"
+
+
 def test_streaming_replays_a_complete_reply_as_events():
     events = list(ac.stream_events(ANTHROPIC_REPLY))
     names = [e.split("event: ", 1)[1].split("\n", 1)[0] for e in events]

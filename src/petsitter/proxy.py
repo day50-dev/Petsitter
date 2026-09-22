@@ -893,6 +893,26 @@ class ProxyHandler:
         rid = new_request_id()
         rid_token = set_request_id(rid)
         messages, tools = ac.to_openai_messages(payload)
+
+        # Same (keyword:request) short-circuit chat_completions() gives the
+        # OpenAI path. This was missing here, so a prompt keyword like
+        # (exportit:) typed in Claude Code -- which talks to /v1/messages,
+        # not /v1/chat/completions -- arrived as literal text and never
+        # dispatched to any trick.
+        messages, pk_response = self._filter_prompt_keywords(messages, payload)
+        if pk_response:
+            text = pk_response.get("content") or ""
+            return {
+                "id": "msg_pk-" + str(int(time.time())),
+                "type": "message",
+                "role": "assistant",
+                "model": payload.get("model", ""),
+                "content": [{"type": "text", "text": text}],
+                "stop_reason": "end_turn",
+                "stop_sequence": None,
+                "usage": {"input_tokens": 0, "output_tokens": 0},
+            }
+
         # The pipeline reads and writes this dict, so tricks that gate tools see
         # and edit exactly the list that will be sent.
         shadow: dict[str, Any] = {

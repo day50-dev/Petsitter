@@ -94,6 +94,19 @@ def to_openai_messages(payload: dict) -> tuple[list[dict], list[dict]]:
             continue
 
         message: dict[str, Any] = {"role": role, "content": text}
+        # Extended thinking (and redacted_thinking) blocks aren't text and
+        # aren't a tool call, so a trick has no reason to see them -- but if
+        # this assistant turn was followed by tool use, Anthropic requires
+        # the thinking blocks that produced it to come back unmodified on the
+        # next request, or it 400s. Stashed here under a private key so
+        # to_anthropic_payload can put them back exactly as received; no
+        # trick reads or writes this key, so nothing a trick does can corrupt
+        # it, and a trick that never runs (paused) never sees the round trip
+        # to begin with.
+        thinking_blocks = [b for b in content
+                           if isinstance(b, dict) and b.get("type") in ("thinking", "redacted_thinking")]
+        if thinking_blocks:
+            message["_thinking_blocks"] = thinking_blocks
         if tool_uses:
             message["tool_calls"] = [{
                 "id": b.get("id", ""),
@@ -149,8 +162,11 @@ def to_anthropic_payload(messages: list[dict], tools: list[dict], original: dict
                 "content": message.get("content") or "",
             }]})
             continue
+        thinking_blocks = message.get("_thinking_blocks")
         if role == "assistant" and message.get("tool_calls"):
-            blocks: list[dict] = []
+            # Thinking blocks must lead a tool-using turn, exactly as Anthropic
+            # sent them, or the API 400s on the next request.
+            blocks: list[dict] = list(thinking_blocks) if thinking_blocks else []
             if message.get("content"):
                 blocks.append({"type": "text", "text": message["content"]})
             for call in message["tool_calls"]:
@@ -161,6 +177,12 @@ def to_anthropic_payload(messages: list[dict], tools: list[dict], original: dict
                     args = {}
                 blocks.append({"type": "tool_use", "id": call.get("id", ""),
                                "name": fn.get("name", ""), "input": args})
+            converted.append({"role": "assistant", "content": blocks})
+            continue
+        if role == "assistant" and thinking_blocks:
+            blocks = list(thinking_blocks)
+            if message.get("content"):
+                blocks.append({"type": "text", "text": message["content"]})
             converted.append({"role": "assistant", "content": blocks})
             continue
         converted.append({"role": role or "user", "content": message.get("content") or ""})
@@ -278,6 +300,26 @@ def stream_events(response: dict):
             yield _sse("content_block_delta", {"type": "content_block_delta", "index": index,
                                                "delta": {"type": "input_json_delta",
                                                          "partial_json": json.dumps(block.get("input") or {})}})
+        elif kind == "thinking":
+            # A real streamed thinking block always starts empty and is built
+            # up from thinking_delta (then signature_delta) events -- a client
+            # does not read text out of content_block_start for this type, the
+            # same way it never does for text or tool_use above. Putting the
+            # finished thinking text straight into content_block_start (the
+            # old `else` branch, still correct for redacted_thinking below)
+            # meant every client that reconstructs the block purely from
+            # deltas recorded it as empty -- the empty-thinking-block
+            # corruption seen in Claude Code's own session transcripts.
+            yield _sse("content_block_start", {"type": "content_block_start", "index": index,
+                                               "content_block": {"type": "thinking", "thinking": ""}})
+            thinking_text = block.get("thinking", "")
+            if thinking_text:
+                yield _sse("content_block_delta", {"type": "content_block_delta", "index": index,
+                                                   "delta": {"type": "thinking_delta", "thinking": thinking_text}})
+            signature = block.get("signature")
+            if signature:
+                yield _sse("content_block_delta", {"type": "content_block_delta", "index": index,
+                                                   "delta": {"type": "signature_delta", "signature": signature}})
         else:
             yield _sse("content_block_start", {"type": "content_block_start",
                                                "index": index, "content_block": block})

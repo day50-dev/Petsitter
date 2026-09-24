@@ -892,3 +892,75 @@ class TestFilterPromptKeywords:
         modified, response = handler._filter_prompt_keywords(messages)
         assert response["content"] == "got: hello (world) foo"
         assert modified[0]["content"] == "prefix suffix"
+
+    def test_buried_keyword_from_earlier_turn_is_stripped(self):
+        """(keyword: ...) is petsitter's own syntax, a layer above the model --
+        it must never reach the model, whether it's in the live turn or one
+        buried earlier in history that the client keeps resending. The live
+        turn here has no keyword at all, so on old behavior this whole
+        function would have been a no-op; now it should still reach back and
+        clean the older turn.
+        """
+        class PromptTrick(Trick):
+            prompt_keyword = "exportit"
+            calls = 0
+            def handle_prompt_keyword(self, request: str, messages: list | None = None, payload: dict | None = None) -> dict | None:
+                PromptTrick.calls += 1
+                return {"role": "assistant", "content": "exported"}
+
+        handler = ProxyHandler("http://localhost:11434", "test", tricks=[PromptTrick()])
+        messages = [
+            {"role": "user", "content": "(exportit) please"},
+            {"role": "assistant", "content": "exported"},
+            {"role": "user", "content": "thanks, what's next"},
+        ]
+        modified, response = handler._filter_prompt_keywords(messages)
+        assert response is None  # the live turn has no keyword, nothing to short-circuit
+        assert modified[0]["content"] == "please"  # syntax gone, rest of the text kept
+        assert modified[2]["content"] == "thanks, what's next"  # live turn untouched
+        assert PromptTrick.calls == 0  # never re-fired for the buried occurrence
+
+    def test_buried_keyword_cleaned_up_on_the_turn_after_it_fired(self):
+        """A short-circuit returns immediately, so on the turn the keyword
+        actually fires, only the live occurrence is touched -- there's no
+        need to scan further back in that same call. The client then resends
+        that same history plus a new reply on the *next* turn; by then the
+        old keyword is no longer live, so it should get cleaned then."""
+        class PromptTrick(Trick):
+            prompt_keyword = "cmd"
+            def handle_prompt_keyword(self, request: str, messages: list | None = None, payload: dict | None = None) -> dict | None:
+                return {"role": "assistant", "content": f"handled: {request}"}
+
+        handler = ProxyHandler("http://localhost:11434", "test", tricks=[PromptTrick()])
+
+        turn1 = [{"role": "user", "content": "(cmd: old one)"}]
+        modified1, response1 = handler._filter_prompt_keywords(turn1)
+        assert response1 == {"role": "assistant", "content": "handled: old one"}
+        assert modified1[0]["content"] == ""
+
+        # The client stores its own copy of what it actually sent, unstripped,
+        # and appends the reply plus a new ordinary message.
+        turn2 = [
+            {"role": "user", "content": "(cmd: old one)"},
+            {"role": "assistant", "content": "handled: old one"},
+            {"role": "user", "content": "thanks, what's next"},
+        ]
+        modified2, response2 = handler._filter_prompt_keywords(turn2)
+        assert response2 is None
+        assert modified2[0]["content"] == ""  # now buried, and cleaned
+        assert modified2[2]["content"] == "thanks, what's next"
+
+    def test_buried_unrecognized_keyword_left_alone(self):
+        """Only petsitter's own known keywords get scrubbed from old turns --
+        an unrecognized paren might just be something the user typed, and
+        there's no trick's handler that could have run for it anyway."""
+        handler = ProxyHandler("http://localhost:11434", "test")
+        messages = [
+            {"role": "user", "content": "(notatrick: whatever)"},
+            {"role": "assistant", "content": "ok"},
+            {"role": "user", "content": "normal follow-up"},
+        ]
+        modified, response = handler._filter_prompt_keywords(messages)
+        assert response is None
+        assert modified[0]["content"] == "(notatrick: whatever)"
+        assert modified[0]["role"] != "system"  # no note injected for a buried turn

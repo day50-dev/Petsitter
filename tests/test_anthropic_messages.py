@@ -235,25 +235,13 @@ async def test_prompt_keyword_short_circuits_anthropic_path_without_calling_upst
     assert result["stop_reason"] == "end_turn"
 
 
-@pytest.mark.asyncio
-async def test_paused_forwards_untouched_on_the_anthropic_path_too():
-    """The same kill switch, exercised through /v1/messages (Claude Code's path)."""
-    ts = Trickset("claude-code", SCHEMA, {"X-Title": "*", "Model": "claude*"}, [])
-    trick = ExportItLikeTrick()
-    ts.tricks = [trick]
-    ts.trick_enabled = [True]
-    ts.trick_keywords = [None]
-    handler = ProxyHandler("http://unused", "m", tricksets={"claude-code": ts})
-    handler.paused = True
-    req = _request(messages=[{"role": "user", "content": "(exportit:) please"}])
-    captured = {}
-    reply = {**ANTHROPIC_REPLY, "content": [{"type": "text", "text": "two files"}]}
-    with patch("httpx.AsyncClient", _mock_post(captured, reply=reply)):
-        result = await handler.messages(req, x_title="claude")
-    assert captured, "paused should still forward to upstream, just untouched"
-    sent_text = captured["body"]["messages"][0]["content"]
-    assert sent_text == "(exportit:) please", "prompt keyword must not be stripped while paused"
-    assert result["content"][0]["text"] == "two files"
+# Pause is no longer this method's concern: the server routes a paused
+# request straight to Anthropic before ProxyHandler.messages() is ever
+# called, so there is no translate/rebuild round trip left to skip tricks
+# inside of. See test_server.py::test_paused_v1_messages_is_a_raw_passthrough
+# for coverage of that behavior -- and why "paused" now means the request
+# never reaches to_openai_messages/to_anthropic_payload/stream_events at all,
+# not just that tricks don't run over it.
 
 
 def test_streaming_replays_a_complete_reply_as_events():
@@ -264,3 +252,63 @@ def test_streaming_replays_a_complete_reply_as_events():
     for chunk in events:
         payload = chunk.split("data: ", 1)[1].strip()
         json.loads(payload)   # every frame must be valid JSON
+
+
+def _events_by_name(reply: dict) -> list[tuple[str, dict]]:
+    out = []
+    for chunk in ac.stream_events(reply):
+        name = chunk.split("event: ", 1)[1].split("\n", 1)[0]
+        data = json.loads(chunk.split("data: ", 1)[1].strip())
+        out.append((name, data))
+    return out
+
+
+def test_streaming_a_thinking_block_carries_its_text_in_a_delta():
+    """A client reconstructs block content purely from deltas, the same way
+    it does for text and tool_use -- a thinking block whose text only ever
+    appears in content_block_start (the old behavior) is recorded as empty by
+    any such client, which is exactly the empty-thinking-block corruption
+    this reply format produced in every streamed, non-paused conversation.
+    """
+    reply = {**ANTHROPIC_REPLY, "content": [
+        {"type": "thinking", "thinking": "mulling it over", "signature": "sig-abc"},
+        {"type": "text", "text": "done"},
+    ]}
+    events = _events_by_name(reply)
+
+    start = next(d for n, d in events if n == "content_block_start" and d["content_block"]["type"] == "thinking")
+    assert start["content_block"]["thinking"] == "", \
+        "a real thinking block always starts empty; text must arrive via thinking_delta"
+
+    deltas = [d["delta"] for n, d in events if n == "content_block_delta" and d["index"] == start["index"]]
+    assert {"type": "thinking_delta", "thinking": "mulling it over"} in deltas
+    assert {"type": "signature_delta", "signature": "sig-abc"} in deltas
+
+
+def test_thinking_blocks_survive_history_round_trip_before_tool_use():
+    """Anthropic requires the thinking blocks that preceded a tool_use to come
+    back unmodified on the next request when extended thinking is on, or it
+    400s. Petsitter used to lose them entirely converting to and from the
+    OpenAI shape tricks are written against.
+    """
+    payload = {
+        "model": "claude-sonnet-4",
+        "messages": [
+            {"role": "user", "content": "go look"},
+            {"role": "assistant", "content": [
+                {"type": "thinking", "thinking": "should check the docs", "signature": "sig-1"},
+                {"type": "tool_use", "id": "tu_1", "name": "look", "input": {}},
+            ]},
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "tu_1", "content": "found it"}]},
+        ],
+    }
+    messages, tools = ac.to_openai_messages(payload)
+    rebuilt = ac.to_anthropic_payload(messages, tools, payload)
+
+    assistant_turn = next(m for m in rebuilt["messages"] if m["role"] == "assistant")
+    kinds = [b["type"] for b in assistant_turn["content"]]
+    assert kinds[0] == "thinking", "the thinking block must lead, exactly as Anthropic requires"
+    thinking_block = assistant_turn["content"][0]
+    assert thinking_block["thinking"] == "should check the docs"
+    assert thinking_block["signature"] == "sig-1"

@@ -407,12 +407,26 @@ class ProxyHandler:
                     registry[kw.lower()] = (t, ts)
 
         modified = list(messages)
+        # (keyword: request) is petsitter's own control syntax -- a layer above
+        # the inference provider, the same way a lower OSI layer's framing never
+        # shows up to the layer above it. It must never reach the model, on
+        # this turn or any later one. Only the most recent user message with
+        # text is "live": it can actually fire a trick's handler and
+        # short-circuit the request. Every older user message still gets
+        # scanned on every single request (the client resends full history
+        # every time), but only to strip petsitter's own syntax back out --
+        # never to re-run a handler, since that turn already ran once for
+        # real when it was live.
+        is_live = True
         for msg in reversed(modified):
             if msg.get("role") != "user":
                 continue
             content = self._message_text(msg)
             if content is None:
                 continue
+
+            this_is_live = is_live
+            is_live = False
 
             patterns = self._find_prompt_keyword_patterns(content)
             if not patterns:
@@ -425,7 +439,7 @@ class ProxyHandler:
                         "end": len(content),
                     }]
                 else:
-                    break
+                    continue
 
             recognized: list[dict] = []
             unrecognized: list[str] = []
@@ -434,22 +448,34 @@ class ProxyHandler:
                 entry = registry.get(keyword)
                 if entry:
                     recognized.append(p | {"trick": entry[0], "trickset": entry[1]})
-                    entry[1].get_logger().info(
-                        "%sprompt keyword %r recognized -> %s",
-                        request_tag(), keyword, type(entry[0]).__name__,
-                    )
-                else:
+                    if this_is_live:
+                        entry[1].get_logger().info(
+                            "%sprompt keyword %r recognized -> %s",
+                            request_tag(), keyword, type(entry[0]).__name__,
+                        )
+                elif this_is_live:
                     unrecognized.append(keyword)
                     get_logger().info("%sprompt keyword %r unrecognized; ignored", request_tag(), keyword)
+                # else: an unrecognized paren in a buried turn is just a paren --
+                # only petsitter's own known keywords get scrubbed back there.
 
-            # Strip all keyword patterns from content
-            for p in reversed(patterns):
+            if not this_is_live and not recognized:
+                continue
+
+            # Strip patterns from content: all of them on the live turn
+            # (including unrecognized ones, which get a system-prompt note
+            # instead), only the recognized ones on an older turn.
+            strip = patterns if this_is_live else recognized
+            for p in reversed(strip):
                 content = content[:p["start"]] + content[p["end"]:]
-            content = content.strip()
             content = re.sub(r' +', " ", content).strip()
             self._set_message_text(msg, content)
 
-            # Inject notices for unrecognized keywords
+            if not this_is_live:
+                continue
+
+            # Inject notices for unrecognized keywords -- only meaningful on
+            # the live turn, since it's the only one about to get a real reply.
             if unrecognized:
                 notes = "Note: unrecognized prompt keyword" + \
                         ("s" if len(unrecognized) > 1 else "") + \
@@ -481,8 +507,6 @@ class ProxyHandler:
                     )
                     trace_event("prompt_keyword", trick, keyword=keyword, short_circuit=True)
                     return modified, response
-
-            break
 
         return modified, None
 
@@ -900,6 +924,10 @@ class ProxyHandler:
         against, run through the same trickset matching and hooks as any other
         request, then translated back and sent to Anthropic. The caller's own
         credentials are forwarded, so petsitter never needs a key of its own.
+
+        Never called while paused: the server routes a paused request straight
+        to Anthropic before it reaches here, so this method can assume the
+        trick pipeline actually runs.
         """
         from petsitter import anthropic_compat as ac
 
@@ -911,22 +939,20 @@ class ProxyHandler:
         # OpenAI path. This was missing here, so a prompt keyword like
         # (exportit:) typed in Claude Code -- which talks to /v1/messages,
         # not /v1/chat/completions -- arrived as literal text and never
-        # dispatched to any trick. Skipped entirely while paused, same as
-        # every other trick mechanism below.
-        if not self.paused:
-            messages, pk_response = self._filter_prompt_keywords(messages, payload)
-            if pk_response:
-                text = pk_response.get("content") or ""
-                return {
-                    "id": "msg_pk-" + str(int(time.time())),
-                    "type": "message",
-                    "role": "assistant",
-                    "model": payload.get("model", ""),
-                    "content": [{"type": "text", "text": text}],
-                    "stop_reason": "end_turn",
-                    "stop_sequence": None,
-                    "usage": {"input_tokens": 0, "output_tokens": 0},
-                }
+        # dispatched to any trick.
+        messages, pk_response = self._filter_prompt_keywords(messages, payload)
+        if pk_response:
+            text = pk_response.get("content") or ""
+            return {
+                "id": "msg_pk-" + str(int(time.time())),
+                "type": "message",
+                "role": "assistant",
+                "model": payload.get("model", ""),
+                "content": [{"type": "text", "text": text}],
+                "stop_reason": "end_turn",
+                "stop_sequence": None,
+                "usage": {"input_tokens": 0, "output_tokens": 0},
+            }
 
         # The pipeline reads and writes this dict, so tricks that gate tools see
         # and edit exactly the list that will be sent.
@@ -950,33 +976,30 @@ class ProxyHandler:
         tricks: list[Trick] = []
         log = get_logger()
         try:
-            if self.paused:
-                log.info("%s/v1/messages: petsitter paused; forwarding untouched, no tricks applied", request_tag())
-            else:
-                model = payload.get("model", "")
-                tricks, matched_ts = self._matching_tricks(x_title, model)
-                if matched_ts is not None:
-                    ts_token = set_current_trickset(matched_ts)
-                    log = get_logger()
-                    log.info("%s/v1/messages -> trickset '%s' (%d tricks)",
-                             request_tag(), matched_ts.name, len(tricks))
-                    trace_event("trickset", trickset=matched_ts.name, via="filters")
-                elif not tricks:
-                    log.info("%s/v1/messages: no trickset matched", request_tag())
+            model = payload.get("model", "")
+            tricks, matched_ts = self._matching_tricks(x_title, model)
+            if matched_ts is not None:
+                ts_token = set_current_trickset(matched_ts)
+                log = get_logger()
+                log.info("%s/v1/messages -> trickset '%s' (%d tricks)",
+                         request_tag(), matched_ts.name, len(tricks))
+                trace_event("trickset", trickset=matched_ts.name, via="filters")
+            elif not tricks:
+                log.info("%s/v1/messages: no trickset matched", request_tag())
 
-                tricks, messages = self._filter_tricks_by_keywords(tricks, messages)
-                self._start_tricks(tricks)
+            tricks, messages = self._filter_tricks_by_keywords(tricks, messages)
+            self._start_tricks(tricks)
 
-                system_prompt = ""
-                if messages and messages[0].get("role") == "system":
-                    system_prompt = messages[0].get("content", "")
-                    messages = messages[1:]
-                new_system_prompt = self._apply_system_prompt_tricks(system_prompt, tricks)
-                if new_system_prompt:
-                    messages = [{"role": "system", "content": new_system_prompt}] + messages
+            system_prompt = ""
+            if messages and messages[0].get("role") == "system":
+                system_prompt = messages[0].get("content", "")
+                messages = messages[1:]
+            new_system_prompt = self._apply_system_prompt_tricks(system_prompt, tricks)
+            if new_system_prompt:
+                messages = [{"role": "system", "content": new_system_prompt}] + messages
 
-                shadow["messages"] = messages
-                messages = self._apply_pre_hooks(messages, shadow, tricks)
+            shadow["messages"] = messages
+            messages = self._apply_pre_hooks(messages, shadow, tricks)
 
             upstream = ANTHROPIC_UPSTREAM.rstrip("/")
             body = ac.to_anthropic_payload(messages, shadow.get("tools") or [], payload)

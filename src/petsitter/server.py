@@ -26,10 +26,11 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from petsitter.agent_manager import AgentManager
 from petsitter.gui_routes import register_gui_routes
-from petsitter.proxy import ProxyHandler
+from petsitter.proxy import ANTHROPIC_UPSTREAM, ProxyHandler
 from petsitter.trick import (
     configure,
     configure_modelset,
+    get_model_config,
 )
 from petsitter.trickset import SCHEMA, Trickset, _default_logfile, _new_id
 
@@ -315,20 +316,29 @@ def _chunk_text(text: str, size: int = 64) -> list[str]:
     return [text[i:i + size] for i in range(0, len(text), size)]
 
 
-async def _generic_proxy(target: str, request: Request) -> Response:
-    """Transparently forward a request to *target* and stream back the response."""
+async def _generic_proxy(target: str, request: Request, timeout: float = 120.0,
+                          extra_headers: dict | None = None) -> Response:
+    """Transparently forward a request to *target* and stream back the response.
+
+    *extra_headers* fills in headers the client didn't already send -- for
+    petsitter's own configured upstream key, say -- without touching anything
+    the client did send. It never overrides a header the client set.
+    """
     body = await request.body()
     headers = {
         k: v for k, v in request.headers.items()
         if k.lower() not in ("host", "content-length", "connection", "transfer-encoding")
     }
+    if extra_headers:
+        for k, v in extra_headers.items():
+            headers.setdefault(k, v)
     try:
         async with httpx.AsyncClient() as client:
             upstream_resp = await client.request(
                 request.method, target,
                 content=body or None,
                 headers=headers,
-                timeout=120.0,
+                timeout=timeout,
             )
     except httpx.TransportError as e:
         return JSONResponse({"error": str(e), "type": "proxy_error"}, status_code=502)
@@ -606,6 +616,25 @@ def create_app(
             payload = await request.json()
             stream = payload.get("stream", False)
             x_title = request.headers.get("X-Title", "")
+            if handler.paused:
+                # Same true bypass as /v1/messages: no build_upstream_payload
+                # round trip (which only carries a handful of fields through),
+                # no fake-streamed reconstruction. The client's own key wins
+                # if it sent one; petsitter's configured key fills in only
+                # when the client didn't bring its own.
+                logging.getLogger("petsitter").info("/v1/chat/completions: petsitter paused; raw passthrough")
+                default_cfg = get_model_config("default")
+                upstream_url = (default_cfg or {}).get("url")
+                if not upstream_url:
+                    return JSONResponse(
+                        {"error": "No upstream model configured. Set a model URL via the dashboard.",
+                         "type": "setup_required"}, status_code=503)
+                target = f"{upstream_url.rstrip('/')}/v1/chat/completions"
+                extra_headers = {}
+                api_key = (default_cfg or {}).get("key")
+                if api_key is not False and api_key:
+                    extra_headers["authorization"] = f"Bearer {api_key}"
+                return await _generic_proxy(target, request, timeout=600.0, extra_headers=extra_headers)
             if stream:
                 return StreamingResponse(
                     stream_chat_completions(handler, payload, x_title),
@@ -653,6 +682,15 @@ def create_app(
         x_title = request.headers.get("X-Title", "")
         forward = dict(request.headers)
         streaming = bool(payload.get("stream", False))
+
+        if handler.paused:
+            # Genuinely off: the request never goes through to_openai_messages /
+            # to_anthropic_payload / stream_events at all, so there is no
+            # translation round trip left to mangle thinking blocks or anything
+            # else. Bytes go straight to Anthropic and straight back, the same
+            # helper the plain `/p/` reverse proxy uses.
+            logging.getLogger("petsitter").info("/v1/messages: petsitter paused; raw passthrough")
+            return await _generic_proxy(f"{ANTHROPIC_UPSTREAM}/v1/messages", request, timeout=600.0)
 
         if streaming:
             async def event_stream():
@@ -727,6 +765,9 @@ def create_app(
         logging.getLogger("petsitter").info("/p/ proxy -> %s (x_title=%r)", upstream, x_title)
 
         if request.method == "POST" and rest.endswith("/chat/completions"):
+            if handler.paused:
+                logging.getLogger("petsitter").info("/p/ proxy: petsitter paused; raw passthrough -> %s", upstream)
+                return await _generic_proxy(upstream, request, timeout=600.0)
             try:
                 payload = await request.json()
             except json.JSONDecodeError:

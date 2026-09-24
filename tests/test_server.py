@@ -175,6 +175,110 @@ class TestServerEndpoints:
             assert (await ac.get("/health")).json()["paused"] is False
 
     @pytest.mark.asyncio
+    async def test_paused_v1_messages_is_a_raw_passthrough(self):
+        """Paused must bypass to_openai_messages/to_anthropic_payload/stream_events
+        entirely, not just skip tricks -- that translation round trip is what
+        was silently dropping thinking blocks (and everything else outside
+        text/tool_use/tool_result) even while "off", which is how a paused
+        petsitter still corrupted extended-thinking turns.
+        """
+        from httpx import AsyncClient, ASGITransport
+
+        app = create_app(model_url="http://localhost:11434", model_name="m", api_key="", trick_paths=[])
+
+        captured = {}
+
+        def make(*a, **kw):
+            client = AsyncMock()
+            async def request(method, url, content=None, headers=None, timeout=None):
+                captured["method"] = method
+                captured["url"] = url
+                captured["content"] = content
+                captured["headers"] = headers
+                resp = MagicMock()
+                resp.status_code = 200
+                resp.content = b'{"id": "msg_1", "type": "message", "content": []}'
+                resp.headers = {"content-type": "application/json"}
+                return resp
+            client.request = request
+            client.__aenter__ = AsyncMock(return_value=client)
+            client.__aexit__ = AsyncMock(return_value=None)
+            return client
+
+        # A thinking block only survives a raw byte passthrough -- the
+        # translate/rebuild path has no field for it and would silently drop
+        # it even with no tricks loaded.
+        body = {
+            "model": "claude-sonnet-4",
+            "max_tokens": 1024,
+            "messages": [
+                {"role": "user", "content": "hi"},
+                {"role": "assistant", "content": [
+                    {"type": "thinking", "thinking": "let me see", "signature": "sig123"},
+                    {"type": "tool_use", "id": "tu_1", "name": "look", "input": {}},
+                ]},
+                {"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": "tu_1", "content": "ok"}]},
+            ],
+        }
+
+        with patch("httpx.AsyncClient", make):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                await ac.post("/api/pause", json={"paused": True})
+                response = await ac.post(
+                    "/v1/messages", json=body,
+                    headers={"x-api-key": "sk-ant-caller", "anthropic-version": "2023-06-01"},
+                )
+
+        assert response.status_code == 200
+        assert captured["url"] == "https://api.anthropic.com/v1/messages"
+        sent = json.loads(captured["content"])
+        assert sent == body, "paused must forward the exact request body, not a rebuilt one"
+        assert captured["headers"]["x-api-key"] == "sk-ant-caller"
+
+    @pytest.mark.asyncio
+    async def test_paused_chat_completions_is_a_raw_passthrough(self):
+        """Same guarantee on the OpenAI-shaped surface: build_upstream_payload
+        only carries a handful of fields through, so even a paused request
+        going through it would silently lose everything else.
+        """
+        from httpx import AsyncClient, ASGITransport
+
+        app = create_app(model_url="http://localhost:11434", model_name="m", api_key="sk-configured", trick_paths=[])
+
+        captured = {}
+
+        def make(*a, **kw):
+            client = AsyncMock()
+            async def request(method, url, content=None, headers=None, timeout=None):
+                captured["url"] = url
+                captured["content"] = content
+                captured["headers"] = headers
+                resp = MagicMock()
+                resp.status_code = 200
+                resp.content = b'{"choices": [{"message": {"role": "assistant", "content": "hi"}}]}'
+                resp.headers = {"content-type": "application/json"}
+                return resp
+            client.request = request
+            client.__aenter__ = AsyncMock(return_value=client)
+            client.__aexit__ = AsyncMock(return_value=None)
+            return client
+
+        body = {"messages": [{"role": "user", "content": "hi"}], "top_p": 0.4, "seed": 7}
+
+        with patch("httpx.AsyncClient", make):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                await ac.post("/api/pause", json={"paused": True})
+                response = await ac.post("/v1/chat/completions", json=body)
+
+        assert response.status_code == 200
+        assert captured["url"] == "http://localhost:11434/v1/chat/completions"
+        sent = json.loads(captured["content"])
+        assert sent == body, "fields build_upstream_payload would drop must still reach upstream while paused"
+        assert captured["headers"]["authorization"] == "Bearer sk-configured", \
+            "petsitter's own configured key must still be attached when the client sent none"
+
+    @pytest.mark.asyncio
     async def test_loaded_trick_persists_across_restart(self, monkeypatch, tmp_path):
         """A trick loaded via the dashboard survives a restart."""
         from httpx import AsyncClient, ASGITransport

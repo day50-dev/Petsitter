@@ -91,6 +91,13 @@
     <span class="idot"></span><span id="intro-status-text">Nothing has come through yet &mdash; that&rsquo;s normal.</span>
   </div>
 
+  <div class="intro-setup" id="intro-setup" hidden>
+    <h3>It needs an AI provider to sit in front of</h3>
+    <p class="intro-setup-sub">Pick a provider, paste your key, and petsitter asks it which models it is serving right now.</p>
+    <div id="prov-panel-intro"></div>
+    <div class="intro-setup-more"><button class="btn btn-sm btn-neutral" onclick="switchTab('models')">See every option</button></div>
+  </div>
+
   <div class="intro-actions">
     <button class="btn-cta" onclick="switchTab('agents')">Connect a tool<span class="cta-arrow">&rarr;</span></button>
     <button class="btn-ghost" onclick="togglePlayground()">or send a test message</button>
@@ -172,8 +179,14 @@
 <!-- === MODELS TAB === -->
 <div class="tab-pane" id="tab-models">
 <div class="card">
+<div class="card-title"><h2>Set up a provider</h2></div>
+<div class="section-desc">Pick a provider, paste your key, and petsitter asks it which models it is serving right now &mdash; so the list is never out of date. Choose one and you&rsquo;re set. Providers marked <em>models only</em> can list their models but won&rsquo;t take requests; a gateway like OpenRouter reaches those too.</div>
+<div id="prov-panel-models"></div>
+</div>
+<div class="card">
 <div class="card-title"><h2>Models</h2></div>
 <div class="section-desc">Upstream model endpoints. Set an API key to false (passthrough) to let the client supply its own key.</div>
+<datalist id="role-model-list"></datalist>
 <div class="models-list" id="model-list"><div class="loader">Loading...</div></div>
 </div>
 </div>
@@ -400,6 +413,10 @@ async function refreshIntro() {
         ? (d.model_name ? d.model_name + ' @ ' + d.model_url : d.model_url)
         : 'not set yet';
     }
+    // Nothing can flow through until a provider is chosen, so offer the
+    // provider setup here rather than making a new visitor find the Models tab.
+    const setup = document.getElementById('intro-setup');
+    if (setup) setup.hidden = !!d.model_url;
   } catch (e) {
     // The intro is decoration; it must never take the rest of the page with it.
     console.warn('intro refresh failed:', e);
@@ -1295,7 +1312,252 @@ async function installExamples() {
   btn.textContent = 'Install Examples';
 }
 
+// ---- provider setup ----
+// The catalog holds endpoints only -- base URL, auth style, where to get a
+// key. No model names ship with petsitter: providers add and retire models on
+// their own schedule, so the list is always fetched from the provider itself.
+//
+// This is the whole setup: pick a provider, paste a key, pick a model. The base
+// URL is in the catalog, so it is not a field anyone has to look at, and it all
+// lands on the default role because that is the only role most people have. The
+// per-role fields further down the Models tab are still there for the rest.
+let _providers = [];
+let _provGroups = {};
+let _provState = { provider: '', models: [], fetched: false, error: '' };
+let _provPanels = {};
+
+function provEl(prefix, name) { return document.getElementById(prefix + '-' + name); }
+function provById(id) { return _providers.find(p => p.id === id) || null; }
+
+function mountProviderPanel(containerId, prefix) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = `<div class="prov-grid">
+<div class="cfg-field">
+<label class="cfg-label" for="${prefix}-select">Provider</label>
+<select id="${prefix}-select" onchange="onProviderPick('${prefix}')"></select>
+</div>
+<div class="cfg-field" id="${prefix}-keyfield">
+<label class="cfg-label" for="${prefix}-key">API key</label>
+<div class="prov-row"><input type="password" id="${prefix}-key" autocomplete="off" spellcheck="false" onkeydown="if(event.key==='Enter')fetchProviderModels('${prefix}')"><a class="prov-keylink" id="${prefix}-keylink" href="#" target="_blank" rel="noopener noreferrer" hidden>get a key</a></div>
+</div>
+<div class="cfg-field" id="${prefix}-urlfield" hidden>
+<label class="cfg-label" for="${prefix}-url">Base URL</label>
+<input type="text" id="${prefix}-url" spellcheck="false" placeholder="https://your-endpoint/v1" onkeydown="if(event.key==='Enter')fetchProviderModels('${prefix}')">
+</div>
+<div class="prov-go"><button class="btn btn-sm btn-primary" id="${prefix}-fetch" onclick="fetchProviderModels('${prefix}')">Fetch models</button></div>
+</div>
+<div class="prov-pick" id="${prefix}-modelrow" hidden>
+<label class="cfg-label" for="${prefix}-model">Model</label>
+<div>
+<input type="text" id="${prefix}-model" class="prov-filter" autocomplete="off" spellcheck="false" placeholder="Fetch the list first" oninput="paintProviderModels('${prefix}')" onkeydown="provModelKeys('${prefix}',event)">
+<div class="prov-list" id="${prefix}-modellist"></div>
+</div>
+</div>
+<div class="prov-status" id="${prefix}-status"></div>`;
+  _provPanels[prefix] = true;
+  paintProviderSelect(prefix);
+  onProviderPick(prefix);
+}
+
+function paintProviderSelect(prefix) {
+  const sel = provEl(prefix, 'select');
+  if (!sel) return;
+  const byGroup = {};
+  _providers.forEach(p => { const g = p.group || 'other'; (byGroup[g] = byGroup[g] || []).push(p); });
+  let out = '';
+  Object.keys(byGroup).forEach(g => {
+    out += '<optgroup label="' + escapeHtml(_provGroups[g] || g) + '">';
+    byGroup[g].forEach(p => {
+      out += '<option value="' + escapeHtml(p.id) + '">' + escapeHtml(p.label + (p.routable === false ? ' (models only)' : '')) + '</option>';
+    });
+    out += '</optgroup>';
+  });
+  out += '<option value="custom">Something else</option>';
+  sel.innerHTML = out;
+  sel.value = _provState.provider || (sel.options[0] ? sel.options[0].value : 'custom');
+}
+
+function onProviderPick(prefix) {
+  const sel = provEl(prefix, 'select');
+  if (!sel) return;
+  _provState.provider = sel.value;
+  _provState.models = [];
+  _provState.fetched = false;
+  _provState.error = '';
+  const p = provById(sel.value);
+  // A base URL only appears for an endpoint the catalog has never heard of.
+  // For a known provider it is already known, and showing it would just be one
+  // more box to read past.
+  const keyField = provEl(prefix, 'keyfield');
+  if (keyField) keyField.hidden = !!(p && p.auth === 'none');
+  const urlField = provEl(prefix, 'urlfield');
+  if (urlField) urlField.hidden = !!p;
+  const url = provEl(prefix, 'url');
+  if (url) url.value = '';
+  const key = provEl(prefix, 'key');
+  if (key) key.placeholder = 'paste your key';
+  const model = provEl(prefix, 'model');
+  if (model) model.value = '';
+  paintProvider();
+}
+
+// Everything except the inputs the user might be typing in. Safe to call after
+// any state change, and it keeps the two mounted panels in step.
+function paintProvider() {
+  const n = _provState.models.length;
+  Object.keys(_provPanels).forEach(prefix => {
+    const p = provById(_provState.provider);
+    const link = provEl(prefix, 'keylink');
+    if (link) {
+      if (p && p.key_url) { link.href = p.key_url; link.hidden = false; }
+      else link.hidden = true;
+    }
+    const row = provEl(prefix, 'modelrow');
+    if (row) row.hidden = !n;
+    const filter = provEl(prefix, 'model');
+    if (filter) filter.placeholder = n ? 'Type to filter ' + n + ' models' : 'Fetch the list first';
+    const list = provEl(prefix, 'modellist');
+    if (list && list.dataset.count !== String(n)) {
+      list.dataset.count = n;
+      paintProviderModels(prefix);
+    }
+    const st = provEl(prefix, 'status');
+    if (st) {
+      st.className = 'prov-status';
+      if (_provState.error) {
+        st.classList.add('err');
+        st.textContent = _provState.error;
+      } else if (_provState.fetched) {
+        st.classList.add('ok');
+        st.textContent = n + (n === 1 ? ' model available.' : ' models available.');
+      } else {
+        st.textContent = '';
+      }
+    }
+  });
+  // The same live list as a suggestion on the per-role fields below, which stay
+  // free text so a partial list from a gateway can't lock anything out.
+  const roleList = document.getElementById('role-model-list');
+  if (roleList) roleList.innerHTML = _provState.models.map(m => '<option value="' + escapeHtml(m.id) + '">' + escapeHtml(m.label) + '</option>').join('');
+}
+
+// A gateway can serve hundreds of models, so this is a filter over the live
+// list rather than a dropdown anyone has to scroll.
+function paintProviderModels(prefix) {
+  const list = provEl(prefix, 'modellist');
+  if (!list) return;
+  const q = ((provEl(prefix, 'model') || {}).value || '').trim().toLowerCase();
+  const hits = q ? _provState.models.filter(m =>
+    m.id.toLowerCase().indexOf(q) !== -1 || m.label.toLowerCase().indexOf(q) !== -1) : _provState.models;
+  if (!hits.length) {
+    // A gateway may report only part of what it serves, so what someone typed
+    // is worth offering back rather than treating as a mistake.
+    list.innerHTML = q
+      ? '<div class="prov-none">No match &mdash; press Enter to use &ldquo;' + escapeHtml(q) + '&rdquo; anyway</div>'
+      : '<div class="prov-none">Nothing to show.</div>';
+    return;
+  }
+  list.innerHTML = hits.map(m =>
+    '<div class="prov-opt" data-id="' + escapeHtml(m.id) + '" onclick="provPickModel(\'' + prefix + '\',this.dataset.id)">'
+    + '<span class="mlabel">' + escapeHtml(m.label) + '</span>'
+    + (m.label === m.id ? '' : '<span class="mid">' + escapeHtml(m.id) + '</span>')
+    + '</div>').join('');
+}
+
+function provModelKeys(prefix, ev) {
+  const list = provEl(prefix, 'modellist');
+  const input = provEl(prefix, 'model');
+  if (!list || !input) return;
+  if (ev.key === 'Escape') { input.value = ''; paintProviderModels(prefix); return; }
+  if (ev.key === 'Enter') {
+    ev.preventDefault();
+    const on = list.querySelector('.prov-opt.on');
+    if (on) { provPickModel(prefix, on.dataset.id); return; }
+    const q = input.value.trim();
+    if (q) provPickModel(prefix, q);
+    return;
+  }
+  if (ev.key !== 'ArrowDown' && ev.key !== 'ArrowUp') return;
+  ev.preventDefault();
+  const opts = Array.prototype.slice.call(list.querySelectorAll('.prov-opt[data-id]'));
+  if (!opts.length) return;
+  let i = opts.findIndex(o => o.classList.contains('on'));
+  i = ev.key === 'ArrowDown' ? Math.min(i + 1, opts.length - 1) : Math.max(i - 1, 0);
+  opts.forEach((o, n) => o.classList.toggle('on', n === i));
+  opts[i].scrollIntoView({ block: 'nearest' });
+}
+
+function provUrl(prefix) {
+  const p = provById(_provState.provider);
+  if (p) return p.base_url;
+  return ((provEl(prefix, 'url') || {}).value || '').trim();
+}
+
+async function fetchProviderModels(prefix) {
+  const btn = provEl(prefix, 'fetch');
+  const p = provById(_provState.provider);
+  const key = (provEl(prefix, 'key') || {}).value || '';
+  const url = provUrl(prefix);
+  _provState.error = '';
+  if (!url) _provState.error = 'What URL should petsitter ask?';
+  else if (p && p.auth !== 'none' && !key.trim()) _provState.error = 'Paste your API key first.';
+  if (_provState.error) { paintProvider(); return; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Asking...'; }
+  paintProvider();
+  try {
+    const d = await fetchJSON('/api/models/discover', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        provider: _provState.provider === 'custom' ? '' : _provState.provider,
+        url: url,
+        api_key: key
+      })
+    });
+    _provState.models = d.models || [];
+    _provState.fetched = true;
+  } catch (e) {
+    _provState.models = [];
+    _provState.fetched = false;
+    _provState.error = e.message;
+  }
+  if (btn) { btn.disabled = false; btn.textContent = 'Fetch models'; }
+  paintProvider();
+}
+
+async function provPickModel(prefix, modelId) {
+  const p = provById(_provState.provider);
+  const url = provUrl(prefix);
+  const key = (provEl(prefix, 'key') || {}).value || '';
+  // A provider can list its models and still not serve chat at the path
+  // petsitter calls. Saving it silently would leave a config that 404s on the
+  // first real request, so say so once and let the user decide.
+  if (p && p.routable === false && !confirm(
+    p.label + ' can list its models, but requests to it will not work - petsitter calls ' +
+    '/v1/chat/completions and that provider does not serve that path. Save it anyway?')) return;
+  if (await setModelForScope('_default', 'default', url, modelId, key)) {
+    const filter = provEl(prefix, 'model');
+    if (filter) filter.value = modelId;
+    fetchModels();
+    fetchInfo();
+  }
+}
+
+async function fetchProviders() {
+  try {
+    const d = await fetchJSON('/api/providers');
+    _providers = d.providers || [];
+    _provGroups = d.groups || {};
+    mountProviderPanel('prov-panel-models', 'provm');
+    mountProviderPanel('prov-panel-intro', 'provi');
+  } catch (e) {
+    console.warn('provider list unavailable:', e);
+  }
+}
+
 let _tsModels = {};
+
 let _cachedConfiguredModels = {};
 
 function _modelDisplay(v) { return v === false ? false : (v || ''); }
@@ -1368,7 +1630,7 @@ function renderModelEntry(scope, k, m) {
   const keyEsc = escapeHtml(keyDisplay);
   const nameInput = isNamePt ? ' oninput="offPassthrough(this)" onclick="offPassthrough(this)"' : '';
   const keyInput = keyPassthrough ? ' oninput="offPassthrough(this)" onclick="offPassthrough(this)"' : '';
-  return `<div class="model-entry" data-scope="${sc}" data-key="${kk}"><span class="key">${kk}</span><div class="model-fields"><input id="${urlId}" type="text" value="${urlEsc}" onchange="setModelForScope('${sc}','${kk}',this.value,document.getElementById('${nameId}').value,document.getElementById('${keyId}').value)" placeholder="http://..." title="Upstream API base URL"><div class="model-subrow"><div class="key-wrap"><input id="${nameId}" type="text" value="${modelEsc}" onchange="setModelForScope('${sc}','${kk}',document.getElementById('${urlId}').value,this.value,document.getElementById('${keyId}').value)" placeholder="${namePlaceholder}" title="Model name to send in requests"${nameInput}><button class="pt-btn${namePtActive}" id="${namePtId}" onclick="togglePassthrough(this)" data-field="name" title="Pass through client model name">pass</button></div><div class="key-wrap"><input id="${keyId}" type="text" value="${keyEsc}" onchange="setModelForScope('${sc}','${kk}',document.getElementById('${urlId}').value,document.getElementById('${nameId}').value,this.value)" placeholder="${keyPlaceholder}" title="API key for upstream service"${keyInput}><button class="pt-btn${keyPtActive}" id="${ptId}" onclick="togglePassthrough(this)" data-field="key" title="Pass through client API key">pass</button></div></div></div></div>`;
+  return `<div class="model-entry" data-scope="${sc}" data-key="${kk}"><span class="key">${kk}</span><div class="model-fields"><input id="${urlId}" type="text" value="${urlEsc}" onchange="setModelForScope('${sc}','${kk}',this.value,document.getElementById('${nameId}').value,document.getElementById('${keyId}').value)" placeholder="http://..." title="Upstream API base URL"><div class="model-subrow"><div class="key-wrap"><input id="${nameId}" list="role-model-list" type="text" value="${modelEsc}" onchange="setModelForScope('${sc}','${kk}',document.getElementById('${urlId}').value,this.value,document.getElementById('${keyId}').value)" placeholder="${namePlaceholder}" title="Model name to send in requests"${nameInput}><button class="pt-btn${namePtActive}" id="${namePtId}" onclick="togglePassthrough(this)" data-field="name" title="Pass through client model name">pass</button></div><div class="key-wrap"><input id="${keyId}" type="text" value="${keyEsc}" onchange="setModelForScope('${sc}','${kk}',document.getElementById('${urlId}').value,document.getElementById('${nameId}').value,this.value)" placeholder="${keyPlaceholder}" title="API key for upstream service"${keyInput}><button class="pt-btn${keyPtActive}" id="${ptId}" onclick="togglePassthrough(this)" data-field="key" title="Pass through client API key">pass</button></div></div></div></div>`;
 }
 
 async function setModelForScope(scope, key, model_url, model_name, api_key) {
@@ -1392,7 +1654,8 @@ async function setModelForScope(scope, key, model_url, model_name, api_key) {
       _tsModels[scope] = updated;
     }
     showToast('Saved ' + key);
-  } catch(e) { showToast(e.message, true); }
+    return true;
+  } catch(e) { showToast(e.message, true); return false; }
 }
 
 function togglePassthrough(btn) {
@@ -1755,6 +2018,7 @@ switchTab(initHash.tab);
 if (initHash.ts !== '_default') selectedTrickset = initHash.ts;
 trickSearch = (document.getElementById('trick-search').value || '').toLowerCase();
 fetchInfo(); fetchTricksets(); fetchAvailable(); fetchModels(); fetchAgents(); fetchPauseState();
+fetchProviders();
 startLogStream();
 refreshIntro();
 </script>

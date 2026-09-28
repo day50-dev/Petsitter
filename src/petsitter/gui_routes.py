@@ -9,6 +9,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.staticfiles import StaticFiles
 
+from petsitter.providers import GROUPS, discover_models, find_provider, provider_catalog
 from petsitter.trick import Trick, get_model_config, remove_model_config, update_model_config
 from petsitter.trickset import Trickset, SCHEMA
 
@@ -388,6 +389,37 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
         _save_full_config(handler, api_key)
         return JSONResponse({"success": True})
     app.add_route("/api/models", gui_models_update, methods=["POST"])
+
+    async def gui_providers(request: Request) -> Response:
+        return JSONResponse({"providers": provider_catalog(), "groups": GROUPS})
+    app.add_route("/api/providers", gui_providers, methods=["GET"])
+
+    # Ask a provider what it is serving right now. Nothing is persisted here -
+    # the key goes out to the provider and comes back as a list of model names.
+    # The dashboard decides what to save from that, and goes through the normal
+    # /api/models write to do it.
+    async def gui_models_discover(request: Request) -> Response:
+        data = await request.json()
+        entry = find_provider(data.get("provider", "") or "")
+        base_url = (data.get("url") or (entry or {}).get("base_url") or "").strip()
+        api_key = data.get("api_key", "")
+        if api_key is True or api_key is False:
+            api_key = ""
+        api_key = str(api_key).strip()
+        # auth is left empty on purpose: the catalog entry knows how this
+        # provider actually authenticates, which is not always a bearer token.
+        auth = str(data.get("auth") or "")
+        try:
+            models = await discover_models(base_url, api_key, auth, provider=entry)
+        except ValueError as e:
+            return JSONResponse({"success": False, "error": str(e)}, status_code=502)
+        return JSONResponse({
+            "success": True,
+            "url": base_url.rstrip("/"),
+            "count": len(models),
+            "models": models,
+        })
+    app.add_route("/api/models/discover", gui_models_discover, methods=["POST"])
 
     async def gui_trickset_create(request: Request) -> Response:
         data = await request.json()

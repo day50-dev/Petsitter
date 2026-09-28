@@ -1313,9 +1313,9 @@ async function installExamples() {
 }
 
 // ---- provider setup ----
-// The catalog holds endpoints only -- base URL, auth style, where to get a
-// key. No model names ship with petsitter: providers add and retire models on
-// their own schedule, so the list is always fetched from the provider itself.
+// The catalog holds endpoints only -- base URL and how to authenticate. No
+// model names ship with petsitter: providers add and retire models on their own
+// schedule, so the list is always fetched from the provider itself.
 //
 // This is the whole setup: pick a provider, paste a key, pick a model. The base
 // URL is in the catalog, so it is not a field anyone has to look at, and it all
@@ -1323,7 +1323,7 @@ async function installExamples() {
 // per-role fields further down the Models tab are still there for the rest.
 let _providers = [];
 let _provGroups = {};
-let _provState = { provider: '', models: [], fetched: false, error: '' };
+let _provState = { provider: '', models: [], fetched: false, busy: false, error: '', hasKey: false };
 let _provPanels = {};
 
 function provEl(prefix, name) { return document.getElementById(prefix + '-' + name); }
@@ -1339,22 +1339,24 @@ function mountProviderPanel(containerId, prefix) {
 </div>
 <div class="cfg-field" id="${prefix}-keyfield">
 <label class="cfg-label" for="${prefix}-key">API key</label>
-<div class="prov-row"><input type="password" id="${prefix}-key" autocomplete="off" spellcheck="false" onkeydown="if(event.key==='Enter')fetchProviderModels('${prefix}')"><a class="prov-keylink" id="${prefix}-keylink" href="#" target="_blank" rel="noopener noreferrer" hidden>get a key</a></div>
+<input type="password" id="${prefix}-key" autocomplete="off" spellcheck="false" oninput="onProviderKey('${prefix}')" onchange="onProviderKeySet('${prefix}')" onkeydown="if(event.key==='Enter')fetchProviderModels('${prefix}')">
 </div>
 <div class="cfg-field" id="${prefix}-urlfield" hidden>
 <label class="cfg-label" for="${prefix}-url">Base URL</label>
-<input type="text" id="${prefix}-url" spellcheck="false" placeholder="https://your-endpoint/v1" onkeydown="if(event.key==='Enter')fetchProviderModels('${prefix}')">
+<input type="text" id="${prefix}-url" spellcheck="false" placeholder="https://your-endpoint/v1" onchange="onProviderKeySet('${prefix}')" onkeydown="if(event.key==='Enter')fetchProviderModels('${prefix}')">
 </div>
-<div class="prov-go"><button class="btn btn-sm btn-primary" id="${prefix}-fetch" onclick="fetchProviderModels('${prefix}')">Fetch models</button></div>
 </div>
-<div class="prov-pick" id="${prefix}-modelrow" hidden>
+<div class="prov-pick">
 <label class="cfg-label" for="${prefix}-model">Model</label>
 <div>
-<input type="text" id="${prefix}-model" class="prov-filter" autocomplete="off" spellcheck="false" placeholder="Fetch the list first" oninput="paintProviderModels('${prefix}')" onkeydown="provModelKeys('${prefix}',event)">
+<div class="prov-row">
+<input type="text" id="${prefix}-model" class="prov-filter" autocomplete="off" spellcheck="false" oninput="paintProviderModels('${prefix}')" onkeydown="provModelKeys('${prefix}',event)">
+<button class="btn btn-sm btn-neutral" id="${prefix}-refresh" onclick="fetchProviderModels('${prefix}')" title="Ask the provider for its models again">refresh</button>
+</div>
 <div class="prov-list" id="${prefix}-modellist"></div>
+<div class="prov-status" id="${prefix}-status"></div>
 </div>
-</div>
-<div class="prov-status" id="${prefix}-status"></div>`;
+</div>`;
   _provPanels[prefix] = true;
   paintProviderSelect(prefix);
   onProviderPick(prefix);
@@ -1378,12 +1380,24 @@ function paintProviderSelect(prefix) {
   sel.value = _provState.provider || (sel.options[0] ? sel.options[0].value : 'custom');
 }
 
+function onProviderKey(prefix) {
+  _provState.hasKey = !!((provEl(prefix, 'key') || {}).value || '').trim();
+  paintProvider();
+}
+
+// Reaching the end of the key is the last thing anyone does here, so don't ask
+// them to go find a button afterwards.
+function onProviderKeySet(prefix) {
+  if (!_provState.fetched && !_provState.busy) fetchProviderModels(prefix);
+}
+
 function onProviderPick(prefix) {
   const sel = provEl(prefix, 'select');
   if (!sel) return;
   _provState.provider = sel.value;
   _provState.models = [];
   _provState.fetched = false;
+  _provState.busy = false;
   _provState.error = '';
   const p = provById(sel.value);
   // A base URL only appears for an endpoint the catalog has never heard of.
@@ -1400,26 +1414,35 @@ function onProviderPick(prefix) {
   const model = provEl(prefix, 'model');
   if (model) model.value = '';
   paintProvider();
+  // Nothing to wait on if the provider needs no key, or if the key is already
+  // sitting there from earlier. So just ask it.
+  if (provUrl(prefix) && (p ? (p.auth === 'none' || _provState.hasKey) : true)) {
+    fetchProviderModels(prefix);
+  }
+}
+
+function provUrl(prefix) {
+  const p = provById(_provState.provider);
+  if (p) return p.base_url;
+  return ((provEl(prefix, 'url') || {}).value || '').trim();
 }
 
 // Everything except the inputs the user might be typing in. Safe to call after
 // any state change, and it keeps the two mounted panels in step.
 function paintProvider() {
   const n = _provState.models.length;
+  const p = provById(_provState.provider);
+  // One signature for the whole thing the list depends on, so a keystroke in the
+  // key box doesn't re-render a few hundred rows it didn't change.
+  const sig = [n, _provState.provider, _provState.fetched, _provState.busy, _provState.error, _provState.hasKey].join('|');
   Object.keys(_provPanels).forEach(prefix => {
-    const p = provById(_provState.provider);
-    const link = provEl(prefix, 'keylink');
-    if (link) {
-      if (p && p.key_url) { link.href = p.key_url; link.hidden = false; }
-      else link.hidden = true;
-    }
-    const row = provEl(prefix, 'modelrow');
-    if (row) row.hidden = !n;
     const filter = provEl(prefix, 'model');
-    if (filter) filter.placeholder = n ? 'Type to filter ' + n + ' models' : 'Fetch the list first';
+    if (filter) filter.placeholder = n ? 'Type to filter ' + n + ' models' : 'No models yet';
+    const refresh = provEl(prefix, 'refresh');
+    if (refresh) refresh.disabled = _provState.busy;
     const list = provEl(prefix, 'modellist');
-    if (list && list.dataset.count !== String(n)) {
-      list.dataset.count = n;
+    if (list && list.dataset.sig !== sig) {
+      list.dataset.sig = sig;
       paintProviderModels(prefix);
     }
     const st = provEl(prefix, 'status');
@@ -1442,20 +1465,36 @@ function paintProvider() {
   if (roleList) roleList.innerHTML = _provState.models.map(m => '<option value="' + escapeHtml(m.id) + '">' + escapeHtml(m.label) + '</option>').join('');
 }
 
+function provIdleMsg(prefix) {
+  if (_provState.busy) return 'Asking...';
+  if (_provState.error) return '';
+  if (_provState.fetched) return 'It listed no models.';
+  const p = provById(_provState.provider);
+  if (!provUrl(prefix)) {
+    return _provState.provider === 'custom' ? 'Enter a URL to see its models.' : 'Pick a provider to see its models.';
+  }
+  if (p && p.auth !== 'none' && !_provState.hasKey) return 'Paste your API key to see its models.';
+  return 'Press refresh to ask it again.';
+}
+
 // A gateway can serve hundreds of models, so this is a filter over the live
 // list rather than a dropdown anyone has to scroll.
 function paintProviderModels(prefix) {
   const list = provEl(prefix, 'modellist');
   if (!list) return;
+  const n = _provState.models.length;
+  if (!n) {
+    const msg = provIdleMsg(prefix);
+    list.innerHTML = msg ? '<div class="prov-none">' + msg + '</div>' : '';
+    return;
+  }
   const q = ((provEl(prefix, 'model') || {}).value || '').trim().toLowerCase();
   const hits = q ? _provState.models.filter(m =>
     m.id.toLowerCase().indexOf(q) !== -1 || m.label.toLowerCase().indexOf(q) !== -1) : _provState.models;
   if (!hits.length) {
     // A gateway may report only part of what it serves, so what someone typed
     // is worth offering back rather than treating as a mistake.
-    list.innerHTML = q
-      ? '<div class="prov-none">No match &mdash; press Enter to use &ldquo;' + escapeHtml(q) + '&rdquo; anyway</div>'
-      : '<div class="prov-none">Nothing to show.</div>';
+    list.innerHTML = '<div class="prov-none">No match &mdash; press Enter to use &ldquo;' + escapeHtml(q) + '&rdquo; anyway</div>';
     return;
   }
   list.innerHTML = hits.map(m =>
@@ -1488,22 +1527,12 @@ function provModelKeys(prefix, ev) {
   opts[i].scrollIntoView({ block: 'nearest' });
 }
 
-function provUrl(prefix) {
-  const p = provById(_provState.provider);
-  if (p) return p.base_url;
-  return ((provEl(prefix, 'url') || {}).value || '').trim();
-}
-
 async function fetchProviderModels(prefix) {
-  const btn = provEl(prefix, 'fetch');
   const p = provById(_provState.provider);
   const key = (provEl(prefix, 'key') || {}).value || '';
   const url = provUrl(prefix);
   _provState.error = '';
-  if (!url) _provState.error = 'What URL should petsitter ask?';
-  else if (p && p.auth !== 'none' && !key.trim()) _provState.error = 'Paste your API key first.';
-  if (_provState.error) { paintProvider(); return; }
-  if (btn) { btn.disabled = true; btn.textContent = 'Asking...'; }
+  _provState.busy = true;
   paintProvider();
   try {
     const d = await fetchJSON('/api/models/discover', {
@@ -1522,7 +1551,7 @@ async function fetchProviderModels(prefix) {
     _provState.fetched = false;
     _provState.error = e.message;
   }
-  if (btn) { btn.disabled = false; btn.textContent = 'Fetch models'; }
+  _provState.busy = false;
   paintProvider();
 }
 

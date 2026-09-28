@@ -61,12 +61,12 @@ class TestCatalog:
                     f"{p['id']} is marked routable but is a remote endpoint with no auth"
                 )
 
-    def test_no_provider_carries_prose(self):
-        """The picker shows facts, not copy. Anything chatty belongs in the
-        error the user actually hits, not on screen for everyone."""
+    def test_no_provider_carries_prose_or_offsite_links(self):
+        """The picker shows facts, not copy, and stays on this page. Anything
+        chatty belongs in the error the user actually hits."""
         for p in PROVIDERS:
-            assert "note" not in p, f"{p['id']} ships a note"
-            assert "description" not in p, f"{p['id']} ships a description"
+            for junk in ("note", "description", "key_url", "docs", "blurb"):
+                assert junk not in p, f"{p['id']} ships {junk}"
             assert len(p["label"]) <= 24, f"{p['id']} label is prose: {p['label']!r}"
 
     def test_local_providers_need_no_key(self):

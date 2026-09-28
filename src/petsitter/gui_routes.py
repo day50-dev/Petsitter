@@ -9,7 +9,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.staticfiles import StaticFiles
 
-from petsitter.providers import GROUPS, discover_models, find_provider, provider_catalog
+from petsitter.providers import GROUPS, discover_models, find_provider, provider_catalog, provider_for_url
 from petsitter.trick import Trick, get_model_config, remove_model_config, update_model_config
 from petsitter.trickset import Trickset, SCHEMA
 
@@ -109,11 +109,17 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
 
     async def gui_info(request: Request) -> Response:
         from petsitter.server import _get_version
+        matched = provider_for_url(handler.model_url) if handler.model_url else None
         return JSONResponse({
             "listen_on": f"{request.url.hostname}:{request.url.port}",
             "model_url": handler.model_url,
             "model_name": handler.model_name,
             "version": _get_version(),
+            # So the provider picker can show the choice someone already made
+            # instead of asking again on every reload. Whether a key exists is
+            # all the browser needs; the key itself never leaves the server.
+            "provider_id": (matched or {}).get("id", ""),
+            "api_key_set": bool(api_key),
         })
     app.add_route("/api/info", gui_info, methods=["GET"])
 
@@ -406,6 +412,15 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
         if api_key is True or api_key is False:
             api_key = ""
         api_key = str(api_key).strip()
+        if not api_key and (entry or {}).get("auth", "bearer") != "none":
+            # The picker should still be able to refresh its list after a reload,
+            # and the browser is never given the stored key, so the key that is
+            # already in the config is the one to use here.
+            try:
+                stored = get_model_config("default")
+            except KeyError:
+                stored = {}
+            api_key = str(stored.get("key") or handler.api_key or "").strip()
         # auth is left empty on purpose: the catalog entry knows how this
         # provider actually authenticates, which is not always a bearer token.
         auth = str(data.get("auth") or "")

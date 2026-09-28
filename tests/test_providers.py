@@ -14,6 +14,7 @@ from petsitter.providers import (
     discover_url_for,
     find_provider,
     provider_catalog,
+    provider_for_url,
 )
 from petsitter.server import create_app
 
@@ -73,13 +74,17 @@ class TestCatalog:
         for p in PROVIDERS:
             if p["group"] == "local":
                 assert p["auth"] == "none"
-                assert not p["key_url"]
 
-    def test_pay_providers_need_a_key_and_have_a_link(self):
+    def test_keyed_providers_actually_use_their_key(self):
+        """The picker hides the key box for auth 'none', so every other entry has
+        to have an auth style that sends the key the way that provider expects."""
         for p in PROVIDERS:
             if p["group"] == "pay":
-                assert p["auth"] != "none"
-                assert p["key_url"].startswith("https://")
+                assert p["auth"] in ("bearer", "x-api-key", "query")
+            # A gateway still wants a key, and "local" is not the only auth-less
+            # case in practice, so auth drives the key box rather than the group.
+            if p["auth"] != "none":
+                assert p["group"] != "local", f"{p['id']} is local but wants a key"
 
     def test_catalog_is_json_safe_and_hides_nothing_but_secrets(self):
         import json
@@ -183,6 +188,32 @@ class TestDiscoverUrlFor:
     def test_provider_override_wins(self):
         p = find_provider("anthropic")
         assert discover_url_for("https://api.anthropic.com", p) == "https://api.anthropic.com/v1/models"
+
+
+class TestProviderForUrl:
+    """Which provider a config already on disk belongs to, so a reload can show
+    the choice that was made instead of asking for it again."""
+
+    def test_matches_a_catalog_entry(self):
+        assert provider_for_url("https://api.openai.com/v1")["id"] == "openai"
+        assert provider_for_url("https://openrouter.ai/api/v1")["id"] == "openrouter"
+
+    def test_tolerates_the_ways_a_config_gets_typed(self):
+        expected = provider_for_url("http://localhost:11434/v1")["id"]
+        for variant in (
+            "http://localhost:11434/v1/",
+            "http://localhost:11434/v1/chat/completions",
+            "http://localhost:11434",
+            "http://localhost:11434/",
+        ):
+            assert provider_for_url(variant)["id"] == expected, variant
+
+    def test_unknown_endpoint_is_not_guessed_at(self):
+        assert provider_for_url("https://my-proxy.internal/v1") is None
+
+    def test_empty_url(self):
+        assert provider_for_url("") is None
+        assert provider_for_url("   ") is None
 
 
 class TestDiscoverModels:
@@ -310,6 +341,62 @@ class TestProviderRoutes:
         # Discovery is a read. Saving stays an explicit, separate act, so a
         # key someone was just trying out never lands in the config file.
         assert _modelset == {}
+
+    async def test_discover_falls_back_to_the_stored_key(self):
+        """Refresh has to work after a reload, and the browser is never handed
+        the saved key, so the server uses the one already in the config."""
+        from httpx import ASGITransport, AsyncClient
+        app = self._app()
+        with patch("petsitter.gui_routes.discover_models") as disc, \
+             patch("petsitter.gui_routes.get_model_config") as cfg:
+            disc.return_value = [{"id": "m", "label": "m"}]
+            cfg.return_value = {"url": "https://openrouter.ai/api/v1", "model": "m", "key": "sk-on-disk"}
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                r = await ac.post("/api/models/discover", json={"provider": "openrouter"})
+        assert r.status_code == 200
+        assert disc.call_args.args[1] == "sk-on-disk"
+
+    async def test_discover_prefers_a_typed_key_over_the_stored_one(self):
+        from httpx import ASGITransport, AsyncClient
+        app = self._app()
+        with patch("petsitter.gui_routes.discover_models") as disc, \
+             patch("petsitter.gui_routes.get_model_config") as cfg:
+            disc.return_value = [{"id": "m", "label": "m"}]
+            cfg.return_value = {"url": "", "model": "", "key": "sk-on-disk"}
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                await ac.post("/api/models/discover", json={"provider": "openai", "api_key": "sk-typed"})
+        assert disc.call_args.args[1] == "sk-typed"
+
+    async def test_discover_never_invents_a_key_for_a_provider_that_needs_none(self):
+        from httpx import ASGITransport, AsyncClient
+        app = self._app()
+        with patch("petsitter.gui_routes.discover_models") as disc, \
+             patch("petsitter.gui_routes.get_model_config") as cfg:
+            disc.return_value = [{"id": "m", "label": "m"}]
+            cfg.return_value = {"url": "", "model": "", "key": "sk-on-disk"}
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                await ac.post("/api/models/discover", json={"provider": "ollama"})
+        assert disc.call_args.args[1] == ""
+
+    async def test_info_reports_the_provider_a_config_belongs_to(self):
+        from httpx import ASGITransport, AsyncClient
+        from petsitter.server import create_app
+        app = create_app(model_url="https://openrouter.ai/api/v1", model_name="m",
+                         api_key="sk-secret", trick_paths=[])
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            body = (await ac.get("/api/info")).json()
+        assert body["provider_id"] == "openrouter"
+        assert body["api_key_set"] is True
+        # The key itself is reported as a fact about itself, never as a value.
+        assert "sk-secret" not in repr(body)
+
+    async def test_info_reports_nothing_configured_without_pretending(self):
+        from httpx import ASGITransport, AsyncClient
+        app = self._app()
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            body = (await ac.get("/api/info")).json()
+        assert body["provider_id"] == ""
+        assert body["api_key_set"] is False
 
     async def test_discover_reports_failure_without_a_stack_trace(self):
         from httpx import ASGITransport, AsyncClient

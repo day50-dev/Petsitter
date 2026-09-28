@@ -216,6 +216,35 @@ def find_provider(provider_id: str) -> dict[str, Any] | None:
     return None
 
 
+def provider_for_url(url: str) -> dict[str, Any] | None:
+    """Which catalog entry a configured base URL belongs to, if any.
+
+    Lets the picker show the provider someone already chose instead of making
+    them pick it again on every reload. Matching is on a normalized URL because
+    a config written by hand often has a trailing slash or no /v1 suffix.
+    """
+    target = _normalize_base(url)
+    if not target:
+        return None
+    for p in PROVIDERS:
+        if _normalize_base(p["base_url"]) == target:
+            return p
+    return None
+
+
+def _normalize_base(url: str) -> str:
+    u = (url or "").strip().rstrip("/")
+    if not u:
+        return ""
+    # petsitter appends /v1/chat/completions, so a base without /v1 is the same
+    # endpoint to anyone setting this up by hand.
+    if u.endswith("/chat/completions"):
+        u = u[: -len("/chat/completions")]
+    if not u.endswith("/v1"):
+        u += "/v1"
+    return u
+
+
 def discover_url_for(url: str, provider: dict[str, Any] | None = None) -> str:
     """Work out which URL lists models for a given base URL.
 

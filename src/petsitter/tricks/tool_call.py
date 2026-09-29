@@ -18,6 +18,7 @@ class ToolCallTrick(Trick):
 
     __brief__ = "Adds tool calling (JSON-RPC) for models without native support"
     __display_name__ = "Tool Call"
+    __category__ = "Tool Calling"
 
     def __init__(self):
         self._tools_cache = None

@@ -15,6 +15,7 @@ class NoEmDashTrick(Trick):
 
     __brief__ = "Replaces em-dashes with hyphens in model responses"
     __display_name__ = "No Em-Dash"
+    __category__ = "Output & Style"
 
     def system_prompt(self, to_add: str) -> str:
         """Add instruction to avoid em-dashes."""

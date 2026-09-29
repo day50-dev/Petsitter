@@ -20,6 +20,7 @@ class ExportItTrick(Trick):
 
     __brief__ = "Export conversation as llcat-compatible JSON"
     __display_name__ = "Export It"
+    __category__ = "Diagnostics"
     prompt_keyword = "exportit"
 
     def handle_prompt_keyword(self, request: str, messages: list | None = None, payload: dict | None = None) -> dict | None:

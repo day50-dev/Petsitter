@@ -23,6 +23,7 @@ class MultiConsultTrick(Trick):
 
     __brief__ = "Two models iteratively improve and vote on each other's responses"
     __display_name__ = "Multi-Model Consultant"
+    __category__ = "Reasoning & Quality"
     required_models = ["default", "consultant"]
 
     def __init__(self, max_rounds: int = 2):

@@ -9,6 +9,7 @@ class KennelTrick(Trick):
 
     __brief__ = "Pipelines thinker, tool-caller, and emitter models"
     __display_name__ = "Kennel"
+    __category__ = "Reasoning & Quality"
     required_models = ["default", "thinker", "toolcall"]
 
     def __init__(self):

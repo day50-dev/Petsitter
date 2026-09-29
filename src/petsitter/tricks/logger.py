@@ -45,6 +45,7 @@ class LoggerTrick(Trick):
 
     __brief__ = "Writes every request/response as timestamped JSONL to a file"
     __display_name__ = "Traffic Logger"
+    __category__ = "Diagnostics"
     config_fields = [
         {
             "key": "path",

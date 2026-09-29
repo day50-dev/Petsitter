@@ -182,6 +182,12 @@ class Trick:
     Subclasses should set:
         __brief__: Short one-line description shown in the dashboard.
         __display_name__: Human-readable name (defaults to class name).
+        __category__: Free-form grouping label (e.g. "Tool Calling",
+            "Diagnostics"). There is no fixed list -- the dashboard just
+            groups the Available Tricks list by whatever values the
+            installed tricks happen to use, alphabetically, with uncategorized
+            tricks under "Other". Reuse an existing category where one fits;
+            check the other tricks in this directory before inventing a new one.
         config_fields: Optional list of configurable key/value settings
             (see ``Trick.configure`` for the schema). Tricks with config
             fields get a gear icon in the dashboard to edit them.
@@ -216,6 +222,7 @@ class Trick:
     replace_system_prompt: bool = False
     __brief__: str = ""
     __display_name__: str = ""
+    __category__: str = ""
     config_fields: list[dict] = []
 
     def configure(self, config: dict) -> None:

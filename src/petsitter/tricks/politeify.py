@@ -36,6 +36,7 @@ class PoliteifyTrick(Trick):
 
     __brief__ = "Rewrites the user's message to be more polite before it reaches the model"
     __display_name__ = "Politeify"
+    __category__ = "Output & Style"
     config_fields = [
         {
             "key": "min_length",

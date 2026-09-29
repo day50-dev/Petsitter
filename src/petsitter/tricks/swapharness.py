@@ -94,6 +94,7 @@ class SwapHarnessTrick(Trick):
     replace_system_prompt = True
     __brief__ = "Browse and swap system prompts from AI tool repos"
     __display_name__ = "Swap Harness"
+    __category__ = "Context & Prompts"
 
     def install(self) -> None:
         """Clone up front, synchronously: adding a trick is allowed to take a moment."""

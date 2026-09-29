@@ -44,6 +44,7 @@ class RecommenderListTrick(Trick):
 
     __brief__ = "Makes the model pick software from the user's preferred list"
     __display_name__ = "Recommender List"
+    __category__ = "Output & Style"
     prompt_keyword = "recommend"
     config_fields = [
         {

@@ -11,6 +11,7 @@ class MultiRoundTrick(Trick):
 
     __brief__ = "Step-by-step reasoning with self-critique and revision"
     __display_name__ = "Multi-Round"
+    __category__ = "Reasoning & Quality"
     keywords = ["multiround"]
 
     def system_prompt(self, to_add: str) -> str:

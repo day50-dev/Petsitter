@@ -66,6 +66,7 @@ class SecretsProtectorTrick(Trick):
 
     __brief__ = "Pseudonymizes API keys, tokens, and PII before sending to the model"
     __display_name__ = "Secrets Protector"
+    __category__ = "Safety & Privacy"
 
     def __init__(self, patterns: list | None = None):
         self._patterns = patterns if patterns is not None else _PATTERNS

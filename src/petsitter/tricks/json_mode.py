@@ -15,6 +15,7 @@ class JsonModeTrick(Trick):
 
     __brief__ = "Enforces valid JSON output with automatic retry on failure"
     __display_name__ = "JSON Mode"
+    __category__ = "Reasoning & Quality"
 
     def __init__(self, max_attempts: int = 3):
         self.max_attempts = max_attempts

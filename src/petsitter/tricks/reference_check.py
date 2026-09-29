@@ -69,6 +69,7 @@ class ReferenceCheckTrick(Trick):
 
     __brief__ = "Challenges answers that cite no valid reference from a retrieval tool"
     __display_name__ = "Reference Check"
+    __category__ = "Reasoning & Quality"
     prompt_keyword = "refcheck"
     config_fields = [
         {

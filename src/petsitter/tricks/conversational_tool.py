@@ -18,6 +18,7 @@ class ConversationalToolTrick(Trick):
 
     __brief__ = "Guided tool calling with one-by-one parameter collection"
     __display_name__ = "Conversational Tool"
+    __category__ = "Tool Calling"
 
     def __init__(self):
         self._tools_cache = None

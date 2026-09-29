@@ -18,6 +18,7 @@ class XmlToolTrick(Trick):
 
     __brief__ = "XML-style tool calling for small models"
     __display_name__ = "XML Tool"
+    __category__ = "Tool Calling"
 
     def __init__(self):
         self._tools_cache = None

@@ -101,6 +101,7 @@ class SelfImproverTrick(Trick):
 
     __brief__ = "Agent that can add, modify, and list tricks at runtime"
     __display_name__ = "Self-Improver"
+    __category__ = "Agents"
     prompt_keyword = "petsitter"
 
     def __init__(self, max_iterations: int = 10):

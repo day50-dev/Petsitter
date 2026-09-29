@@ -64,7 +64,7 @@ def _introspect_trick_file(path: Path) -> dict:
     """Extract display_name, brief, keywords, and prompt_keyword from a trick module without instantiating."""
     import importlib.util
 
-    info = {"path": str(path), "display_name": None, "brief": None, "keywords": [], "prompt_keyword": "", "config_fields": [], "mtime": path.stat().st_mtime_ns}
+    info = {"path": str(path), "display_name": None, "brief": None, "category": "", "keywords": [], "prompt_keyword": "", "config_fields": [], "mtime": path.stat().st_mtime_ns}
     try:
         spec = importlib.util.spec_from_file_location(path.stem, str(path))
         if spec and spec.loader:
@@ -75,6 +75,7 @@ def _introspect_trick_file(path: Path) -> dict:
                 if isinstance(obj, type) and issubclass(obj, Trick) and obj is not Trick:
                     info["display_name"] = getattr(obj, "__display_name__", None) or name
                     info["brief"] = getattr(obj, "__brief__", "")
+                    info["category"] = getattr(obj, "__category__", "") or ""
                     info["keywords"] = list(getattr(obj, "keywords", []) or [])
                     info["prompt_keyword"] = getattr(obj, "prompt_keyword", "") or ""
                     info["config_fields"] = list(getattr(obj, "config_fields", []) or [])

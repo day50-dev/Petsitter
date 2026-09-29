@@ -25,6 +25,7 @@ class RulesFileTrick(Trick):
 
     __brief__ = "Injects a rules file (AGENTS.md-style) into the system prompt"
     __display_name__ = "Rules File"
+    __category__ = "Context & Prompts"
     prompt_keyword = "rules"
     config_fields = [
         {

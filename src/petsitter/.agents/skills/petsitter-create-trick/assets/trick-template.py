@@ -11,6 +11,7 @@ class <Name>Trick(Trick):
 
     __brief__ = "<one-line summary shown in the dashboard>"
     __display_name__ = "<human-readable name>"
+    __category__ = "<grouping label, e.g. 'Tool Calling' -- reuse an existing category from src/petsitter/tricks/ if one fits>"
     keywords = ["<keyword>"]  # Optional: set to activate only when keyword is in user message
 
     def system_prompt(self, to_add: str) -> str:

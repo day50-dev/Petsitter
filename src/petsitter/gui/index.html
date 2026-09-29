@@ -784,7 +784,7 @@ async function fetchAvailable() {
 
   const locals = (local || []).filter(f => {
     if (!trickSearch) return true;
-    const hay = [f.display_name, f.path, f.brief, f.prompt_keyword, ...(f.keywords || [])].join(' ').toLowerCase();
+    const hay = [f.display_name, f.path, f.brief, f.category, f.prompt_keyword, ...(f.keywords || [])].join(' ').toLowerCase();
     return hay.includes(trickSearch);
   }).sort((a, b) => {
     if (sortMode === 'chrono') return (b.mtime || 0) - (a.mtime || 0);
@@ -802,7 +802,8 @@ async function fetchAvailable() {
     const more = hidden > 0
       ? `<div class="avail-more" onclick="setScope(true)">Show ${hidden} more community trick${hidden === 1 ? '' : 's'}</div>`
       : (browseAll && remote && remote.total ? '<div class="avail-more" onclick="setScope(false)">Show featured only</div>' : '');
-    el.innerHTML = locals.map(renderLocalTrick).join('') + remotes.map(renderRemoteTrick).join('') + more;
+    const communityHeader = (locals.length && remotes.length) ? '<div class="avail-category">Community</div>' : '';
+    el.innerHTML = renderGroupedByCategory(locals) + communityHeader + remotes.map(renderRemoteTrick).join('') + more;
   }
 
   if (remote && (remote.unavailable || remote.error)) {
@@ -814,6 +815,29 @@ async function fetchAvailable() {
   } else {
     status.textContent = '';
   }
+}
+
+function renderGroupedByCategory(locals) {
+  // Categories are whatever the installed tricks' authors chose -- there is
+  // no fixed list. Group by what's actually here, alphabetically, with
+  // uncategorized tricks under "Other" at the end. A single group (e.g. a
+  // search narrowed everything to one category, or no trick sets one at all)
+  // isn't worth a header, so skip grouping entirely in that case.
+  const groups = new Map();
+  for (const f of locals) {
+    const cat = (f.category || '').trim() || 'Other';
+    if (!groups.has(cat)) groups.set(cat, []);
+    groups.get(cat).push(f);
+  }
+  if (groups.size <= 1) return locals.map(renderLocalTrick).join('');
+  const names = [...groups.keys()].sort((a, b) => {
+    if (a === 'Other') return 1;
+    if (b === 'Other') return -1;
+    return a.localeCompare(b);
+  });
+  return names.map(name =>
+    `<div class="avail-category">${escapeHtml(name)}</div>` + groups.get(name).map(renderLocalTrick).join('')
+  ).join('');
 }
 
 function renderLocalTrick(f) {

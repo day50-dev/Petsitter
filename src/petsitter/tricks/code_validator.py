@@ -14,6 +14,7 @@ class CodeValidatorTrick(Trick):
 
     __brief__ = "Validates code changes by comparing model description against user request"
     __display_name__ = "Code Validator"
+    __category__ = "Reasoning & Quality"
 
     def __init__(self, max_attempts: int = 3):
         self.max_attempts = max_attempts

@@ -150,6 +150,7 @@ def _introspect(path: Path) -> dict:
         "path": str(path),
         "display_name": None,
         "brief": None,
+        "category": "",
         "keywords": [],
         "prompt_keyword": "",
         "required_models": ["default"],
@@ -167,6 +168,7 @@ def _introspect(path: Path) -> dict:
                 if isinstance(obj, type) and issubclass(obj, Trick) and obj is not Trick:
                     info["display_name"] = getattr(obj, "__display_name__", None) or name
                     info["brief"] = getattr(obj, "__brief__", "")
+                    info["category"] = getattr(obj, "__category__", "") or ""
                     info["keywords"] = list(getattr(obj, "keywords", []) or [])
                     info["prompt_keyword"] = getattr(obj, "prompt_keyword", "") or ""
                     info["required_models"] = list(getattr(obj, "required_models", ["default"]) or ["default"])

@@ -41,6 +41,7 @@ class McpToolsTrick(Trick):
 
     __brief__ = "Injects MCP tools from an mcp.json file into any harness"
     __display_name__ = "MCP Tools"
+    __category__ = "Tool Calling"
     prompt_keyword = "mcp"
     config_fields = [
         {

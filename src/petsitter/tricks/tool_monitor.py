@@ -136,6 +136,7 @@ class ToolMonitorTrick(Trick):
 
     __brief__ = "Publishes tool offered/withheld/fired events to a unix socket"
     __display_name__ = "Tool Monitor"
+    __category__ = "Diagnostics"
     config_fields = [
         {
             "key": "socket_path",

@@ -575,25 +575,30 @@ header .nav a:hover { background: #1a2a4d; }
   align-items: end;
 }
 
-.prov-row { display: flex; gap: 6px; align-items: center; }
+.prov-row { display: flex; gap: 6px; align-items: stretch; }
 .prov-row input { flex: 1; min-width: 0; }
-.prov-row .btn { flex-shrink: 0; }
+.prov-row .btn { flex-shrink: 0; align-self: stretch; }
 
-.prov-pick {
-  display: grid;
-  grid-template-columns: 70px 1fr;
-  gap: 8px;
-  align-items: start;
-  margin-top: 4px;
+/* the model field lines up with provider / key / url above it: label on top,
+   input full width, so all four fields read the same way. */
+.prov-pick { margin-top: 2px; }
+
+/* the model-refresh button is an icon now: the circular arrow, centered, and
+   tall enough to line up with the input it sits beside. */
+.prov-refresh {
+  width: 34px;
+  justify-content: center;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0;
 }
-.prov-pick .cfg-label { padding-top: 7px; }
 
 .prov-filter {
   width: 100%;
   box-sizing: border-box;
   background: #0e0e22;
   color: #e0e0e0;
-  border: 1px solid #2a5a3a;
+  border: 1px solid #2a2a55;
   border-radius: 4px;
   padding: 6px 8px;
   font-size: 12px;
@@ -1299,6 +1304,90 @@ header .nav a:hover { background: #1a2a4d; }
   max-width: 62ch;
   margin-bottom: 26px;
 }
+
+/* same lead/sub treatment, for tabs that open with an intro */
+.tab-intro { max-width: 860px; margin: 0 auto 22px; padding: 8px 0 0; }
+.tab-intro .intro-lead { margin-bottom: 8px; }
+.tab-intro .intro-sub { margin-bottom: 0; }
+
+/* the three-step onboarding: one row per thing to do, in order */
+.onboard { max-width: 860px; margin: 4px auto 30px; }
+
+.onboard-step {
+  display: flex;
+  gap: 16px;
+  background: #141428;
+  border: 1px solid #1e2a3a;
+  border-radius: 10px;
+  padding: 16px 18px;
+  margin-bottom: 12px;
+}
+.onboard-step.next { border-color: #2a4a6a; }
+.onboard-step.done { background: #121826; border-color: #1c2a22; }
+
+.ob-badge {
+  flex: none;
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  border: 1.5px solid #2a4a6a;
+  color: #8ab4ff;
+  font-size: 14px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.onboard-step.done .ob-badge { border-color: #2f7d4f; background: #16281f; color: #4ade80; }
+.onboard-step.next .ob-badge { background: #16203a; }
+
+.ob-content { flex: 1 1 auto; min-width: 0; }
+.ob-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+.ob-title { font-size: 15px; font-weight: 600; color: #e6eef7; }
+.onboard-step.done .ob-title { color: #9fb8a6; }
+.ob-toggle { flex: none; }
+.ob-desc { font-size: 13px; line-height: 1.55; color: #8fa6bd; max-width: 60ch; }
+.ob-detail { margin-top: 14px; }
+
+.ob-sum {
+  font-size: 12.5px; color: #9fd4b0;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background: #12201b;
+  border: 1px solid #1c3a2a;
+  border-radius: 7px;
+}
+.onboard-step:not(.done) .ob-sum { color: #8fa6bd; background: #141428; border-color: #1e2a3a; }
+
+.ob-tools { display: flex; flex-direction: column; gap: 8px; max-width: 420px; }
+.ob-tool {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 9px 12px;
+  background: #16162a;
+  border: 1px solid #1e2a3a;
+  border-radius: 8px;
+}
+.ob-tool.on { border-color: #2f7d4f; }
+.ob-tool-name { font-size: 13.5px; font-weight: 600; color: #c8d6e5; }
+.ob-tool .btn { flex: none; }
+/* step three: the tool-call demo, a placeholder until the pass is wired up */
+.ob-demo {
+  max-width: 460px;
+  padding: 12px 14px;
+  background: #141428;
+  border: 1px dashed #2a3a52;
+  border-radius: 8px;
+}
+.ob-demo-title { font-size: 13px; font-weight: 600; color: #c8d6e5; margin-bottom: 4px; }
+.ob-demo p { font-size: 12px; line-height: 1.5; color: #8fa6bd; margin: 0 0 10px; }
+.ob-demo-soon {
+  font-size: 11px; letter-spacing: .04em; text-transform: uppercase;
+  color: #6b8299;
+  padding: 4px 10px;
+  background: #191930;
+  border: 1px solid #2a3a52;
+  border-radius: 20px;
+}
+
+/* the "and if you want to go further" divider above the explore cards */
+.intro-more { margin: 34px 0 14px; }
+.intro-more h3 { font-size: 14px; font-weight: 600; color: #6b8299; letter-spacing: .02em; }
 
 /* the diagram */
 .intro-flow {

@@ -6,28 +6,36 @@ Naming upstream models so tricks can reach more than one.
 
 ---
 
-## Setting up a provider
+## Set your provider
 
-The Models tab opens with a provider picker: choose a provider, paste your key,
-and petsitter asks that provider which models it is serving *right now*. The list
-comes from the provider, not from petsitter, so it is never out of date -
-nobody has to update a hardcoded list when a new model ships or an old one is
-retired. Pick a model, choose which role it fills, and save.
+Petsitter is a proxy to your provider. This is where you set where the traffic
+goes: pick a provider, paste your key, pick a model.
 
-The same panel appears on the Start Here tab whenever no provider is set up yet,
-since nothing can flow through petsitter until one is.
+The list of models comes from the provider itself, so it is never out of date.
+Type to filter it, or press refresh to ask the provider again.
 
-The bare `url` / `model` / `key` fields underneath are untouched and still work
-on their own - use them for anything the picker doesn't list, including custom
-and self-hosted endpoints. The picker only ever writes to them.
+Picking a model fills the `url`, `model` and `key` fields, but saves nothing.
+A wrong model is free to undo, and the list folds up after a pick. Touch the
+model box again and it comes back.
 
-Fetched models also appear as suggestions on every role's model field, and stay
-free text, so a gateway that reports a partial list can't lock you out of a model
+Reload the page and the panel shows what you already have set: the provider,
+the key (marked "saved", never re-shown), and the model.
+
+The same panel shows on the Start Here tab until a provider is set, since
+nothing can flow through petsitter without one.
+
+An endpoint petsitter doesn't recognise (self-hosted, hand-written) still works.
+Pick "Something else" and a base-URL box appears, pre-filled with what the role
+already had. The bare `url` / `model` / `key` fields underneath still work on
+their own.
+
+Fetched models also show as suggestions on every role's model field. The field
+stays free text, so a gateway with a partial list can't lock you out of a model
 it didn't mention.
 
-Your API key is sent to the provider you picked, to ask it for that list, and
-into your config file when you save. It goes nowhere else. Fetching the list does
-not save anything - a key you were just trying out never lands on disk.
+Your key goes to the provider, to fetch the list, and into your config when you
+save. Nowhere else. Fetching the list saves nothing, so a key you're just trying
+out never lands on disk.
 
 ### Providers listed as "models only"
 

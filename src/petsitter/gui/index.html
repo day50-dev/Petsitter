@@ -68,7 +68,52 @@
 
   <p class="intro-lead">Petsitter sits between the tools you already use<br>and the AI provider they talk to.</p>
   <p class="intro-sub">Everything passes through here on its way out, and again on its way back.
-  Your tools don&rsquo;t need to know it&rsquo;s there, and nothing about the way you work has to change.</p>
+  Your tools don&rsquo;t need to know it&rsquo;s there, and nothing about the way you work has to change.
+  Three short steps get it running.</p>
+
+  <div class="onboard" id="onboard">
+    <div class="onboard-step" id="ob-step1" data-ob="1">
+      <div class="ob-badge" id="ob-badge1">1</div>
+      <div class="ob-content">
+        <div class="ob-top"><div class="ob-title">Set your provider</div>
+          <button class="btn btn-sm btn-neutral ob-toggle" id="ob-toggle1" onclick="obToggle(1)">set up</button></div>
+        <div class="ob-desc">Where your requests go. Pick a provider, paste your key, choose a model.</div>
+        <div class="ob-detail" id="ob-detail1" hidden>
+          <div class="ob-sum" id="ob-sum1"></div>
+          <div id="prov-panel-intro"></div>
+        </div>
+      </div>
+    </div>
+    <div class="onboard-step" id="ob-step2" data-ob="2">
+      <div class="ob-badge" id="ob-badge2">2</div>
+      <div class="ob-content">
+        <div class="ob-top"><div class="ob-title">Connect a tool</div>
+          <button class="btn btn-sm btn-neutral ob-toggle" id="ob-toggle2" onclick="obToggle(2)">connect</button></div>
+        <div class="ob-desc">Point a tool you already use at petsitter. It edits the tool&rsquo;s own config, and puts it back exactly when you switch off.</div>
+        <div class="ob-detail" id="ob-detail2" hidden>
+          <div class="ob-sum" id="ob-sum2"></div>
+          <div class="ob-tools" id="ob-tools"></div>
+        </div>
+      </div>
+    </div>
+    <div class="onboard-step" id="ob-step3" data-ob="3">
+      <div class="ob-badge" id="ob-badge3">3</div>
+      <div class="ob-content">
+        <div class="ob-top"><div class="ob-title">See it do a trick</div>
+          <button class="btn btn-sm btn-neutral ob-toggle" id="ob-toggle3" onclick="obToggle(3)">watch</button></div>
+        <div class="ob-desc">The first real thing: a message goes in, and a tool call comes back shaped. That&rsquo;s petsitter working, not just passing traffic through.</div>
+        <div class="ob-detail" id="ob-detail3" hidden>
+          <div class="ob-sum" id="ob-sum3"></div>
+          <div class="ob-demo">
+            <div class="ob-demo-title">Tool-call demo</div>
+            <p>One message in, a clean tool call out. You&rsquo;ll watch the raw model answer get turned
+            into the shape your tool expects.</p>
+            <span class="ob-demo-soon">coming soon</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div class="intro-flow">
     <div class="inode">
@@ -91,21 +136,10 @@
     <span class="idot"></span><span id="intro-status-text">Nothing has come through yet &mdash; that&rsquo;s normal.</span>
   </div>
 
-  <div class="intro-setup" id="intro-setup" hidden>
-    <h3>It needs an AI provider to sit in front of</h3>
-    <p class="intro-setup-sub">Pick a provider, paste your key, and petsitter asks it which models it is serving right now.</p>
-    <div id="prov-panel-intro"></div>
-    <div class="intro-setup-more"><button class="btn btn-sm btn-neutral" onclick="switchTab('models')">See every option</button></div>
-  </div>
-
-  <div class="intro-actions">
-    <button class="btn-cta" onclick="switchTab('agents')">Connect a tool<span class="cta-arrow">&rarr;</span></button>
-    <button class="btn-ghost" onclick="togglePlayground()">or send a test message</button>
-  </div>
-
   <p class="intro-note">None of it is on until you turn it on, and you can take it back out whenever you
   like &mdash; point your tool back where it was and it&rsquo;s as if petsitter had never been here.</p>
 
+  <div class="intro-more"><h3>And if you want to go further</h3></div>
   <div class="intro-cards">
     <div class="intro-card" role="button" tabindex="0" onclick="switchTab('logs')"
          onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('logs');}">
@@ -178,9 +212,14 @@
 
 <!-- === MODELS TAB === -->
 <div class="tab-pane" id="tab-models">
+<div class="tab-intro">
+<p class="intro-lead">Petsitter is a proxy to your provider. This is where you set where the traffic goes.</p>
+<p class="intro-sub">Pick a provider, paste your key, and petsitter asks it which models it has. The list comes
+straight from the provider, so it&rsquo;s never out of date. Providers marked <em>models only</em> can&rsquo;t
+take requests directly, but a gateway like OpenRouter reaches those too.</p>
+</div>
 <div class="card">
-<div class="card-title"><h2>Set up a provider</h2></div>
-<div class="section-desc">Pick a provider, paste your key, and petsitter asks it which models it is serving right now &mdash; so the list is never out of date. Choose one and you&rsquo;re set. Providers marked <em>models only</em> can list their models but won&rsquo;t take requests; a gateway like OpenRouter reaches those too.</div>
+<div class="card-title"><h2>Set your provider</h2></div>
 <div id="prov-panel-models"></div>
 </div>
 <div class="card">
@@ -415,8 +454,15 @@ async function refreshIntro() {
     }
     // Nothing can flow through until a provider is chosen, so offer the
     // provider setup here rather than making a new visitor find the Models tab.
-    const setup = document.getElementById('intro-setup');
-    if (setup) setup.hidden = !!d.model_url;
+    const wasProvider = _ob.provider;
+    _ob.provider = !!d.model_url;
+    _ob.model = d.model_name || '';
+    const pp = provById(d.provider_id);
+    _ob.provLabel = (pp && pp.label) || (d.provider_id ? d.provider_id : '');
+    // A step that just finished nudges the next one open, once. Only on the
+    // intro tab, so a save from the Models tab doesn't yank the visitor back.
+    if (currentTab === 'intro' && _ob.provider && !wasProvider && !_ob.tool) _ob.open[2] = true;
+    paintOnboard();
   } catch (e) {
     // The intro is decoration; it must never take the rest of the page with it.
     console.warn('intro refresh failed:', e);
@@ -460,10 +506,92 @@ function paintIntroTraffic() {
   const plural = _introSeen === 1 ? 'request has' : 'requests have';
   text.textContent = _introSeen + ' ' + plural + ' passed through'
     + (recent ? ' \u2014 just now.' : '.');
-  if (tools && _introSeen) tools.textContent = 'something is connected';
+   if (tools && _introSeen) tools.textContent = 'something is connected';
+  if (document.getElementById('tab-intro')) paintOnboard();
 }
 
 setInterval(paintIntroTraffic, 4000);
+
+// ---- onboarding (the three steps a new visitor has to do) ----
+// Provider, tool, first request. Each step is its own row that folds to a check
+// once done, so the page reads as a list of three things to do, in order.
+let _ob = {
+  provider: false, provLabel: '', model: '',
+  tool: false, toolName: '',
+  open: {1: true, 2: false, 3: false},
+};
+let _obAgents = null;      // {id, name, ready}[]  -- filled by fetchAgents()
+let _obRegistered = {};    // {id: true}          -- filled by fetchAgents()
+
+function paintOnboard() {
+  const done = [_ob.provider, _ob.tool, _introSeen > 0];
+  const next = done.indexOf(false) + 1;   // 0 when all three are done
+
+  const labels = {1: 'provider', 2: 'tool', 3: 'watch'};
+  for (let n = 1; n <= 3; n++) {
+    const step = document.getElementById('ob-step' + n);
+    if (!step) continue;
+    const isDone = done[n - 1];
+    step.classList.toggle('done', isDone);
+    step.classList.toggle('next', n === next);
+    const badge = document.getElementById('ob-badge' + n);
+    if (badge) badge.innerHTML = isDone ? '&#10003;' : String(n);
+    const btn = document.getElementById('ob-toggle' + n);
+    if (btn) btn.textContent = isDone ? 'change' : labels[n];
+    // A step that just finished closes itself, so the check is the payoff and
+    // the row folds to a single line. Reopening is the "change" button.
+    if (isDone && !window['_obDone' + n]) _ob.open[n] = false;
+    window['_obDone' + n] = isDone;
+    const detail = document.getElementById('ob-detail' + n);
+    if (detail) detail.hidden = !_ob.open[n];
+  }
+  for (let n = 1; n <= 3; n++) {
+    const sum = document.getElementById('ob-sum' + n);
+    if (!sum) continue;
+    let line = '';
+    if (n === 1) line = _ob.provider
+      ? (_ob.provLabel + (_ob.model ? ' @ ' + _ob.model : '') + ' is set')
+      : 'Pick one to start.';
+    if (n === 2) line = _ob.tool
+      ? _ob.toolName + ' is connected'
+      : (_ob.provider ? 'Pick a tool to route through.' : 'Set a provider first.');
+    if (n === 3) line = _introSeen > 0
+      ? _introSeen + ' message' + (_introSeen === 1 ? '' : 's') + ' through, and the trick held'
+      : 'Send one through and watch it get shaped.';
+    sum.textContent = line;
+  }
+}
+
+function obToggle(n) {
+  _ob.open[n] = !_ob.open[n];
+  paintOnboard();
+}
+
+// Step three: the first real thing. A message goes in and a tool call comes
+// back shaped. Not built yet; when it lands, this runs the pass and fills
+// #ob-demo with the before/after. Left as a stub for now.
+async function obRunDemo() {}
+
+// The step-two tool list. fetchAgents() owns the full grid on the Agents tab;
+// this is the same data, reduced to the tools someone can actually turn on now.
+function paintOnboardTools() {
+  const el = document.getElementById('ob-tools');
+  if (!el || !_obAgents) return;
+  el.innerHTML = _obAgents.map(a => {
+    const on = _obRegistered[a.id];
+    const btn = on
+      ? `<button class="btn btn-sm btn-secondary" onclick="switchTab('agents')">&#10003; connected</button>`
+      : `<button class="btn btn-sm btn-secondary" onclick="obConnectTool('${escapeHtml(a.id)}')">connect</button>`;
+    return `<div class="ob-tool${on ? ' on' : ''}"><span class="ob-tool-name">${escapeHtml(a.name)}</span>${btn}</div>`;
+  }).join('');
+}
+
+async function obConnectTool(id) {
+  const name = (window._agentNames && window._agentNames[id]) || id;
+  await toggleAgent(id, true);
+  _ob.tool = true; _ob.toolName = name;
+  paintOnboard();
+}
 
 // ---- info ----
 async function fetchInfo() {
@@ -1351,7 +1479,7 @@ function mountProviderPanel(containerId, prefix) {
 <div>
 <div class="prov-row">
 <input type="text" id="${prefix}-model" class="prov-filter" autocomplete="off" spellcheck="false" onfocus="showProviderList('${prefix}')" oninput="onProviderModelInput('${prefix}')" onkeydown="provModelKeys('${prefix}',event)">
-<button class="btn btn-sm btn-neutral" id="${prefix}-refresh" onclick="fetchProviderModels('${prefix}')" title="Ask the provider for its models again">refresh</button>
+<button class="btn btn-neutral prov-refresh" id="${prefix}-refresh" onclick="fetchProviderModels('${prefix}')" title="Ask the provider for its models again">&#8635;</button>
 </div>
 <div class="prov-list" id="${prefix}-modellist"></div>
 <div class="prov-status" id="${prefix}-status"></div>
@@ -1499,8 +1627,6 @@ function onProviderModelInput(prefix) {
 function paintProviderModels(prefix) {
   const list = provEl(prefix, 'modellist');
   if (!list) return;
-  list.hidden = false;
-  _provState.listOpen = true;
   const n = _provState.models.length;
   if (!n) {
     const msg = provIdleMsg(prefix);
@@ -1599,6 +1725,7 @@ async function provPickModel(prefix, modelId) {
     Object.keys(_provPanels).forEach(q => {
       const f = provEl(q, 'model');
       if (f) f.value = modelId;
+      paintProviderModels(q);
     });
     paintProvider();
     fetchModels();
@@ -1607,7 +1734,6 @@ async function provPickModel(prefix, modelId) {
     // having it there, so that panel has to close too.
     refreshIntro();
   }
-}
 }
 
 // Put the picker back where it was left, so a reload shows the values that are
@@ -1640,6 +1766,9 @@ async function restoreProviderSelection() {
     const model = provEl(prefix, 'model');
     if (model) model.value = _provState.savedModel;
   });
+  // A model is already in use, so the list starts folded the way it does after
+  // a pick. Touching the model box opens it again.
+  _provState.listOpen = false;
   paintProvider();
   // No request on page load: a provider that is merely unreachable shouldn't
   // greet someone who has not opened the panel with an error.
@@ -1848,6 +1977,14 @@ function changeLogLevel() {
   startLogStream();
 }
 
+// Close the log stream the moment the page goes away. Without this, a reload
+// or tab close has an open streaming response to unwind and the navigation
+// stalls on it until the server gives up; pagehide fires before the old
+// document is torn down, so the connection is released cleanly.
+window.addEventListener('pagehide', function() {
+  if (logEventSource) logEventSource.close();
+});
+
 function clearLogDisplay() {
   if (logEventSource) logEventSource.close();
   document.getElementById('log-viewer').innerHTML = '';
@@ -1941,6 +2078,17 @@ async function fetchAgents() {
       String(agents[x].display_name || x).localeCompare(String(agents[y].display_name || y)));
     window._agentNames = {};
     ids.forEach(i => { window._agentNames[i] = agents[i].display_name || i; });
+    // The onboarding tool step shows the same set, reduced to tools you can act
+    // on now. A tool that's already registered counts step two as done.
+    _obRegistered = {};
+    ids.forEach(i => { if (regAgents[i] && regAgents[i].status === 'registered') _obRegistered[i] = true; });
+    _obAgents = ordered.map(i => ({ id: i, name: agents[i].display_name || i, ready: (agents[i].detect || {}).status === 'ready' }));
+    if (!_ob.tool) {
+      const reg = ids.find(i => _obRegistered[i]);
+      if (reg) { _ob.tool = true; _ob.toolName = agents[reg].display_name || reg; }
+    }
+    paintOnboardTools();
+    paintOnboard();
     el.innerHTML = ordered.map(id => {
       const a = agents[id];
       const d = a.detect || {};

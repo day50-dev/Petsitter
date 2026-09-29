@@ -212,6 +212,12 @@
 
 <!-- === MODELS TAB === -->
 <div class="tab-pane" id="tab-models">
+<div class="models-body">
+<div class="ts-pills" id="model-method-pills">
+<span class="pill active" id="mm-simple" onclick="setModelMethod('simple')">Simple</span>
+<span class="pill" id="mm-advanced" onclick="setModelMethod('advanced')">Advanced</span>
+</div>
+<div id="model-method-simple">
 <div class="tab-intro">
 <p class="intro-lead">Petsitter is a proxy to your provider. This is where you set where the traffic goes.</p>
 <p class="intro-sub">Pick a provider, paste your key, and petsitter asks it which models it has. The list comes
@@ -222,11 +228,15 @@ take requests directly, but a gateway like OpenRouter reaches those too.</p>
 <div class="card-title"><h2>Set your provider</h2></div>
 <div id="prov-panel-models"></div>
 </div>
+</div>
+<div id="model-method-advanced" hidden>
 <div class="card">
-<div class="card-title"><h2>Models</h2></div>
-<div class="section-desc">Upstream model endpoints. Set an API key to false (passthrough) to let the client supply its own key.</div>
+<div class="section-desc">Some tricks (kennel, multiconsult) route subtasks to a named role, so they reach more than
+the default model. Set an API key to false (passthrough) to let the client supply its own key.</div>
 <datalist id="role-model-list"></datalist>
 <div class="models-list" id="model-list"><div class="loader">Loading...</div></div>
+</div>
+</div>
 </div>
 </div>
 
@@ -609,8 +619,9 @@ async function fetchInfo() {
 // to send requests here. This is the thing that actually works for that
 // case: flip it and every request from every client, no matter what they
 // think their config is, gets forwarded untouched starting immediately.
-// Polled rather than fetched once so the banner stays honest if it's
-// toggled from another tab, the API directly, or another dashboard session.
+// Streamed over SSE rather than polled, so the banner updates the instant it's
+// toggled from another tab, the CLI, or another dashboard session, and there's
+// no request flooding the log when nothing has changed.
 function renderPauseState(paused) {
   const btn = document.getElementById('pause-btn');
   const banner = document.getElementById('paused-banner');
@@ -618,11 +629,19 @@ function renderPauseState(paused) {
   if (banner) banner.classList.toggle('visible', !!paused);
 }
 
-async function fetchPauseState() {
-  try {
-    const d = await fetchJSON('/api/pause');
-    renderPauseState(d.paused);
-  } catch(e) { console.error(e); }
+let pauseEventSource = null;
+function startPauseStream() {
+  if (pauseEventSource) pauseEventSource.close();
+  pauseEventSource = new EventSource('/api/pause/stream');
+  pauseEventSource.onmessage = function(e) {
+    if (e.data && e.data.startsWith('{')) {
+      try { renderPauseState(JSON.parse(e.data).paused); } catch(_) {}
+    }
+  };
+  pauseEventSource.onerror = function() {
+    pauseEventSource.close();
+    setTimeout(startPauseStream, 3000);
+  };
 }
 
 async function togglePause() {
@@ -637,8 +656,6 @@ async function togglePause() {
     showToast(d.paused ? 'Paused — forwarding everything untouched' : 'Resumed — tricks are active again');
   } catch(e) { showToast(e.message, true); }
 }
-
-setInterval(fetchPauseState, 5000);
 
 // ---- tricks ----
 let _dragName = null;
@@ -1775,6 +1792,26 @@ async function restoreProviderSelection() {
   if (_provState.hasKey || (p && p.auth === 'none')) fetchProviderModels('provm');
 }
 
+// ---- models tab: which method the user last used ----
+// Simple is the provider picker, Advanced is the per-role endpoints. They are
+// the two ways to point petsitter at a model, shown one at a time. The choice is
+// remembered so someone in Advanced mode is not punted back to Simple on a
+// reload.
+const MM_KEY = 'petsitter.modelMethod';
+function setModelMethod(m) {
+  m = (m === 'advanced') ? 'advanced' : 'simple';
+  try { localStorage.setItem(MM_KEY, m); } catch(_) {}
+  document.getElementById('model-method-simple').hidden = (m !== 'simple');
+  document.getElementById('model-method-advanced').hidden = (m !== 'advanced');
+  document.getElementById('mm-simple').classList.toggle('active', m === 'simple');
+  document.getElementById('mm-advanced').classList.toggle('active', m === 'advanced');
+}
+function initModelMethod() {
+  let m = 'simple';
+  try { m = localStorage.getItem(MM_KEY) || 'simple'; } catch(_) {}
+  setModelMethod(m);
+}
+
 async function fetchProviders() {
   try {
     const d = await fetchJSON('/api/providers');
@@ -1983,6 +2020,7 @@ function changeLogLevel() {
 // document is torn down, so the connection is released cleanly.
 window.addEventListener('pagehide', function() {
   if (logEventSource) logEventSource.close();
+  if (pauseEventSource) pauseEventSource.close();
 });
 
 function clearLogDisplay() {
@@ -2268,7 +2306,8 @@ var initHash = parseHash();
 switchTab(initHash.tab);
 if (initHash.ts !== '_default') selectedTrickset = initHash.ts;
 trickSearch = (document.getElementById('trick-search').value || '').toLowerCase();
-fetchInfo(); fetchTricksets(); fetchAvailable(); fetchModels(); fetchAgents(); fetchPauseState();
+initModelMethod();
+fetchInfo(); fetchTricksets(); fetchAvailable(); fetchModels(); fetchAgents(); startPauseStream();
 fetchProviders();
 startLogStream();
 refreshIntro();

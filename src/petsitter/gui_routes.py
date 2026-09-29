@@ -15,6 +15,14 @@ from petsitter.trickset import Trickset, SCHEMA
 
 _log_capture = None
 _config_path: str | None = None
+_pause_clients: set[asyncio.Queue] = set()
+
+
+def pause_notify() -> None:
+    """Wake every connected pause dashboard so it picks up a new state at once,
+    instead of waiting for the next poll. Called by POST /api/pause."""
+    for q in list(_pause_clients):
+        q.put_nowait(None)
 
 
 def _save_full_config(handler, api_key):
@@ -489,3 +497,33 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
 
         return StreamingResponse(event_generator(), media_type="text/event-stream")
     app.add_route("/api/logs", gui_logs_sse, methods=["GET"])
+
+    async def gui_pause_sse(request: Request) -> StreamingResponse:
+        from petsitter.server import is_shutting_down
+
+        async def event_generator():
+            q: asyncio.Queue = asyncio.Queue()
+            _pause_clients.add(q)
+            try:
+                yield f"data: {json.dumps({'paused': handler.paused})}\n\n"
+                idle = 0.0
+                while True:
+                    if is_shutting_down() or await request.is_disconnected():
+                        break
+                    try:
+                        await asyncio.wait_for(q.get(), timeout=1.0)
+                    except asyncio.TimeoutError:
+                        idle += 1.0
+                        if idle >= 30:
+                            idle = 0.0
+                            yield ": keepalive\n\n"
+                        continue
+                    idle = 0.0
+                    yield f"data: {json.dumps({'paused': handler.paused})}\n\n"
+            except asyncio.CancelledError:
+                pass
+            finally:
+                _pause_clients.discard(q)
+
+        return StreamingResponse(event_generator(), media_type="text/event-stream")
+    app.add_route("/api/pause/stream", gui_pause_sse, methods=["GET"])

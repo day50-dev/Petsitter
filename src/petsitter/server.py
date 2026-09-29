@@ -738,6 +738,8 @@ def create_app(
             body = {}
         paused = bool(body.get("paused", True))
         handler.paused = paused
+        from petsitter.gui_routes import pause_notify
+        pause_notify()
         return JSONResponse({"paused": handler.paused})
     app.add_route("/api/pause", set_pause_state, methods=["POST"])
 

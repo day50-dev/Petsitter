@@ -1310,6 +1310,10 @@ header .nav a:hover { background: #1a2a4d; }
 .tab-intro .intro-lead { margin-bottom: 8px; }
 .tab-intro .intro-sub { margin-bottom: 0; }
 
+/* the copy up top sits in a centered column, so the method pills and the cards
+   below it share that same width instead of stretching edge to edge. */
+.models-body { max-width: 860px; margin: 0 auto; }
+
 /* the three-step onboarding: one row per thing to do, in order */
 .onboard { max-width: 860px; margin: 4px auto 30px; }
 

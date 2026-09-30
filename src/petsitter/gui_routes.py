@@ -74,7 +74,7 @@ def _introspect_trick_file(path: Path) -> dict:
     """Extract display_name, brief, keywords, and prompt_keyword from a trick module without instantiating."""
     import importlib.util
 
-    info = {"path": str(path), "name": "", "display_name": None, "brief": None, "category": "", "keywords": [], "prompt_keyword": "", "required_models": [], "config_fields": [], "readme": "", "mtime": path.stat().st_mtime_ns}
+    info = {"path": str(path), "name": "", "display_name": None, "brief": None, "category": "", "keywords": [], "prompt_keyword": "", "required_models": [], "config_fields": [], "readme": "", "has_ui": False, "mtime": path.stat().st_mtime_ns}
     try:
         info["readme"] = _module_readme(path.read_text(encoding="utf-8"))
     except OSError:
@@ -90,6 +90,7 @@ def _introspect_trick_file(path: Path) -> dict:
                     info["name"] = name
                     info["display_name"] = getattr(obj, "__display_name__", None) or name
                     info["required_models"] = list(getattr(obj, "required_models", []) or [])
+                    info["has_ui"] = obj.has_ui()
                     info["brief"] = getattr(obj, "__brief__", "")
                     info["category"] = getattr(obj, "__category__", "") or ""
                     info["keywords"] = list(getattr(obj, "keywords", []) or [])
@@ -159,6 +160,81 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
             ]
         return JSONResponse(out)
     app.add_route("/api/traffic", gui_traffic, methods=["GET"])
+
+    # ---- Live pages ------------------------------------------------------
+    # A trick's optional page (Trick.ui_page / ui_html) and its two pipes,
+    # served under one directory so the page can use relative URLs:
+    #   /api/tricks/ui/<id>/         the page
+    #   /api/tricks/ui/<id>/events   what the trick publish()ed, then live
+    #   /api/tricks/ui/<id>/action   POST, answered by trick.ui_action()
+    # The page runs same-origin, i.e. with the dashboard's own access. That
+    # adds nothing: the trick's Python already runs inside petsitter.
+
+    def _trick_by_id(tid: str):
+        for ts in handler.tricksets.values():
+            for i, t in enumerate(ts.tricks):
+                if i < len(ts.trick_ids) and ts.trick_ids[i] == tid:
+                    return t
+        return None
+
+    async def gui_trick_ui(request: Request) -> Response:
+        tid = request.path_params.get("tid", "")
+        if not request.url.path.endswith("/"):
+            from starlette.responses import RedirectResponse
+            return RedirectResponse(request.url.path + "/")
+        trick = _trick_by_id(tid)
+        if trick is None or not type(trick).has_ui():
+            return JSONResponse({"error": "no live page for this extension"}, status_code=404)
+        try:
+            page = trick.ui_html() or ""
+        except OSError as e:
+            return JSONResponse({"error": f"couldn't read the live page: {e}"}, status_code=500)
+        return Response(content=page, media_type="text/html", headers=NO_STORE)
+    app.add_route("/api/tricks/ui/{tid}", gui_trick_ui, methods=["GET"])
+    app.add_route("/api/tricks/ui/{tid}/", gui_trick_ui, methods=["GET"])
+
+    async def gui_trick_ui_events(request: Request) -> Response:
+        trick = _trick_by_id(request.path_params.get("tid", ""))
+        if trick is None:
+            return JSONResponse({"error": "not installed"}, status_code=404)
+        feed = trick.live_feed
+
+        async def event_generator():
+            from petsitter.server import is_shutting_down
+            seq, idle = 0, 0.0
+            try:
+                while True:
+                    for seq, event in feed.since(seq):
+                        yield f"data: {json.dumps(event, default=str)}\n\n"
+                        idle = 0.0
+                    if is_shutting_down() or await request.is_disconnected():
+                        break
+                    await asyncio.sleep(0.25)
+                    idle += 0.25
+                    if idle >= 15:
+                        idle = 0.0
+                        yield ": keepalive\n\n"
+            except asyncio.CancelledError:
+                pass
+
+        return StreamingResponse(event_generator(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache"})
+    app.add_route("/api/tricks/ui/{tid}/events", gui_trick_ui_events, methods=["GET"])
+
+    async def gui_trick_ui_action(request: Request) -> Response:
+        trick = _trick_by_id(request.path_params.get("tid", ""))
+        if trick is None:
+            return JSONResponse({"error": "not installed"}, status_code=404)
+        try:
+            data = await request.json()
+        except Exception:
+            data = None
+        try:
+            reply = trick.ui_action(data)
+        except Exception as e:
+            return JSONResponse({"error": f"{type(e).__name__}: {e}"}, status_code=500)
+        return JSONResponse(reply if reply is not None else {"ok": True})
+    app.add_route("/api/tricks/ui/{tid}/action", gui_trick_ui_action, methods=["POST"])
 
     async def gui_tricks(request: Request) -> Response:
         return JSONResponse(handler.get_tricks_info())

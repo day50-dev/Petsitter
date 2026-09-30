@@ -1534,8 +1534,12 @@ header .nav a:hover { background: #1a2a4d; }
    between tabs -- a landing screen that jumps as soon as you click anything
    reads as broken. The filter bar underneath is trickset vocabulary, so it
    keeps its box but not its contents. */
-/* Start here isn't about any one channel, so the channel title bar goes. */
-body.on-intro #ts-bar { display: none; }
+/* Start here, Help and New channel aren't about any one channel, so the
+   channel title bar goes. */
+body.no-channel #ts-bar { display: none; }
+/* ...and the tabs are a channel's tabs, so they go with it. */
+body.no-channel .tabs { display: none; }
+.section-desc a { color: #8ab4ff; }
 
 /* the explanation detect() already produced, which the card used to discard */
 .agent-why {
@@ -1815,6 +1819,7 @@ body.on-intro #ts-bar { display: none; }
 .ext-side {
   position: sticky;
   top: 12px;
+  /* fallback only: fitExtPanes() sets the real height from where it starts */
   max-height: calc(100vh - 24px);
   overflow-y: auto;
   padding: 12px;
@@ -1830,19 +1835,80 @@ body.on-intro #ts-bar { display: none; }
   margin-bottom: 12px;
 }
 .ext-search:focus { outline: none; border-color: #2a4a6a; }
-.ext-sec + .ext-sec { margin-top: 14px; }
+/* Installed and Browse are two different things (what this channel runs,
+   what you could add), so they look it: full-width header bars that pin to
+   the top of the list while you scroll their section, an inset panel for
+   Installed, and quiet category labels inside Browse. */
+.ext-sec + .ext-sec { margin-top: 16px; }
 .ext-sec-h {
+  position: sticky;
+  top: -12px;              /* the list's own top padding */
+  z-index: 2;
   display: flex;
-  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% + 24px);
+  margin: 0 -12px 8px;
+  padding: 9px 12px;
+  background: #1a1a33;
+  border: none;
+  border-top: 1px solid #2a3a4a;
+  border-bottom: 1px solid #2a3a4a;
+  color: #c8d6e5;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+}
+.ext-sec-h:hover { background: #1e2240; }
+.ext-sec-title { flex: 1; }
+.ext-chev { width: 12px; font-size: 10px; color: #6b8299; transition: transform .15s ease; }
+.ext-sec.collapsed .ext-chev { transform: rotate(-90deg); }
+.ext-sec.collapsed .ext-sec-body { display: none; }
+.ext-sec.collapsed .ext-sec-h { margin-bottom: 0; }
+.ext-count {
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-  color: #7a9ab5;
-  margin-bottom: 2px;
+  letter-spacing: 0;
+  color: #8ab4ff;
+  background: #1a2a4d;
+  border-radius: 9px;
+  padding: 0 8px;
+  line-height: 18px;
 }
-.ext-count { color: #4a6572; }
-.ext-sec-desc { font-size: 11px; color: #4a6572; margin-bottom: 6px; }
+.ext-count:empty { display: none; }
+.ext-sec-desc { font-size: 11px; color: #5a7a8a; margin: 0 2px 8px; }
+
+/* Installed: an inset panel of what's actually running. */
+.ext-sec-installed #loaded-tricks {
+  background: #12122a;
+  border: 1px solid #1e2a3a;
+  border-left: 3px solid #2a5aa0;
+  border-radius: 8px;
+  padding: 4px;
+}
+.ext-sec-installed #loaded-tricks:has(.ext-empty) { border-left-color: #1e2a3a; }
+
+/* Browse: rows offer an Install button on hover or keyboard focus. */
+.ext-add {
+  flex: none;
+  display: none;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  background: #2a5aa0;
+  border: none;
+  border-radius: 4px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.ext-add:hover { background: #3468b8; }
+.ext-browse-item:hover .ext-add, .ext-browse-item.selected .ext-add, .ext-add:focus-visible { display: inline-block; }
+@media (hover: none) { .ext-add { display: inline-block; } }
 .ext-empty { font-size: 12px; color: #5a7a8a; padding: 8px 2px; }
 .ext-empty a { color: #8ab4ff; }
 
@@ -1865,7 +1931,18 @@ body.on-intro #ts-bar { display: none; }
 .ext-item.is-off .name, .ext-item.is-off .brief, .ext-item.is-off .ext-avatar { opacity: .5; }
 .ext-item.trick-item { justify-content: flex-start; }
 .ext-got { color: #6bff8a; font-size: 13px; }
-.ext-side .avail-category { margin-top: 10px; }
+/* Categories are sub-groups of Browse, not sections: normal case, dim. */
+.ext-side .avail-category {
+  margin: 12px 2px 4px;
+  padding: 0;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #5a7a8a;
+}
+.ext-side .avail-category:first-child { margin-top: 2px; }
 .ext-side .avail-more { margin-top: 6px; }
 .ext-custom { margin-top: 14px; font-size: 12px; color: #5a7a8a; }
 .ext-custom summary { cursor: pointer; }
@@ -1889,7 +1966,9 @@ body.on-intro #ts-bar { display: none; }
 }
 .ext-avatar-lg { width: 64px; height: 64px; border-radius: 14px; font-size: 22px; }
 
-.ext-detail { min-height: 420px; padding: 24px; }
+/* Sticky and fitted to the window like the list beside it (fitExtPanes()
+   sets max-height); long pages scroll inside it, not the whole page. */
+.ext-detail { padding: 24px; position: sticky; top: 12px; overflow-y: auto; max-height: calc(100vh - 24px); }
 .ext-head { display: flex; gap: 18px; align-items: flex-start; }
 .ext-title { flex: 1; min-width: 0; }
 .ext-title h2 { font-size: 22px; color: #fff; margin-bottom: 4px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -1971,7 +2050,7 @@ body.on-intro #ts-bar { display: none; }
 @media (max-width: 800px) {
   .ext { grid-template-columns: minmax(0, 1fr); }
   .ext-side { position: static; max-height: none; }
-  .ext-detail { padding: 16px; }
+  .ext-detail { padding: 16px; position: static; max-height: none; overflow: visible; }
   .ext-head { gap: 12px; }
   .ext-avatar-lg { width: 48px; height: 48px; font-size: 17px; border-radius: 11px; }
 }
@@ -2011,10 +2090,12 @@ body.on-intro #ts-bar { display: none; }
   padding: 2px 8px 6px;
 }
 .chan-h-off { margin-top: 14px; color: #4a6572; }
-.chan-top { display: flex; align-items: center; gap: 4px; padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid #1e2a3a; }
+.chan-top { display: flex; align-items: center; gap: 4px; margin-bottom: 2px; }
+.chan-page + .chan-h { border-top: 1px solid #1e2a3a; padding-top: 14px; margin-top: 12px; }
 .chan-top .chan-home { flex: 1; margin: 0; }
 .chan-home { color: #c8d6e5; font-weight: 600; }
-.chan-home .chan-glyph { display: inline-flex; color: #8ab4ff; }
+.chan-home .chan-glyph, .chan-page .chan-glyph { display: inline-flex; color: #8ab4ff; }
+.chan-page { color: #c8d6e5; font-weight: 600; }
 .chan-home.active .chan-glyph { color: #8ab4ff; }
 .chan-toggle {
   display: inline-flex;
@@ -2140,6 +2221,7 @@ body.rail-collapsed .chan-count { position: absolute; top: 0; right: 0; font-siz
   width: 170px;
 }
 .rule-ed-sentence input:focus, .rule-ed-name input:focus { outline: none; border-color: #3a5a7a; }
+.rule-ed-then { flex-basis: 100%; color: #6b8299; font-size: 13px; }
 .rule-ed-name { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 13px; color: #6b8299; }
 .rule-ed-hint { font-size: 11px; color: #4a6572; margin-top: 8px; }
 .rule-ed-hint code { color: #f5c542; }
@@ -2185,26 +2267,58 @@ body.rail-collapsed .chan-count { position: absolute; top: 0; right: 0; font-siz
   .rule-ed-sentence input { width: 100%; }
 }
 
-/* Scrollbars in the extensions list, code blocks and rule menu: a real,
-   full-width scrollbar with a visible track, in the dashboard's colours
-   rather than the OS's light grey. Chrome ignores ::-webkit-scrollbar as
-   soon as the standard scrollbar-* properties are set (and those only offer
-   "thin"), so the standard ones are for Firefox alone. */
-.ext-side::-webkit-scrollbar, .ext-detail pre::-webkit-scrollbar, .chan-rail::-webkit-scrollbar { width: 14px; height: 14px; }
-.ext-side::-webkit-scrollbar-track, .ext-detail pre::-webkit-scrollbar-track, .chan-rail::-webkit-scrollbar-track {
-  background: #0f0f23;
-  border-left: 1px solid #1e2a3a;
-}
-.ext-side::-webkit-scrollbar-thumb, .ext-detail pre::-webkit-scrollbar-thumb, .chan-rail::-webkit-scrollbar-thumb {
+/* Scrollbars, everywhere in the dashboard (page, extension list, logs, code
+   blocks, channel rail): a real, full-width scrollbar with a visible track,
+   in the dashboard's colours rather than the OS's light grey. Global on
+   purpose, so a new scrolling panel can't ship with the default look.
+   Chrome ignores ::-webkit-scrollbar as soon as the standard scrollbar-*
+   properties are set (and those only offer "thin"), so the standard ones
+   are for Firefox alone. */
+::-webkit-scrollbar { width: 14px; height: 14px; }
+::-webkit-scrollbar-track { background: #0f0f23; border-left: 1px solid #1e2a3a; }
+::-webkit-scrollbar-thumb {
   background: #34465a;
   border-radius: 7px;
   border: 2px solid #0f0f23;
   border-left-width: 3px;
   min-height: 40px;
 }
-.ext-side::-webkit-scrollbar-thumb:hover, .ext-detail pre::-webkit-scrollbar-thumb:hover, .chan-rail::-webkit-scrollbar-thumb:hover { background: #4a6a8a; }
-.ext-side::-webkit-scrollbar-thumb:active, .ext-detail pre::-webkit-scrollbar-thumb:active, .chan-rail::-webkit-scrollbar-thumb:active { background: #5a82aa; }
-.ext-side::-webkit-scrollbar-corner, .ext-detail pre::-webkit-scrollbar-corner { background: #0f0f23; }
+::-webkit-scrollbar-thumb:hover { background: #4a6a8a; }
+::-webkit-scrollbar-thumb:active { background: #5a82aa; }
+::-webkit-scrollbar-corner { background: #0f0f23; }
 @supports not selector(::-webkit-scrollbar) {
-  .ext-side, .ext-detail pre, .chan-rail { scrollbar-color: #34465a #0f0f23; }
+  * { scrollbar-color: #34465a #0f0f23; }
 }
+
+/* Live tab: an extension's own page, in a frame that fills the pane. */
+.ext-live {
+  display: block;
+  width: 100%;
+  height: max(320px, calc(100vh - 330px));  /* fallback; fitExtPanes() measures */
+  border: 1px solid #1e2a3a;
+  border-radius: 8px;
+  background: #0f0f1a;
+}
+.ext-live-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #6bff8a;
+  box-shadow: 0 0 6px #6bff8a;
+  margin-right: 7px;
+  vertical-align: 1px;
+}
+
+/* New channel: its own page. */
+.newchan { max-width: 760px; padding: 8px 4px; }
+.newchan h2 { font-size: 22px; color: #fff; margin-bottom: 8px; }
+.newchan-lead { font-size: 14px; line-height: 1.6; color: #a4b8d4; margin-bottom: 18px; max-width: 640px; }
+.newchan-form { max-width: none; padding: 20px; }
+.newchan-form .rule-suggest { font-size: 13px; margin-bottom: 18px; }
+.newchan-form .rule-ed-sentence { font-size: 15px; }
+.newchan-form .rule-ed-sentence input, .newchan-form .rule-ed-name input { width: 200px; padding: 7px 10px; font-size: 14px; }
+.newchan-form .rule-ed-name { margin-top: 16px; font-size: 14px; }
+.newchan-form .rule-ed-actions { margin-top: 18px; }
+.newchan-form .rule-ed-actions .btn { padding: 6px 16px; font-size: 13px; }
+.chan-add.active { background: #1a2a4d; color: #fff; }

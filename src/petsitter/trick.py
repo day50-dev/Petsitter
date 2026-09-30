@@ -1,6 +1,10 @@
 """Base Trick class and callmodel utility for petsitter."""
 
 import json
+import sys
+import threading
+from collections import deque
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -244,6 +248,35 @@ def find_prompt_keyword_patterns(text: str) -> list[dict]:
     return results
 
 
+class LiveFeed:
+    """Recent events a trick published for its Live page, newest last.
+
+    Deliberately dumb: whatever the trick hands publish() is kept as-is, no
+    schema. A page that opens late still sees the recent past, which is the
+    point -- you use your tool, then come and look.
+    """
+
+    KEEP = 500
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._events: deque = deque(maxlen=self.KEEP)
+        self._seq = 0
+
+    def publish(self, event: Any) -> None:
+        with self._lock:
+            self._seq += 1
+            self._events.append((self._seq, event))
+
+    def since(self, seq: int) -> list[tuple[int, Any]]:
+        with self._lock:
+            return [(n, e) for n, e in self._events if n > seq]
+
+    def clear(self) -> None:
+        with self._lock:
+            self._events.clear()
+
+
 class Trick:
     """Base class for all petsitter tricks.
 
@@ -289,6 +322,22 @@ class Trick:
         Both directions are inert when nothing is watching, so instrumenting a
         trick costs nothing until someone turns an observer on.
 
+    Live page (optional):
+        A trick can ship a page that shows it working, in a "Live" tab on its
+        extension page in the dashboard. It's a dumb container: petsitter
+        serves the page and two pipes, and imposes no schema on either.
+
+            ui_page = "my_trick.html"   # file next to the trick's module
+
+        or override ``ui_html()`` to return the HTML directly. The page is
+        served at ``.../ui/<id>/``, so it reaches its pipes by relative URL:
+
+            new EventSource("events")         # recent past, then live
+            fetch("action", {method: "POST", body: JSON.stringify({...})})
+
+        ``self.publish(anything_json_able)`` feeds ``events``; ``ui_action(data)``
+        answers ``action`` and returns a JSON-able reply (or None).
+
     Lifecycle hooks (called automatically by the framework):
         install()    — when the trick is first added to a trickset
         startup()    — when the first concurrent request uses this trick (0→1)
@@ -309,6 +358,36 @@ class Trick:
     __display_name__: str = ""
     __category__: str = ""
     config_fields: list[dict] = []
+
+    ui_page: str = ""
+
+    @property
+    def live_feed(self) -> LiveFeed:
+        # Created on first use: subclasses don't call super().__init__().
+        feed = self.__dict__.get("_live_feed")
+        if feed is None:
+            feed = self.__dict__.setdefault("_live_feed", LiveFeed())
+        return feed
+
+    def publish(self, event: Any) -> None:
+        """Send one event to this trick's Live page. Cheap, never blocks."""
+        self.live_feed.publish(event)
+
+    def ui_html(self) -> str | None:
+        """The Live page's HTML, or None when the trick has no page."""
+        if not self.ui_page:
+            return None
+        module = sys.modules.get(type(self).__module__)
+        base = Path(getattr(module, "__file__", "") or ".").parent
+        return (base / self.ui_page).read_text(encoding="utf-8")
+
+    def ui_action(self, data: Any) -> Any:
+        """Answer a POST from the Live page. Return anything JSON-able."""
+        return None
+
+    @classmethod
+    def has_ui(cls) -> bool:
+        return bool(cls.ui_page) or cls.ui_html is not Trick.ui_html
 
     def configure(self, config: dict) -> None:
         """Apply per-trick key/value config to this instance.

@@ -667,6 +667,7 @@ class ProxyHandler:
                     "required_models": list(t.required_models),
                     "config_fields": list(getattr(type(t), "config_fields", []) or []),
                     "config": ts.trick_configs.get(tid, {}),
+                    "has_ui": type(t).has_ui(),
                     "readme": inspect.cleandoc(getattr(sys.modules.get(type(t).__module__), "__doc__", None) or ""),
                 })
         return result

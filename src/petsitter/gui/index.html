@@ -60,8 +60,6 @@
 
 <div class="tabs">
 <div class="tab active" data-tab="tricks" onclick="switchTab('tricks')">Extensions</div>
-<div class="tab" data-tab="models" onclick="switchTab('models')">Models</div>
-<div class="tab" data-tab="agents" onclick="switchTab('agents')">Agents</div>
 <div class="tab" data-tab="logs" onclick="switchTab('logs')">Logs</div>
 <div class="tab" data-tab="settings" onclick="switchTab('settings')">Settings</div>
 </div>
@@ -171,22 +169,41 @@
 </div>
 </div>
 
+<!-- === NEW CHANNEL: its own page, reached from the rail's "Add channel" === -->
+<div class="tab-pane" id="tab-newchannel">
+<div class="newchan">
+<h2>New channel</h2>
+<p class="newchan-lead">A channel gives an app its own set of extensions. Requests from the apps
+(or models) it matches run through that channel&rsquo;s extensions, and everything else carries on
+exactly as before.</p>
+<div class="rule-editor newchan-form" id="newchannel-form"></div>
+</div>
+</div>
+
 <!-- === TRICKS TAB (shown as "Extensions") === -->
 <div class="tab-pane" id="tab-tricks">
 <div class="tricks-context" id="tricks-context" hidden></div>
 <div class="ext">
 <aside class="card ext-side">
 <input type="search" id="trick-search" class="ext-search" placeholder="Search extensions" title="Search by name, what it does, or keyword" oninput="filterAvailable()" spellcheck="false">
-<div class="ext-sec">
-<div class="ext-sec-h"><span>Installed</span><span class="ext-count" id="ext-installed-count"></span></div>
-<div class="ext-sec-desc">Run top to bottom on every request. Drag to reorder.</div>
+<section class="ext-sec ext-sec-installed" id="ext-sec-installed">
+<button class="ext-sec-h" onclick="toggleExtSec('installed')" aria-expanded="true">
+<span class="ext-chev" aria-hidden="true">&#9662;</span><span class="ext-sec-title">Installed</span><span class="ext-count" id="ext-installed-count"></span>
+</button>
+<div class="ext-sec-body">
+<div class="ext-sec-desc">Run top to bottom on every request in this channel. Drag to reorder.</div>
 <div id="loaded-tricks"><div class="loader">Loading...</div></div>
 </div>
-<div class="ext-sec">
-<div class="ext-sec-h"><span>Browse</span></div>
+</section>
+<section class="ext-sec ext-sec-browse" id="ext-sec-browse">
+<button class="ext-sec-h" onclick="toggleExtSec('browse')" aria-expanded="true">
+<span class="ext-chev" aria-hidden="true">&#9662;</span><span class="ext-sec-title">Browse</span><span class="ext-count" id="ext-browse-count"></span>
+</button>
+<div class="ext-sec-body">
 <div id="available-tricks"><div class="loader">Loading...</div></div>
 <div class="browse-status" id="avail-status"></div>
 </div>
+</section>
 <details class="ext-custom">
 <summary>Load from a file&hellip;</summary>
 <div class="custom-path">
@@ -288,7 +305,7 @@ file back exactly as it was. Your tool keeps using its own account &mdash; petsi
 <div class="tab-pane" id="tab-settings">
 <div class="card">
 <h2>Settings</h2>
-<div class="section-desc">Logging settings for the current trickset (<span id="ts-settings-scope"></span>).</div>
+<div class="section-desc">Logging for this channel (<span id="ts-settings-scope"></span>).</div>
 <div class="settings-group">
 <div class="setting-row">
 <label class="setting-label" for="ts-loglevel">Log level</label>
@@ -307,6 +324,11 @@ file back exactly as it was. Your tool keeps using its own account &mdash; petsi
 </div>
 </div>
 </div>
+</div>
+<div class="card">
+<h2>Models for this channel</h2>
+<div class="section-desc" id="ts-models-note"></div>
+<div class="models-list" id="ts-model-list"></div>
 </div>
 </div>
 
@@ -345,7 +367,10 @@ function html(strings, ...vals) {
 // ---- tabs ----
 let currentTab = 'intro';
 
+let _prevTab = null;
+const NO_CHANNEL_TABS = ['intro', 'help', 'newchannel', 'agents', 'models'];
 function switchTab(name) {
+  if (typeof currentTab !== 'undefined' && currentTab !== name) _prevTab = currentTab;
   if (name !== 'tricks') dismissTricksContext();
   currentTab = name;
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
@@ -355,10 +380,14 @@ function switchTab(name) {
   // inline style because switchTrickset() clears ts-bar's inline display
   // whenever it runs, which on boot happens after this.
   document.body.classList.toggle('on-intro', name === 'intro');
+  document.body.classList.toggle('no-channel', NO_CHANNEL_TABS.includes(name));
   if (typeof renderChannelRail === 'function') renderChannelRail();
+  if (typeof queueFitExtPanes === 'function') queueFitExtPanes();
   if (name === 'intro') refreshIntro();
   if (name === 'help') loadHelpContent();
-  if (name === 'models') renderModels(selectedTrickset, _cachedConfiguredModels);
+  if (name === 'newchannel') openRuleEditor(true);
+  if (name === 'models') renderModels('_default', _cachedConfiguredModels);
+  if (name === 'settings') renderChannelModels();
   if (name === 'logs') {
     populateTsLogSelect();
     refreshTricksetLog();
@@ -381,7 +410,7 @@ function parseHash() {
   var tab = parts[0] || 'intro';
   var ts = parts[1] || '_default';
   var ext = parts[2] ? decodeURIComponent(parts.slice(2).join('/')) : null;
-  if (tab === 'help' || tab === 'intro') ts = '_default';
+  if (NO_CHANNEL_TABS.includes(tab)) ts = '_default';
   var hasPane = !!document.getElementById('tab-' + tab);
   if (!hasPane) { tab = 'intro'; ts = '_default'; }
   return {tab, ts, ext};
@@ -437,7 +466,7 @@ window.addEventListener('hashchange', function() {
   var p = parseHash();
   if (p.tab === 'tricks' && p.ext !== _extSel) {
     _extSel = p.ext;
-    _extView = 'details';
+    _extView = _defaultExtView(p.ext);
     document.querySelectorAll('.ext-item').forEach(el => el.classList.toggle('selected', el.dataset.key === _extSel));
     renderExtDetail();
   }
@@ -672,7 +701,8 @@ let _dragName = null;
 let _installed = [];
 let _catalog = [];
 let _extSel = null;          // extKey of the extension shown in the detail pane
-let _extView = 'details';    // details | source
+let _extView = 'details';    // live | details | source
+let _extViewPending = false; // a linked extension waits for the installed list to pick its tab
 let _readmeCache = {};       // community readmes, fetched on first view
 
 function extKey(path) {
@@ -712,6 +742,7 @@ async function fetchTricks() {
     _installed = all.filter(t => t.trickset === selectedTrickset);
   } catch(e) { el.innerHTML = '<div class="loader">Error loading extensions</div>'; return; }
   document.getElementById('ext-installed-count').textContent = _installed.length || '';
+  if (_extViewPending && _extSel) { _extView = _defaultExtView(_extSel); _extViewPending = false; }
   const shown = _installed.filter(_matchesSearch);
   if (!_installed.length) {
     el.innerHTML = '<div class="ext-empty">Nothing installed yet. Pick one from Browse below.</div>';
@@ -849,9 +880,13 @@ function renderAvailable() {
 
   const item = e => {
     const nm = e.display_name || e.name || e.path;
-    return `<div class="ext-item${e.key === _extSel ? ' selected' : ''}" data-key="${escapeHtml(e.key)}" onclick="selectExt(this.dataset.key)" title="${escapeHtml(extTagline(e) || nm)}">`
+    const install = e.source === 'community'
+      ? `installFromIndex(${escapeHtml(JSON.stringify(e.name))},${escapeHtml(JSON.stringify(e.version))})`
+      : `loadTrick(${escapeHtml(JSON.stringify(e.path))})`;
+    return `<div class="ext-item ext-browse-item${e.key === _extSel ? ' selected' : ''}" data-key="${escapeHtml(e.key)}" onclick="selectExt(this.dataset.key)" title="${escapeHtml(extTagline(e) || nm)}">`
       + extAvatar(nm, e.category)
       + `<div class="info"><div class="name">${escapeHtml(nm)}</div><div class="brief">${escapeHtml(extTagline(e))}</div></div>`
+      + `<button class="ext-add" onclick="event.stopPropagation();${install}" aria-label="Install ${escapeHtml(nm)}">Install</button>`
       + `</div>`;
   };
 
@@ -874,6 +909,7 @@ function renderAvailable() {
   if (hidden > 0) out += `<div class="avail-more" onclick="setScope(true)">Show ${hidden} more from the community</div>`;
   else if (browseAll && remote && remote.total) out += '<div class="avail-more" onclick="setScope(false)">Show featured only</div>';
 
+  document.getElementById('ext-browse-count').textContent = (locals.length + remotes.length) || '';
   el.innerHTML = out || (trickSearch
     ? `<div class="ext-empty">Nothing matching &ldquo;${escapeHtml(trickSearch)}&rdquo;${browseAll ? '' : ' &mdash; <a href="#" onclick="setScope(true);return false">search the whole community index</a>'}</div>`
     : '<div class="ext-empty">No extensions found</div>');
@@ -886,8 +922,32 @@ function renderAvailable() {
   }
 }
 
+// Opening an extension lands on its Live page when it's installed and has
+// one: seeing it work is the point. Everything else opens on Details.
+function _defaultExtView(key) {
+  const inst = _installed.find(t => extKey(t.path) === key);
+  return inst && inst.has_ui ? 'live' : 'details';
+}
+
+// The two sections fold like an editor's side panel; remembered per browser.
+function toggleExtSec(which, force) {
+  const sec = document.getElementById('ext-sec-' + which);
+  if (!sec) return;
+  const collapsed = force !== undefined ? force : !sec.classList.contains('collapsed');
+  sec.classList.toggle('collapsed', collapsed);
+  sec.querySelector('.ext-sec-h').setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  try { localStorage.setItem('petsitter.extSec.' + which, collapsed ? '1' : '0'); } catch(e) {}
+}
+['installed', 'browse'].forEach(w => {
+  try { if (localStorage.getItem('petsitter.extSec.' + w) === '1') toggleExtSec(w, true); } catch(e) {}
+});
+
 function selectExt(key) {
-  if (_extSel !== key) _extView = 'details';
+  if (_extSel !== key) {
+    _extView = _defaultExtView(key);
+    const pane = document.getElementById('ext-detail');
+    if (pane) pane.scrollTop = 0;
+  }
   _extSel = key;
   document.querySelectorAll('.ext-item').forEach(el => el.classList.toggle('selected', el.dataset.key === key));
   renderExtDetail();
@@ -941,6 +1001,11 @@ function _howToUse(e, installed) {
   if (extra.length) {
     rows.push(['Needs', `extra models named ${extra.map(m => `<code>${escapeHtml(m)}</code>`).join(', ')}. <a href="#" onclick="switchTab('models');return false">Set them up in Models</a>.`]);
   }
+  if (e.has_ui) {
+    rows.push(['See it work', installed
+      ? `<a href="#" onclick="setExtView('live');return false">Open the Live tab</a> and use your AI tool.`
+      : 'Install it, and a Live tab shows it working as your AI tool runs.']);
+  }
   if ((e.config_fields || []).length) {
     const labels = e.config_fields.map(f => escapeHtml(f.label || f.key)).join(', ');
     rows.push(['Settings', installed
@@ -983,13 +1048,19 @@ function renderExtDetail() {
     actions = `<button class="btn btn-primary ext-install" onclick="loadTrick(${escapeHtml(JSON.stringify(e.path))})">Install</button>`;
   }
 
+  // Live: the extension's own page, shown once it's installed and running.
+  const live = !!(inst && inst.has_ui);
+  if (_extView === 'live' && !live) _extView = 'details';
   const tabs = `<div class="ext-tabs">`
+    + (live ? `<button class="ext-tab${_extView === 'live' ? ' active' : ''}" onclick="setExtView('live')"><span class="ext-live-dot" aria-hidden="true"></span>Live</button>` : '')
     + `<button class="ext-tab${_extView === 'details' ? ' active' : ''}" onclick="setExtView('details')">Details</button>`
     + (e.source !== 'file' ? `<button class="ext-tab${_extView === 'source' ? ' active' : ''}" onclick="setExtView('source')">Source code</button>` : '')
     + `</div>`;
 
   let body;
-  if (_extView === 'source') {
+  if (_extView === 'live') {
+    body = `<iframe class="ext-live" src="/api/tricks/ui/${encodeURIComponent(inst.id || '')}/" title="${escapeHtml(nm)}: live"></iframe>`;
+  } else if (_extView === 'source') {
     body = `<div class="ext-note">Read before you run. An extension runs inside petsitter with your API keys, the same way a pip package runs inside your Python.</div><pre class="browse-source"><code id="ext-source" class="language-python">Loading&hellip;</code></pre>`;
   } else {
     let readme = e.readme;
@@ -1006,12 +1077,62 @@ function renderExtDetail() {
     + `<div class="ext-from">${e.category ? escapeHtml(e.category) + ' &middot; ' : ''}${from}</div>`
     + `<div class="ext-actions">${actions}</div></div></div>` + tabs + `<div class="ext-body">${body}</div>`;
 
+  queueFitExtPanes();
   if (_extView === 'source') _loadExtSource(e);
   else if (e.source === 'community' && !e.readme && _readmeCache[e.name + '@' + e.version] === undefined) _loadCommunityReadme(e);
   pane.querySelectorAll('.ext-readme pre code').forEach(b => { if (window.hljs) hljs.highlightElement(b); });
 }
 
 function setExtView(v) { _extView = v; renderExtDetail(); }
+
+// Keep the extension list and the Live frame inside the window. How far down
+// they start depends on the header, the channel bar and the tabs (and on the
+// window width, which wraps the header), so measure instead of guessing a
+// constant: whatever is left below their top edge is their height.
+//
+// Measured in page coordinates, not on-screen ones. The panes are sticky, so
+// on screen they ride up as you scroll; sizing from that grew them with every
+// scroll, which made the page taller, which let it scroll further.
+function fitExtPanes() {
+  if (currentTab !== 'tricks') return;
+  const narrow = window.matchMedia('(max-width: 800px)').matches;
+  const side = document.querySelector('.ext-side');
+  const detail = document.querySelector('.ext-detail');
+  const panes = [side, detail].filter(Boolean);
+  if (narrow) { panes.forEach(el => el.style.maxHeight = ''); return; }
+  const bottom = parseFloat(getComputedStyle(document.body).paddingBottom) || 0;
+  const docTop = el => el.getBoundingClientRect().top + window.scrollY;
+  let paneH = 0;
+  panes.forEach(el => {
+    const h = Math.max(240, Math.floor(window.innerHeight - docTop(el) - bottom));
+    el.style.maxHeight = h + 'px';
+    if (el === detail) paneH = h;
+  });
+  // Anything else below the panes (margins, borders) shows up as overflow:
+  // take exactly that back, so the page itself doesn't scroll at all.
+  const over = document.documentElement.scrollHeight - window.innerHeight;
+  if (over > 0 && panes.every(el => parseFloat(el.style.maxHeight) - over >= 240)) {
+    panes.forEach(el => el.style.maxHeight = (parseFloat(el.style.maxHeight) - over) + 'px');
+    paneH -= over;
+  }
+  // The Live frame fills whatever the detail pane has left below the
+  // extension's header, so the page inside it gets the whole view.
+  const live = document.querySelector('iframe.ext-live');
+  if (live && detail) {
+    if (narrow || !paneH) { live.style.height = ''; return; }
+    const offset = live.getBoundingClientRect().top - detail.getBoundingClientRect().top + detail.scrollTop;
+    const padBottom = parseFloat(getComputedStyle(detail).paddingBottom) || 0;
+    live.style.height = Math.max(320, paneH - offset - padBottom - 2) + 'px';
+  }
+}
+let _fitQueued = false;
+function queueFitExtPanes() {
+  if (_fitQueued) return;
+  _fitQueued = true;
+  requestAnimationFrame(() => { _fitQueued = false; fitExtPanes(); });
+}
+window.addEventListener('scroll', queueFitExtPanes, {passive: true});
+window.addEventListener('resize', queueFitExtPanes);
 
 async function _loadCommunityReadme(e) {
   const k = e.name + '@' + e.version;
@@ -1061,6 +1182,7 @@ async function loadTrick(path) {
     const d = await fetchJSON('/api/tricks/load', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path, trickset: selectedTrickset}) });
     _extSel = extKey(path);
     const e = _catalog.find(x => x.key === _extSel);
+    _extView = (e && e.has_ui) ? 'live' : 'details';
     showToast('Installed ' + ((e && e.display_name) || d.name));
     fetchTricks(); fetchModels();
   } catch(e) { showToast(e.message, true); }
@@ -1477,6 +1599,11 @@ function _setTricksetList(loaded, avail) {
 async function fetchTraffic() {
   try { _traffic = await fetchJSON('/api/traffic'); } catch(e) {}
   renderRuleBar();
+  // Fresh suggestions for an untouched New channel form (never over typing).
+  if (currentTab === 'newchannel'
+      && ['rule-app', 'rule-model', 'rule-name-input'].every(id => !(document.getElementById(id) || {}).value)) {
+    openRuleEditor(true);
+  }
 }
 
 function renderRuleBar() {
@@ -1492,6 +1619,8 @@ function renderRuleBar() {
 // The channel list: every trickset, always on screen, each with its traffic.
 // A dot means it caught a request in the last minute.
 const _homeIcon = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg>';
+const _modelsIcon = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/><line x1="9" y1="2" x2="9" y2="6"/><line x1="15" y1="2" x2="15" y2="6"/><line x1="9" y1="18" x2="9" y2="22"/><line x1="15" y1="18" x2="15" y2="22"/><line x1="2" y1="9" x2="6" y2="9"/><line x1="2" y1="15" x2="6" y2="15"/><line x1="18" y1="9" x2="22" y2="9"/><line x1="18" y1="15" x2="22" y2="15"/></svg>';
+const _agentsIcon = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>';
 function renderChannelRail() {
   const rail = document.getElementById('chan-rail');
   if (!rail) return;
@@ -1507,7 +1636,7 @@ function renderChannelRail() {
     if (n === '_default' && catchAll) tip += ` · never used while ${catchAll.name} matches every request`;
     const words = ruleLabel(n).replace(/[^A-Za-z0-9]+/g, ' ').trim().split(' ');
     const abbr = n === '_default' ? '∗' : (words.length > 1 ? words[0][0] + words[1][0] : words[0].slice(0, 2)).toUpperCase();
-    return `<button class="chan${n === selectedTrickset && !home ? ' active' : ''}${off ? ' off' : ''}${_newTricksets.has(n) ? ' is-new' : ''}" data-name="${escapeHtml(n)}" onclick="openChannel(this.dataset.name)" title="${escapeHtml(ruleLabel(n) + ': ' + tip)}">`
+    return `<button class="chan${n === selectedTrickset && !noChan ? ' active' : ''}${off ? ' off' : ''}${_newTricksets.has(n) ? ' is-new' : ''}" data-name="${escapeHtml(n)}" onclick="openChannel(this.dataset.name)" title="${escapeHtml(ruleLabel(n) + ': ' + tip)}">`
       + `<span class="chan-abbr" aria-hidden="true">${escapeHtml(abbr)}</span>`
       + `<span class="chan-glyph">${n === '_default' ? '∗' : '#'}</span>`
       + `<span class="chan-name">${escapeHtml(ruleLabel(n))}</span>`
@@ -1520,17 +1649,22 @@ function renderChannelRail() {
   const off = names.filter(n => !loadedTricksets[n]);
   const collapsed = document.body.classList.contains('rail-collapsed');
   const home = currentTab === 'intro';
+  const noChan = NO_CHANNEL_TABS.includes(currentTab);
   // "Start here" is the rail's Home, above the channels, like a chat app's.
   rail.innerHTML = `<div class="chan-top">`
     + `<button class="chan chan-home${home ? ' active' : ''}" onclick="switchTab('intro')" title="Start here">`
     + `<span class="chan-abbr" aria-hidden="true">${_homeIcon}</span><span class="chan-glyph" aria-hidden="true">${_homeIcon}</span><span class="chan-name">Start here</span></button>`
     + `<button class="chan-toggle" onclick="toggleRail()" title="${collapsed ? 'Show channels' : 'Collapse channels'}" aria-label="${collapsed ? 'Show channels' : 'Collapse channels'}" aria-expanded="${collapsed ? 'false' : 'true'}">`
     + `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/>${collapsed ? '<polyline points="13 10 15 12 13 14"/>' : '<polyline points="16 10 14 12 16 14"/>'}</svg></button></div>`
+    + `<button class="chan chan-page${currentTab === 'agents' ? ' active' : ''}" onclick="switchTab('agents')" title="Agents: the coding tools connected to petsitter">`
+    + `<span class="chan-abbr" aria-hidden="true">${_agentsIcon}</span><span class="chan-glyph" aria-hidden="true">${_agentsIcon}</span><span class="chan-name">Agents</span></button>`
+    + `<button class="chan chan-page${currentTab === 'models' ? ' active' : ''}" onclick="switchTab('models')" title="Models: your provider, and the models petsitter sends to">`
+    + `<span class="chan-abbr" aria-hidden="true">${_modelsIcon}</span><span class="chan-glyph" aria-hidden="true">${_modelsIcon}</span><span class="chan-name">Models</span></button>`
     + `<div class="chan-h">Channels</div>`
     + live.map(item).join('')
     + item('_default')
     + (catchAll ? `<div class="chan-warn">Everything else never runs while <b>#${escapeHtml(catchAll.name)}</b> matches every request.</div>` : '')
-    + `<button class="chan chan-add" onclick="openRuleEditor(true)" title="Add channel"><span class="chan-abbr" aria-hidden="true">+</span><span class="chan-glyph">+</span><span class="chan-name">Add channel</span></button>`
+    + `<button class="chan chan-add${currentTab === 'newchannel' ? ' active' : ''}" onclick="openRuleEditor(true)" title="Add channel"><span class="chan-abbr" aria-hidden="true">+</span><span class="chan-glyph">+</span><span class="chan-name">Add channel</span></button>`
     + (off.length ? `<div class="chan-h chan-h-off">Saved, off</div>` + off.map(item).join('') : '')
     + `<div class="chan-foot">Each app's requests go through every channel that matches it. <b>Everything else</b> gets what no channel matches.</div>`;
 }
@@ -1538,7 +1672,7 @@ function renderChannelRail() {
 // From a page that isn't about any channel (Start here, Help), opening a
 // channel means seeing what it does, so it lands on its extensions.
 function openChannel(name) {
-  if (currentTab === 'intro' || currentTab === 'help') switchTab('tricks');
+  if (NO_CHANNEL_TABS.includes(currentTab)) switchTab('tricks');
   switchTrickset(name);
 }
 
@@ -1552,11 +1686,31 @@ function toggleRail(force) {
 }
 try { if (localStorage.getItem('petsitter.railCollapsed') === '1') document.body.classList.add('rail-collapsed'); } catch(e) {}
 
+// Pick up channels created or removed elsewhere (connecting a tool, the
+// pet CLI). Only the rail is redrawn, and only when the set of channels
+// changed, so an open extension page or Live frame is left alone.
+async function refreshChannelList() {
+  try {
+    const [loaded, avail] = await Promise.all([
+      fetchJSON('/api/tricksets'),
+      fetchJSON('/api/tricksets/available'),
+    ]);
+    const sig = l => l.map(ts => ts.name).sort().join('\n');
+    const before = sig(Object.values(loadedTricksets)) + '|' + sig(_availTricksets);
+    if (before === sig(loaded) + '|' + sig(avail)) return;
+    _markNewTricksets(loaded.map(ts => ts.name));
+    _setTricksetList(loaded, avail);
+    if (!loadedTricksets[selectedTrickset]) switchTrickset('_default');
+  } catch(e) {}
+}
+
 // Counts on the rail should move while you watch, without a stream: a
 // light poll while the page is visible.
-setInterval(() => { if (!document.hidden) fetchTraffic(); }, 10000);
+setInterval(() => { if (!document.hidden) { fetchTraffic(); refreshChannelList(); } }, 10000);
 
 function openRuleEditor(isNew) {
+  // A new channel isn't part of the one on screen, so it gets its own page.
+  if (isNew && currentTab !== 'newchannel') { switchTab('newchannel'); return; }
   _ruleEditingNew = isNew;
   const ts = isNew ? null : loadedTricksets[selectedTrickset];
   if (!isNew && (!ts || ts.name === '_default')) return;
@@ -1570,19 +1724,19 @@ function openRuleEditor(isNew) {
         `<button class="rule-chip" onclick="fillRuleApp(${escapeHtml(JSON.stringify(a.name))})">${escapeHtml(a.name)} <i>${a.count}</i></button>`).join('')}</div>`
     : (isNew ? '<div class="rule-suggest"><span>Once an app sends requests through petsitter, it shows up here to pick from.</span></div>' : '');
   const opts = list => (list || []).map(x => `<option value="${escapeHtml(x.name)}"></option>`).join('');
-  const ed = document.getElementById('rule-editor');
-  ed.innerHTML = `<div class="rule-ed-title">${isNew ? 'New channel' : 'Edit channel'}</div>`
+  const ed = document.getElementById(isNew ? 'newchannel-form' : 'rule-editor');
+  ed.innerHTML = (isNew ? '' : `<div class="rule-ed-title">Edit channel</div>`)
     + suggest
     + `<div class="rule-ed-sentence">`
     + `<span>For requests from</span><input type="text" id="rule-app" list="rule-app-list" value="${val(app)}" placeholder="any app" spellcheck="false" oninput="ruleEdPreview()">`
     + `<span>using</span><input type="text" id="rule-model" list="rule-model-list" value="${val(model)}" placeholder="any model" spellcheck="false" oninput="ruleEdPreview()">`
-    + `<span>, use this channel&rsquo;s extensions.</span></div>`
+    + `<span class="rule-ed-then">Those requests run through this channel&rsquo;s extensions.</span></div>`
     + `<datalist id="rule-app-list">${opts(_traffic.apps)}</datalist><datalist id="rule-model-list">${opts(_traffic.models)}</datalist>`
     + `<label class="rule-ed-name"><span>Name</span><input type="text" id="rule-name-input" value="${ts ? escapeHtml(ts.name) : ''}" placeholder="e.g. claude-code" spellcheck="false"></label>`
     + `<div class="rule-ed-hint">The app is what your tool sends as its X-Title header. Leave a box empty for any. <code>*</code> works as a wildcard, as in <code>claude*</code>.</div>`
     + `<div class="rule-ed-preview" id="rule-ed-preview"></div>`
     + `<div class="rule-ed-actions"><button class="btn btn-sm btn-neutral" onclick="saveRule()">${isNew ? 'Create channel' : 'Save'}</button>`
-    + `<button class="btn btn-sm btn-secondary" onclick="closeRuleEditor()">Cancel</button>`
+    + `<button class="btn btn-sm btn-secondary" onclick="${isNew ? 'cancelNewChannel()' : 'closeRuleEditor()'}">Cancel</button>`
     + (isNew ? '' : `<button class="btn btn-sm btn-danger rule-ed-del" onclick="deleteTrickset()">Delete channel</button>`)
     + `</div>`;
   ed.hidden = false;
@@ -1610,6 +1764,10 @@ function ruleEdPreview(quiet) {
   }
 }
 
+function cancelNewChannel() {
+  switchTab(_prevTab && _prevTab !== 'newchannel' ? _prevTab : 'tricks');
+}
+
 function closeRuleEditor() {
   const ed = document.getElementById('rule-editor');
   if (ed) { ed.hidden = true; ed.innerHTML = ''; }
@@ -1631,6 +1789,9 @@ async function saveRule() {
       });
       showToast('Created #' + d.name);
       selectedTrickset = d.name || name;
+      // Next step for a new channel is giving it extensions.
+      _extSel = null;
+      switchTab('tricks');
     } else {
       const orig = selectedTrickset;
       await fetchJSON('/api/tricksets/' + encodeURIComponent(orig), {
@@ -1688,15 +1849,15 @@ async function switchTrickset(name) {
   try {
     const ts = loadedTricksets[name];
     document.getElementById('ts-bar').style.display = '';
-    document.getElementById('ts-settings-scope').textContent = ts.name;
+    document.getElementById('ts-settings-scope').textContent = ruleLabel(ts.name);
     document.getElementById('ts-logfile').value = ts.logfile || '';
     document.getElementById('ts-loglevel').value = ts.loglevel || 'INFO';
     if (currentTab === 'logs') {
       populateTsLogSelect();
       document.getElementById('tslog-select').value = name;
       refreshTricksetLog();
-    } else if (document.querySelector('.tab.active')?.dataset.tab === 'models') {
-      renderModels(selectedTrickset, _cachedConfiguredModels);
+    } else if (currentTab === 'settings') {
+      renderChannelModels();
     } else {
       fetchTricks();
     }
@@ -2168,12 +2329,29 @@ async function fetchModels() {
     _tsModels = {};
     loaded.forEach(ts => _tsModels[ts.name] = ts.models || {});
     _setTricksetList(loaded, avail);
-    renderModels(selectedTrickset, _cachedConfiguredModels);
+    renderModels('_default', _cachedConfiguredModels);
+    renderChannelModels();
   } catch(e) { document.getElementById('model-list').innerHTML = '<div class="loader">Error loading models</div>'; }
 }
 
-function renderModels(scope, globalConfigured) {
-  const el = document.getElementById('model-list');
+// Models are global (the Models page in the sidebar). A channel can override
+// a role for itself; those overrides live in its Settings tab.
+function renderChannelModels() {
+  const note = document.getElementById('ts-models-note');
+  const list = document.getElementById('ts-model-list');
+  if (!note || !list) return;
+  if (selectedTrickset === '_default') {
+    note.innerHTML = 'Everything else uses the global models. <a href="#" onclick="switchTab(\'models\');return false">Change them on the Models page</a>.';
+    list.innerHTML = '';
+    return;
+  }
+  note.innerHTML = `Override a model role for <b>#${escapeHtml(selectedTrickset)}</b> only. Leave a role empty to use the global one from the <a href="#" onclick="switchTab('models');return false">Models page</a>.`;
+  renderModels(selectedTrickset, _cachedConfiguredModels, 'ts-model-list');
+}
+
+function renderModels(scope, globalConfigured, targetId) {
+  const el = document.getElementById(targetId || 'model-list');
+  if (!el) return;
   let prefix;
   if (scope === '_default') {
     const models = globalConfigured;
@@ -2607,6 +2785,9 @@ async function toggleAgent(id, enable) {
       showToast(`${escapeHtml(id)} configuration restored`);
     }
     fetchAgents();
+    // Connecting a tool gives it its own channel (disconnecting may remove
+    // it), so the rail has to hear about it now, not on the next reload.
+    refreshChannelList();
   } catch(e) { showToast(e.message, true); }
 }
 
@@ -2628,7 +2809,7 @@ async function shutdownPetsitter() {
 
 // ---- init ----
 var initHash = parseHash();
-if (initHash.tab === 'tricks' && initHash.ext) _extSel = initHash.ext;
+if (initHash.tab === 'tricks' && initHash.ext) { _extSel = initHash.ext; _extViewPending = true; }
 // Before switchTab(): it writes the hash back, and would overwrite a linked
 // rule with _default before we ever read it.
 if (initHash.ts !== '_default') selectedTrickset = initHash.ts;

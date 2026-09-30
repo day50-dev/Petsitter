@@ -55,6 +55,7 @@ import hmac
 import json
 import re
 import secrets
+import time
 import uuid
 from typing import Callable
 
@@ -151,6 +152,8 @@ class SecretsProtectorTrick(Trick):
             value = p["request"]
             if value:
                 marker = self._marker(value)
+                if marker not in self._marked:
+                    self._announce_hidden("marked", marker)
                 self._marked[marker] = value
             else:
                 marker = ""
@@ -220,6 +223,7 @@ class SecretsProtectorTrick(Trick):
             pseudonym = f"__{secret_type}_{counter}__"
         self._vault[key] = pseudonym
         self._reverse[pseudonym] = original
+        self._announce_hidden(secret_type, pseudonym)
         return pseudonym
 
     def _find_spans(self, text: str) -> list[tuple[int, int, str, str]]:
@@ -296,6 +300,7 @@ class SecretsProtectorTrick(Trick):
         last = context[-1]
         content = last.get("content")
         if content and isinstance(content, str):
+            self._announce_restored(content, "the reply")
             last["content"] = self._reveal_marked(self._restore(content))
         tool_calls = last.get("tool_calls")
         if tool_calls:
@@ -303,8 +308,45 @@ class SecretsProtectorTrick(Trick):
                 func = tc.get("function", {})
                 args = func.get("arguments", "")
                 if args and isinstance(args, str):
+                    self._announce_restored(args, f"a call to {func.get('name') or 'a tool'}")
                     func["arguments"] = self._reveal_marked(self._restore(args), in_json=True)
         return context
+
+    # -- live page -------------------------------------------------------------
+    # Only ever the kind of secret and the stand-in the model saw. The real
+    # value never goes into an event: the Live page is for seeing that it
+    # works, and must not become a place the secret shows up.
+
+    ui_page = "secrets_protector.html"
+
+    def ui_action(self, data):
+        if isinstance(data, dict) and data.get("action") == "clear":
+            self.live_feed.clear()
+        return {"ok": True}
+
+    KIND_LABELS = {
+        "openai_proj_key": "an OpenAI key", "openai_key": "an OpenAI key",
+        "anthropic_key": "an Anthropic key", "aws_key": "an AWS key",
+        "jwt": "a JWT", "github_token": "a GitHub token",
+        "google_api_key": "a Google API key", "stripe_key": "a Stripe key",
+        "bearer_token": "a bearer token", "slack_token": "a Slack token",
+        "database_url": "a database URL", "private_key": "a private key",
+        "email": "an email address", "phone": "a phone number",
+        "ssn": "a Social Security number", "ip_address": "an IP address",
+        "credit_card": "a card number", "marked": "a value you marked",
+    }
+
+    def _announce_hidden(self, kind: str, stand_in: str) -> None:
+        label = self.KIND_LABELS.get(kind, "a " + kind.replace("_", " "))
+        self.publish({"event": "hidden", "kind": kind, "label": label,
+                      "stand_in": stand_in, "ts": time.time()})
+
+    def _announce_restored(self, text: str, where: str) -> None:
+        found = [p for p in self._reverse if p in text]
+        found += [m for m in _MARKER_RE.findall(text) if m in self._marked]
+        if found:
+            self.publish({"event": "restored", "where": where,
+                          "stand_ins": sorted(set(found)), "ts": time.time()})
 
     def info(self, capabilities: dict) -> dict:
         capabilities["secrets_protection"] = True

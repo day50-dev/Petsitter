@@ -144,6 +144,46 @@ def info(self, capabilities: dict) -> dict:
     return capabilities
 ```
 
+## Live page
+
+A trick can show itself working. Give it a page and it gets a **Live** tab on
+its extension page in the dashboard, and installing it opens straight onto that
+tab. It is a dumb container: petsitter serves your HTML and two pipes, and puts
+no schema on either.
+
+```python
+class MyTrick(Trick):
+    ui_page = "my_trick.html"          # a file next to my_trick.py
+
+    def post_hook(self, context):
+        self.publish({"saw": len(context)})   # anything JSON-able
+        return context
+
+    def ui_action(self, data):         # optional: POSTs from the page
+        if data.get("action") == "clear":
+            self.live_feed.clear()
+        return {"ok": True}
+```
+
+The page is served at `/api/tricks/ui/<id>/`, so it uses relative URLs:
+
+```js
+const events = new EventSource("events");   // the recent past, then live
+events.onmessage = m => draw(JSON.parse(m.data));
+fetch("action", {method: "POST", headers: {"Content-Type": "application/json"},
+                 body: JSON.stringify({action: "clear"})});
+```
+
+- `publish()` is cheap and never blocks. The last 500 events are kept in memory,
+  so opening the tab after using your tool still shows what happened.
+- For a single-file trick, override `ui_html()` and return the HTML as a string.
+- The page runs with the dashboard's own access, same as your trick's Python.
+- Never publish anything you wouldn't show on screen. Secrets Protector publishes
+  what kind of secret it hid and the stand-in, never the value.
+- Examples: `tricks/tool_monitor.py` + `tool_monitor.html` (a full viewer, with a
+  built-in demo) and `tricks/secrets_protector.py` + `secrets_protector.html`
+  (a small activity log).
+
 ## Request Metadata
 
 Hooks are handed the conversation, but not everything about the request that produced it — `post_hook` in particular receives only the message list, with no way back to the tools, model, or headers that came with it.

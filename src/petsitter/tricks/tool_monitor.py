@@ -8,17 +8,17 @@ viewer draws it.
 
 ## How to use
 
-Run the viewer in a terminal, then use your AI tool as normal:
+Install it, then open its **Live** tab and use your AI tool as normal. Every
+request shows up there as it happens. No AI tool connected yet? Press **demo**
+on the Live tab to watch made-up traffic.
 
-```bash
-./contrib/toolwatch.py            # listen on the default socket
-./contrib/toolwatch.py --demo     # see it with made-up traffic first
-```
+Put this extension **first** in the channel, so its "offered" list is what your
+tool really sent, before other extensions change it. Turn on `include_schemas` to
+also see each tool's full parameter schema (events get much larger).
 
-Put this trick **first** in the trickset, so its "offered" list is what your tool
-really sent, before other tricks change it. Nothing is recorded when no viewer is
-running. Turn on `include_schemas` to also see each tool's full parameter schema
-(events get much larger).
+Prefer a terminal? The same events go to a unix socket that
+`./contrib/toolwatch.py` (curses) and `./contrib/toolwatch_web.py` (browser)
+listen on.
 
 ## How it works
 
@@ -30,7 +30,8 @@ running. Turn on `include_schemas` to also see each tool's full parameter schema
   trick that just ran. A trick can explain itself with
   `trace_event("gate", self, reason=...)`; non-pipeline events arrive as notes.
 - Per-request state lives in `request_meta()`, not on the instance.
-- Transport: non-blocking unix datagram socket at `socket_path` (default
+- Transport: every event goes to the Live tab (`self.publish`, the last 500
+  kept in memory) and to a non-blocking unix datagram socket at `socket_path` (default
   `~/.cache/petsitter/toolmon.sock`). No listener or a full buffer means the event
   is dropped; it never blocks the request. Oversized events (over 60 KB) drop
   descriptions and are marked `truncated`. Swap `_emit` to use another transport.
@@ -133,9 +134,10 @@ def _pending_results(messages: list) -> list[dict]:
 class ToolMonitorTrick(Trick):
     """Publishes which tools were offered, withheld, added, and invoked."""
 
-    __brief__ = "Publishes tool offered/withheld/fired events to a unix socket"
+    __brief__ = "Shows live which tools were offered, hidden, and called"
     __display_name__ = "Tool Monitor"
     __category__ = "Diagnostics"
+    ui_page = "tool_monitor.html"
     config_fields = [
         {
             "key": "socket_path",
@@ -304,6 +306,73 @@ class ToolMonitorTrick(Trick):
         })
         return context
 
+    # -- live page -------------------------------------------------------------
+
+    def ui_html(self) -> str | None:
+        page = super().ui_html() or ""
+        demo = ('<button id="demo-btn" title="play some made-up agent traffic '
+                'through this page">demo</button>')
+        hint = ("<br><br>No AI tool connected yet? Press <b>demo</b> to watch "
+                "made-up traffic.")
+        return (page.replace("__TAG__", "live").replace("__DEMO_BTN__", demo)
+                .replace("__EMPTY_HINT__", hint))
+
+    def ui_action(self, data):
+        action = (data or {}).get("action") if isinstance(data, dict) else None
+        if action == "clear":
+            self.live_feed.clear()
+        elif action == "demo":
+            threading.Thread(target=self._demo, daemon=True).start()
+        return {"ok": True}
+
+    DEMO_TOOLS = [
+        ("read_file", "Read a file from the workspace"),
+        ("write_file", "Write a file in the workspace"),
+        ("run_tests", "Run the project's test suite"),
+        ("search", "Search the codebase"),
+        ("git_commit", "Commit staged changes"),
+    ]
+    DEMO_PHASES = [
+        ("explore", ["read_file", "search"]),
+        ("edit", ["read_file", "write_file"]),
+        ("verify", ["run_tests", "read_file"]),
+        ("ship", ["git_commit"]),
+    ]
+
+    def _demo(self) -> None:
+        """A few rounds of made-up agent traffic, published to the Live page only.
+
+        A phase-gating trick is imagined hiding tools each round, so every
+        column of the view has something in it.
+        """
+        import random
+        import time
+        names = [n for n, _ in self.DEMO_TOOLS]
+        conversation = "demo%04x" % random.getrandbits(16)
+        for phase, allowed in self.DEMO_PHASES * 2:
+            rid = "demo%04x" % random.getrandbits(16)
+            self.publish({
+                "v": SCHEMA_VERSION, "ts": _now(), "event": "request",
+                "request_id": rid, "conversation": conversation,
+                "x_title": f"demo/{phase}", "model": "demo-model", "stream": True,
+                "messages": 4, "results": [], "demo": True,
+                "offered": [{"name": n, "description": d} for n, d in self.DEMO_TOOLS],
+            })
+            time.sleep(0.5)
+            withheld = [n for n in names if n not in allowed]
+            fired = random.sample(allowed, k=1)
+            self.publish({
+                "v": SCHEMA_VERSION, "ts": _now(), "event": "response",
+                "request_id": rid, "conversation": conversation, "model": "demo-model",
+                "offered": names, "final": allowed, "withheld": withheld, "added": [],
+                "fired": [{"name": n, "id": "call_%04x" % random.getrandbits(16),
+                           "arguments": json.dumps({"path": "src/app.py"})} for n in fired],
+                "by_trick": [{"trick": "PhaseGateTrick", "withheld": withheld, "added": []}],
+                "notes": [{"stage": "gate", "trick": "PhaseGateTrick", "reason": f"phase={phase}"}],
+                "finish": "tool_calls", "demo": True,
+            })
+            time.sleep(0.4)
+
     # -- transport -----------------------------------------------------------
 
     def _emit(self, record: dict) -> None:
@@ -323,6 +392,11 @@ class ToolMonitorTrick(Trick):
                         for e in trimmed[key]
                     ]
             line = json.dumps(trimmed, default=str)[:MAX_DATAGRAM]
+        try:
+            # The same event, for the dashboard's Live tab (kept in memory).
+            self.publish(json.loads(line))
+        except ValueError:
+            pass  # cut mid-string by the size cap: only the socket gets it
         self._send(line.encode("utf-8", "replace"))
 
     def _send(self, blob: bytes) -> None:

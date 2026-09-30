@@ -1,8 +1,35 @@
-"""Export conversation as llcat-compatible JSON.
+"""Saves the current conversation to a JSON file you can reload in llcat or any OpenAI-compatible tool.
 
-Activate by typing (exportit) or (exportit: optional note) in your message.
-Exports the conversation history to /tmp/petsitter/ as a JSON file compatible
-with llcat's conversation format.
+Handy for keeping a record of a good session, reproducing a bug, or moving a
+conversation to another tool. The file is a plain array of messages in the
+standard Chat Completions format, with tool calls, tool results and reasoning
+kept intact.
+
+## How to use
+
+Type `(exportit)` in a message, optionally with a note:
+
+```
+(exportit: backup before refactor)
+```
+
+petsitter answers directly, without calling the model:
+
+```
+Conversation exported to `/tmp/petsitter/convo-20260718-143022.json` (6 messages, llcat-compatible)
+Note: backup before refactor
+```
+
+Load it back with `llcat -c convo.json`.
+
+## How it works
+
+- Prompt keyword `exportit`; the handler writes the file and returns the reply.
+- Files go to `/tmp/petsitter/convo-<YYYYmmdd-HHMMSS>.json` (not configurable).
+- Messages are normalized: assistant `tool_calls` are cleaned to
+  `{id, type, function: {name, arguments}}` (an empty list when absent),
+  `reasoning` is kept, tool messages keep `name` and `tool_call_id`. Unknown
+  roles are copied as-is.
 """
 
 import json

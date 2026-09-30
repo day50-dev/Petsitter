@@ -164,6 +164,86 @@ def callmodel_sync(
     return messages + [assistant_message]
 
 
+def find_prompt_keyword_patterns(text: str) -> list[dict]:
+    """Find every prompt keyword pattern in text, with its span.
+
+    Three forms:
+        ``(keyword)``
+        ``(keyword: request)``   request may nest balanced parens; trimmed
+        ``(keyword=DrequestD)``  sed-style: D is any character the user picks
+                                 that doesn't occur in the request, which is
+                                 taken verbatim -- no trimming, and parens or
+                                 anything else allowed. One optional space on
+                                 either side of ``=``.
+
+    Delimited matches carry ``"delimited": True``.
+    """
+    results: list[dict] = []
+    i = 0
+    while i < len(text):
+        if text[i] != '(':
+            i += 1
+            continue
+        j = i + 1
+        if j >= len(text) or not (text[j].isalnum() or text[j] == '_'):
+            i += 1
+            continue
+        while j < len(text) and (text[j].isalnum() or text[j] in ('_', '/')):
+            j += 1
+        kw_end = j
+        if j >= len(text):
+            i += 1
+            continue
+        if text[j] == ':':
+            j += 1
+            while j < len(text) and text[j].isspace():
+                j += 1
+            depth = 1
+            k = j
+            while k < len(text) and depth > 0:
+                if text[k] == '(':
+                    depth += 1
+                elif text[k] == ')':
+                    depth -= 1
+                k += 1
+            if depth != 0:
+                i += 1
+                continue
+            request = text[j:k - 1].strip()
+            delimited = False
+        elif text[j] == '=' or (text[j] == ' ' and text[j + 1:j + 2] == '='):
+            j += 2 if text[j] == ' ' else 1
+            if text[j:j + 1] == ' ':
+                j += 1
+            if j >= len(text) or text[j].isspace() or text[j] == ')':
+                i += 1
+                continue
+            close = text.find(text[j] + ')', j + 1)
+            if close == -1:
+                i += 1
+                continue
+            request = text[j + 1:close]
+            k = close + 2
+            delimited = True
+        elif text[j] == ')':
+            k = j + 1
+            request = ""
+            delimited = False
+        else:
+            i += 1
+            continue
+        keyword = text[i + 1:kw_end].strip()
+        results.append({
+            "start": i,
+            "end": k,
+            "keyword": keyword,
+            "request": request,
+            "delimited": delimited,
+        })
+        i = k
+    return results
+
+
 class Trick:
     """Base class for all petsitter tricks.
 
@@ -218,6 +298,11 @@ class Trick:
 
     keywords: list[str] = []
     prompt_keyword: str = ""
+    # False leaves "(prompt_keyword: request)" where the user typed it, on
+    # every turn, for the trick's own pre_hook to rewrite in place;
+    # handle_prompt_keyword is not called for it. The pattern then reaches
+    # the model verbatim unless the pre_hook deals with it.
+    strip_prompt_keyword: bool = True
     required_models: list[str] = ["default"]
     replace_system_prompt: bool = False
     __brief__: str = ""

@@ -1,26 +1,36 @@
-"""Traffic logger trick.
+"""Records every request sent to the model and every response that comes back, one JSON line each, so you can see exactly what your AI tool is doing.
 
-Appends one JSON line per request to a JSONL file so you can inspect every
-message going out to the model and every response coming back while debugging
-a misbehaving harness.
+When an agent misbehaves ("why did it forget my instructions?", "what tools did it
+actually send?"), the answer is usually in the raw traffic, which your tool
+normally hides. Turn this on, reproduce the problem, and read the file: full
+payloads, tool lists and messages going out, and the model's answer coming back.
+It never changes what the model sees.
 
-Each request produces two records:
+## How to use
 
-    {"timestamp": ..., "event": "request",  ...}   # what goes out (pre_hook)
-    {"timestamp": ..., "event": "response", ...}   # what comes back (post_hook)
+By default it writes `~/.cache/petsitter/traffic.jsonl`; set the `path` setting to
+change it. Each request produces two lines:
 
-Hooks run in trickset order, so where this trick sits matters:
+```
+{"timestamp": "...", "event": "request",  "direction": "out", "request_id": "ab12cd34", "model": "qwen3:8b", "payload": {...}, "messages": [...]}
+{"timestamp": "...", "event": "response", "direction": "in",  "request_id": "ab12cd34", "messages": [...], "answer": {"role": "assistant", "content": "hi!"}}
+```
 
-* first in the trickset — sees the messages *as they arrive* from the client
-* last in the trickset — sees them after every other trick has rewritten them
+Where it sits in the trickset matters. First, it records messages as they arrive
+from your tool; last, it records them after every other trick has rewritten them.
+A trick that answers on its own (a prompt keyword like `(exportit)`) stops
+everything after it, so put the logger first to be sure of a record.
 
-A trick that short-circuits the pipeline (a prompt-keyword handler, or a
-post_hook that replaces the answer) prevents anything after it from running,
-so put the logger before those tricks to guarantee a record.
+## How it works
 
-The ``path`` config field sets where the JSONL file is written.  If the path
-is an existing directory (or ends with a slash) the file ``traffic.jsonl`` is
-written inside it.
+- `pre_hook` writes the `request` record (payload, tools, messages, plus
+  `request_id`, `x_title`, `model`, `stream` from the request metadata);
+  `post_hook` writes the `response` record. Both return the context untouched.
+- If `path` is a directory, ends in `/`, or has no file extension, `traffic.jsonl`
+  is written inside it. Parent directories are created on demand.
+- Appends are serialized with a module-level lock. Unserializable values are
+  written via `str()`; write errors are swallowed so logging never breaks a
+  request.
 """
 
 import json

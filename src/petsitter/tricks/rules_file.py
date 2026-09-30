@@ -1,15 +1,31 @@
-"""Rules file trick.
+"""Adds the contents of a rules file (like AGENTS.md or CLAUDE.md) to every request, so every AI tool you use follows the same instructions.
 
-Reads a plain-markdown rules file (AGENTS.md / CLAUDE.md style) and injects
-its content into the system prompt on every request. Because petsitter sits
-in front of any tool pointed at it, the same rules file applies across
-opencode, Claude Code, Codex, etc. - write the rules once and keep every
-harness consistent.
+Each coding tool has its own rules file: CLAUDE.md for Claude Code, AGENTS.md for
+others, and so on. If you switch between tools you end up copying the same rules
+around. Because petsitter sits in front of all of them, this trick lets you write
+the rules once ("use pytest, not unittest", "never commit directly to main") and
+have every tool follow them.
 
-The rules path is configured per-trickset (the scope where petsitter config
-lives) via the ``rules_path`` config field, or switched at runtime with the
-``(rules: /path/to/rules.md)`` prompt keyword. Content is cached and reloaded
-when the path changes, on startup, or on request.
+## How to use
+
+Set the `rules_path` setting to your markdown file. Or switch files from any
+chat:
+
+```
+(rules: ~/notes/my-rules.md)
+```
+
+petsitter replies directly with how many characters it loaded. Type `(rules)`
+alone to see which file is active. With no file set, the trick does nothing.
+
+## How it works
+
+- `system_prompt` appends "The following rules MUST be followed for every
+  response:" followed by the file content.
+- The file is read and cached on configure, on startup, and when the keyword sets
+  a new path. Edits to the file are picked up only on one of those, so re-run
+  `(rules: <path>)` after editing.
+- A missing or unreadable file is logged and treated as no rules.
 """
 
 import logging

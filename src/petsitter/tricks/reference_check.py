@@ -1,30 +1,49 @@
-"""Reference check trick.
+"""Catches the model answering from memory when it should be using your search or docs tool, by making it cite what it looked up.
 
-Catches the most common shape of hallucination in a retrieval setup: the model
-either never consults its reference tool, or consults it, finds nothing useful,
-and answers from memory anyway - in both cases sounding exactly as confident as
-when it is right.
+In a retrieval setup (the model has a tool to search docs, a wiki or a
+knowledge base), the most common hallucination looks like this: the model never
+searches, or searches, finds nothing useful, and answers from memory anyway,
+sounding just as sure as when it's right. This trick stamps every search result
+with an id the model can't guess, requires it to cite those ids, and challenges
+it when it doesn't:
 
-Every result coming back from a reference-ish tool is stamped with an
-unforgeable ``ref_id``, and the model is required to attribute its claims to
-those ids in a delimited ``<refs>`` block. Because the ids are HMACs of the
-retrieved text under a per-process secret, a fabricated id can be spotted
-without keeping any state: recompute what was issued from the transcript in
-hand.  A model that cannot attribute a claim has a legitimate escape hatch -
-``ref_id:none`` - which matters, because if the only outcome of failing is
-punishment then the cheapest way out is to forge a better id.
+```
+You:   What is the Cascade valve rated to?
+       (model answers "900 PSI", citing an id that was never issued)
+       (petsitter challenges it, re-showing the retrieved text)
+Reply: The Cascade valve is rated to 400 PSI.
+```
 
-Failing the check is not fatal; it costs tokens.  The trick challenges the
-model with the retrieved content re-presented, up to ``max_rounds`` times, and
-if the model still cannot attribute its answer the answer is passed through
-untouched.
+It is invisible: the stamps and citations are stripped before anything reaches
+your tool, so the reply is exactly what the model wrote. If the model still can't
+back its answer after a few challenges, the answer passes through untouched.
 
-Nothing this trick does is visible downstream.  The stamps exist only in the
-payload sent upstream, the ``<refs>`` block exists only in the response coming
-back, and both are gone before anything leaves petsitter - the response body a
-client receives is byte-identical to what the model produced.  That is a
-correctness requirement, not a stylistic one: the output may be JSON, graph
-triples, or anything else with a parser waiting on the other end.
+## How to use
+
+Nothing to type. It turns itself on whenever the request includes a tool whose
+name or description matches `tool_patterns` (search, lookup, docs, wiki, rag and
+so on). Set `challenge_missing_call` to false if it's too noisy on turns that
+don't need a lookup. Type `(refcheck)` for a tally of answers checked, challenged
+and fabricated ids caught.
+
+## How it works
+
+- `pre_hook` stamps every matching `role: "tool"` result. JSON lists (or lists
+  under keys like `results`, `docs`, `hits`) get a `ref_id` field per item;
+  prose gets `[ref_id:...]` per paragraph, plus one id for the whole result. It
+  also adds a system-prompt contract asking for a trailing `<refs>` block.
+- `ref_id = HMAC(per-process secret, tool_call_id + chunk)[:12]`: deterministic,
+  so re-stamping each turn gives the same ids and no ledger is needed (loading
+  mid-conversation works retroactively), and unguessable, so it can't be forged.
+- `post_hook` parses `<refs>`. A valid issued id passes; `ref_id:none` is an
+  honest pass (so forging is never the cheapest way out). Otherwise it
+  challenges via `callmodel_sync`, up to `max_rounds`, naming forged ids, or
+  asking it to retrieve if nothing was retrieved. If the model responds with a
+  tool call, that goes to your harness to run.
+- Per-request state rides `request_meta()`; only the `(refcheck)` stats are on
+  the instance.
+- Limit: a model can cite a real id for a claim that id doesn't support. Catching
+  that needs a per-claim entailment check.
 """
 
 import hmac

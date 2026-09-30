@@ -1,9 +1,36 @@
-"""XML-based tool calling trick for models without native support.
+"""Gives small models a simpler, XML-style way to call tools, and translates their replies into real tool calls.
 
-Uses simple XML-like tags that are easier for smaller models to follow:
-- <tool>name</tool> for the tool name
-- <args>json</args> for arguments
-- <result>output</result> for tool results
+Very small models often can't produce the exact JSON a tool call needs, but can
+reliably fill in a couple of tags. With this trick the model writes:
+
+```
+<tool>list_files</tool>
+<args>{"path": "~/mp3"}</args>
+```
+
+and your agent receives a normal OpenAI `tool_calls` entry. Try it when
+the Tool Call trick gives you broken or missing calls on a small model.
+
+## How to use
+
+Nothing to type. Add it to the trickset your agent uses (instead of, not
+alongside, the other tool-calling tricks).
+
+## How it works
+
+- `system_prompt`: explains the `<tool>` / `<args>` format with a worked example,
+  and says results will arrive in `<result>` tags. (Tool results are not
+  actually rewritten into `<result>` tags; they reach the model as normal tool
+  messages.)
+- `pre_hook`: appends an "Available tools:" list of names and descriptions only
+  (no parameter schemas) to the system prompt. Tools are cached from the last
+  request that carried them.
+- `post_hook`: matches `<tool>name</tool>` followed by `<args>{...}</args>`
+  (also tolerates `<args={...}</args>`), converts each pair to a `tool_calls`
+  entry and clears the text content.
+- Native `tool_calls` in a reply are cleaned and switch off the XML
+  instructions for the rest of the process (instance state, shared across
+  requests).
 """
 
 import json

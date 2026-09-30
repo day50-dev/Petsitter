@@ -1,17 +1,33 @@
-"""Politeify trick.
+"""Rewrites your message into a polite, professional tone before the model sees it, without changing what you're asking for.
 
-Rewrites the user's outgoing message to be polite and professional before it
-reaches the backend model. Models tend to perform worse when a prompt is
-hostile or profane, even when the actual request is perfectly reasonable --
-this launders the tone without touching the ask itself.
+Models tend to do worse when a prompt is hostile or full of swearing, even when
+the request itself is perfectly reasonable. If you type while frustrated, this
+trick quietly cleans up the tone so you still get the model's best effort:
 
-The rewrite is one extra, one-shot call. It can go to a dedicated
-"politeify" entry in the modelset (its own host/model/key, so the rewrite
-never has to touch the same backend as the real request), or, if no such
-entry is configured, to the same "default" model the real request is about
-to use. Either way, the rewritten text is what actually gets sent upstream;
-the original wording never leaves petsitter, and nothing about the rewrite
-is visible in the model's response.
+```
+You type:        why the hell is this stupid test still failing, fix it
+Model receives:  Could you help me understand why this test is still failing and fix it?
+```
+
+Code blocks, file paths, commands and technical terms are kept exactly as
+written. The original wording never leaves petsitter.
+
+## How to use
+
+Nothing to type. Every message you send in the trickset is rewritten. Messages
+shorter than the `min_length` setting (default 12 characters) are skipped, so
+short replies like "yes" or a bare keyword pass through untouched.
+
+To send the rewrite to a separate, cheaper model, add a `politeify` entry to your
+models; otherwise it uses the `default` model.
+
+## How it works
+
+- `pre_hook`: finds the last user message (string content only) and makes one
+  `callmodel_sync` call with a rewrite-only instruction.
+- Model config: the `politeify` modelset entry if present, else `default`.
+- If the rewrite call fails or returns nothing, the message is sent unchanged
+  (a warning is logged). Nothing about the rewrite shows up in the response.
 """
 
 import logging

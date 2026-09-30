@@ -253,6 +253,20 @@ Detects and pseudonymizes sensitive information before it reaches the model, the
 pet add mine secrets_protector
 ```
 
+For anything the patterns can't recognize, mark it by hand with `(secret: value)`:
+
+```
+Here's my credentials. Username: (secret: realusername) Password: (secret: realpassword)
+```
+
+The proxy leaves these patterns in place (the trick sets `strip_prompt_keyword = False`), and the trick swaps each marked value for an opaque stand-in like `__96178c403fd9__d4360d48-b2ed-49cb-b39f-6de6443d06df` before the model sees it. The model is never told a swap happened, so it just uses the stand-in as if it were the real value. When the stand-in comes back in the reply or in a tool call's arguments, it is swapped back to the real value (JSON-escaped inside tool arguments). Real values that come back up in later turns are swapped out again before they reach the model. That covers your restored reply, the tool calls it made, and tool results that echo the value.
+
+The same value always maps to the same stand-in for the life of the process. Stand-ins are HMAC-derived, so they reveal nothing about the value. With `(secret: value)`, leading and trailing whitespace is trimmed and parentheses have to balance. For values that don't fit that, use the sed-style form: `(secret=|value|)`. You pick the delimiter (`|`, `^`, `#`, anything the value doesn't end with right before a `)`), and everything between the delimiters is taken exactly as typed, spaces and parens included:
+
+```
+Password: (secret=|ab)c( |)
+```
+
 ### Swap Harness
 
 [tricks/swapharness.py](tricks/swapharness.py)

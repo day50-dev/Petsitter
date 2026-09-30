@@ -1,6 +1,7 @@
 """GUI dashboard routes for petsitter."""
 
 import asyncio
+import time
 import json
 from pathlib import Path
 from typing import Any
@@ -60,11 +61,24 @@ def _save_full_config(handler, api_key):
     Path(_config_path).write_text(json.dumps(config, indent=2) + "\n")
 
 
+def _module_readme(source: str) -> str:
+    """A trick module's docstring, which doubles as its page in the dashboard."""
+    import ast
+    try:
+        return ast.get_docstring(ast.parse(source)) or ""
+    except SyntaxError:
+        return ""
+
+
 def _introspect_trick_file(path: Path) -> dict:
     """Extract display_name, brief, keywords, and prompt_keyword from a trick module without instantiating."""
     import importlib.util
 
-    info = {"path": str(path), "display_name": None, "brief": None, "category": "", "keywords": [], "prompt_keyword": "", "config_fields": [], "mtime": path.stat().st_mtime_ns}
+    info = {"path": str(path), "name": "", "display_name": None, "brief": None, "category": "", "keywords": [], "prompt_keyword": "", "required_models": [], "config_fields": [], "readme": "", "mtime": path.stat().st_mtime_ns}
+    try:
+        info["readme"] = _module_readme(path.read_text(encoding="utf-8"))
+    except OSError:
+        pass
     try:
         spec = importlib.util.spec_from_file_location(path.stem, str(path))
         if spec and spec.loader:
@@ -73,7 +87,9 @@ def _introspect_trick_file(path: Path) -> dict:
             for name in dir(mod):
                 obj = getattr(mod, name)
                 if isinstance(obj, type) and issubclass(obj, Trick) and obj is not Trick:
+                    info["name"] = name
                     info["display_name"] = getattr(obj, "__display_name__", None) or name
+                    info["required_models"] = list(getattr(obj, "required_models", []) or [])
                     info["brief"] = getattr(obj, "__brief__", "")
                     info["category"] = getattr(obj, "__category__", "") or ""
                     info["keywords"] = list(getattr(obj, "keywords", []) or [])
@@ -132,14 +148,27 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
         })
     app.add_route("/api/info", gui_info, methods=["GET"])
 
+    async def gui_traffic(request: Request) -> Response:
+        """Apps, models and tricksets seen since startup, most recent first."""
+        now = time.time()
+        out = {}
+        for kind, bucket in handler.traffic.items():
+            out[kind] = [
+                {"name": k, "count": v["count"], "ago": round(now - v["last"])}
+                for k, v in sorted(bucket.items(), key=lambda kv: -kv[1]["last"])
+            ]
+        return JSONResponse(out)
+    app.add_route("/api/traffic", gui_traffic, methods=["GET"])
+
     async def gui_tricks(request: Request) -> Response:
         return JSONResponse(handler.get_tricks_info())
     app.add_route("/api/tricks", gui_tricks, methods=["GET"])
 
     async def gui_tricks_available(request: Request) -> Response:
-        tricks_dir = Path("tricks")
-        if not tricks_dir.exists():
-            tricks_dir = Path(__file__).parent / "tricks"
+        # Always the bundled directory. This used to prefer ./tricks in the
+        # working directory, so launching from anywhere with a stray "tricks"
+        # folder (even just a leftover __pycache__) showed an empty store.
+        tricks_dir = Path(__file__).parent / "tricks"
         result = []
         if tricks_dir.exists():
             for f in sorted(tricks_dir.glob("*.py")):
@@ -153,6 +182,20 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
                 result.append(info)
         return JSONResponse(result)
     app.add_route("/api/tricks/available", gui_tricks_available, methods=["GET"])
+
+    async def gui_trick_source(request: Request) -> Response:
+        """Source of a bundled trick, for its extension page's Source tab.
+
+        Only files in the bundled tricks directory: this takes a name from
+        the browser, and must not become a way to read arbitrary files.
+        """
+        tricks_dir = (Path(__file__).parent / "tricks").resolve()
+        name = Path(request.query_params.get("path", "")).name
+        f = (tricks_dir / name).resolve()
+        if f.parent != tricks_dir or f.suffix != ".py" or not f.is_file():
+            return JSONResponse({"error": "not a bundled trick"}, status_code=404)
+        return Response(content=f.read_text(encoding="utf-8"), media_type="text/plain")
+    app.add_route("/api/tricks/source", gui_trick_source, methods=["GET"])
 
     # ---- community index -------------------------------------------------
     # There is no registry server; these routes read the static index.json
@@ -227,24 +270,40 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
         return JSONResponse(result)
     app.add_route("/api/registry/install", gui_registry_install, methods=["POST"])
 
-    async def gui_registry_source(request: Request) -> Response:
-        """Source of a trick, for the Read button. Installed copy if we have it."""
+    async def _registry_source_text(name: str, version: str) -> str:
+        """Source of a community trick. Installed copy if we have it."""
         from petsitter import registry
-        name = request.query_params.get("name", "")
-        version = request.query_params.get("version", "")
         cfg_dir = _registry_config_dir()
+        if version:
+            local = registry.installed_path(cfg_dir, name, version)
+            if local.exists():
+                return local.read_text()
+        index = await asyncio.to_thread(registry.fetch_index, cfg_dir, None, False)
+        entry = registry.resolve(index, name, version or None)
+        blob = await asyncio.to_thread(registry._fetch, entry["url"], 30)
+        return blob.decode("utf-8", "replace")
+
+    async def gui_registry_source(request: Request) -> Response:
+        """Source of a trick, for the Read button."""
+        from petsitter import registry
         try:
-            if version:
-                local = registry.installed_path(cfg_dir, name, version)
-                if local.exists():
-                    return Response(content=local.read_text(), media_type="text/plain")
-            index = await asyncio.to_thread(registry.fetch_index, cfg_dir, None, False)
-            entry = registry.resolve(index, name, version or None)
-            blob = await asyncio.to_thread(registry._fetch, entry["url"], 30)
-            return Response(content=blob.decode("utf-8", "replace"), media_type="text/plain")
+            text = await _registry_source_text(request.query_params.get("name", ""),
+                                               request.query_params.get("version", ""))
+            return Response(content=text, media_type="text/plain")
         except registry.RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
     app.add_route("/api/registry/source", gui_registry_source, methods=["GET"])
+
+    async def gui_registry_readme(request: Request) -> Response:
+        """A community trick's docstring, for its extension page."""
+        from petsitter import registry
+        try:
+            text = await _registry_source_text(request.query_params.get("name", ""),
+                                               request.query_params.get("version", ""))
+            return JSONResponse({"readme": _module_readme(text)})
+        except registry.RegistryError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+    app.add_route("/api/registry/readme", gui_registry_readme, methods=["GET"])
 
     # ---- playground ------------------------------------------------------
     # A real trip through the pipeline, not a simulation: the same
@@ -454,7 +513,8 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
         parameters = data.get("parameters", {})
         models = data.get("models", {})
         ts = Trickset(name, SCHEMA, filters, [], parameters=parameters, models=models)
-        ts.file_path = str(Path.home() / ".config" / "petsitter" / "tricksets" / f"{name}.json")
+        from petsitter import server
+        ts.file_path = str(server.TRICKSETS_DIR / f"{name}.json")
         ts.save()
         handler.tricksets[name] = ts
         return JSONResponse({"success": True, "name": name})

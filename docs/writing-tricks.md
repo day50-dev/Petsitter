@@ -274,6 +274,8 @@ The method receives the text after `mycommand: ` and can return:
 
 - Execution goes in order of the prompt reference. Unrecognized prompt keywords are passed through and surface as a non-critical error in the response along with the rest of the response
 - The pattern `(<keyword>: <request>)` properly handles nested parentheses by tracking a depth counter.
+- A second, sed-style form `(<keyword>=<D><request><D>)` takes the request verbatim between a delimiter `D` of the user's choosing, for requests with unbalanced parentheses or significant whitespace: `(secret=|ab)c|)`. One optional space is allowed on either side of `=`. This form only counts when it names a registered keyword, so code like `f(x = 'a')` is left alone.
+- Set `strip_prompt_keyword = False` on a trick to have the framework leave its pattern where the user typed it, on every turn, for the trick's own `pre_hook` to rewrite in place (secrets_protector does this). `handle_prompt_keyword` isn't called for it, and `petsitter.trick.find_prompt_keyword_patterns` gives the trick the same parser the framework uses.
 - Keyword matching is case-insensitive.
 - If the handler raises, an error message is returned as the assistant response.
 

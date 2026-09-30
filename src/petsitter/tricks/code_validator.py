@@ -1,9 +1,29 @@
-"""Code validation trick with self-healing retry.
+"""Double-checks that a code change the model proposes actually does what you asked for, and makes it try again if it doesn't.
 
-Validates model-generated code changes by:
-1. Asking the model to describe the proposed change
-2. Comparing that description against the original user request
-3. Retrying with feedback if the descriptions don't match
+Models sometimes hand back a change that looks plausible but solves a different
+problem: you ask to "make the retry loop stop after 3 attempts" and get a patch
+that adds logging. This trick catches that mismatch before you see it.
+
+After every response, it asks the model to describe the proposed change in plain
+words, then asks whether that description matches your last message. If the
+answer is no, the model is told why and asked for a different approach.
+
+## How to use
+
+Nothing to type. Add it to a trickset and every response goes through the check.
+It costs two extra model calls per response (more on a retry), so it fits best in
+a trickset dedicated to code editing.
+
+## How it works
+
+- `post_hook` only. Uses `callmodel_sync` against the default model for the
+  "describe this change" call, the "are these the same? Yes/No" comparison, and
+  any retry.
+- A verdict counts as a pass when the comparison reply starts with "YES".
+- On a fail the last assistant message is dropped and the model is re-asked with
+  the validation feedback. Up to `max_attempts` (constructor arg, default 3).
+- Any model call error stops validation and returns the latest response as-is.
+- Runs on every non-empty response, including ones that contain no code.
 """
 
 from petsitter.trick import Trick, callmodel_sync

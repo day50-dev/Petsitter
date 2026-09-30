@@ -964,3 +964,30 @@ class TestFilterPromptKeywords:
         assert response is None
         assert modified[0]["content"] == "(notatrick: whatever)"
         assert modified[0]["role"] != "system"  # no note injected for a buried turn
+
+
+class TestRuleMatching:
+    """A trickset is a rule: any match claims the request; case doesn't matter."""
+
+    def _handler(self, filters):
+        from petsitter.proxy import ProxyHandler
+        from petsitter.trickset import Trickset
+        default = Trickset("_default", "0.3.0", {"X-Title": "*", "Model": "*"}, [])
+        rule = Trickset("claude", "0.3.0", filters, [])
+        return ProxyHandler("http://unused", "m", tricksets={"_default": default, "claude": rule})
+
+    def test_empty_matching_rule_claims_request(self):
+        h = self._handler({"X-Title": "Claude Code", "Model": "*"})
+        _, matched = h._matching_tricks("Claude Code", "m")
+        assert matched.name == "claude"
+        assert list(h.traffic["tricksets"]) == ["claude"]
+
+    def test_no_match_falls_back(self):
+        h = self._handler({"X-Title": "Claude Code", "Model": "*"})
+        _, matched = h._matching_tricks("curl", "m")
+        assert matched.name == "_default"
+
+    def test_match_is_case_insensitive(self):
+        h = self._handler({"X-Title": "opencode*", "Model": "*"})
+        _, matched = h._matching_tricks("OpenCode", "m")
+        assert matched.name == "claude"

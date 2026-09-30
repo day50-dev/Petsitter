@@ -1,11 +1,39 @@
-"""Browse and swap system prompts from a repository of AI tool harnesses.
+"""Lets you browse a library of system prompts from well-known AI tools (Cursor, Windsurf and others) and make your model use one.
 
-Trigger: (swapharness: path/to/file) in any user message.
-On install, clones https://github.com/x1xhlol/system-prompts-and-models-of-ai-tools
-into ~/.petsitter/harnesses/.  Then use the prompt keyword to navigate the
-directory tree with folder/file icons and select a system prompt file.
-The selected content is injected into the system prompt on every request
-until a different file is chosen or the trick is uninstalled.
+A "harness" is the long set of instructions an AI tool gives its model behind the
+scenes. They differ a lot, and trying another tool's prompt with your own model
+is a quick way to change how it behaves. This trick downloads a public
+collection of them
+([system-prompts-and-models-of-ai-tools](https://github.com/x1xhlol/system-prompts-and-models-of-ai-tools))
+and lets you pick one from chat.
+
+## How to use
+
+Browse folders, then pick a file:
+
+```
+(swapharness: )
+(swapharness: Cursor Prompts)
+(swapharness: Cursor Prompts/Rules for All Models.md)
+```
+
+petsitter answers directly with a folder listing, or confirms the selection with
+a preview. From then on the chosen prompt is added to every request until you
+pick another or remove the trick. The library is cloned when you install the
+trick; if that hasn't happened, the first `(swapharness: )` starts the download
+in the background and tells you to try again shortly.
+
+## How it works
+
+- Clones with `git clone --depth 1` into `~/.config/petsitter/harnesses/`.
+  `install()` clones synchronously and raises on failure; the keyword clones in a
+  background thread and reports a failure once, then retries on the next use.
+  `uninstall()` deletes the clone.
+- `system_prompt` returns the client's system prompt followed by the selected
+  file (`replace_system_prompt = True`, but the existing prompt is kept in front).
+- The selection lives on the trick instance and is lost on restart.
+- If the request has no tool with "question" in its name, the listing ends with a
+  hint on how to browse and select.
 """
 
 import logging

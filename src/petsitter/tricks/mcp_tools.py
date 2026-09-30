@@ -1,10 +1,47 @@
-"""MCP tools trick.
+"""Adds the tools described in an mcp.json file to every request, so any AI tool pointed at petsitter can see and call them.
 
-Injects tools defined in an mcp.json file into any harness.  Tools with
-name collisions take precedence over existing tool definitions.
+Your coding agent only knows about the tools it ships with. If you have extra
+tools described in an [mcp.json](https://github.com/sourcey/mcp-schema) file
+(a docs search, an internal API), this trick injects them into every request,
+whatever agent you're using. The model can then call them like any other tool;
+your agent is still the one that runs the call.
 
-Default path: ~/.config/petsitter/mcp.json
-Use the prompt keyword ``(mcp: /path/to/file.json)`` to switch files at runtime.
+## How to use
+
+By default it reads `~/.config/petsitter/mcp.json`; set the `mcp_path` setting to
+use another file. A minimal file:
+
+```json
+{
+  "tools": [
+    {
+      "name": "search_docs",
+      "description": "Search documentation by query",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "query": { "type": "string" } },
+        "required": ["query"]
+      }
+    }
+  ]
+}
+```
+
+Switch files at runtime, or type `(mcp)` alone to see what's loaded:
+
+```
+(mcp: ~/work/my-tools.json)
+```
+
+## How it works
+
+- Each MCP tool becomes an OpenAI `function` tool; `inputSchema` becomes
+  `parameters`. Tools without a name are skipped.
+- `pre_hook` merges them into `params["tools"]`: a client tool with the same
+  name is dropped in favor of the MCP one.
+- `system_prompt` also lists the MCP tool names and descriptions.
+- The file is (re)loaded on configure, on startup, and when the keyword sets a
+  new path. A missing or unparseable file just means no tools (logged).
 """
 
 import json

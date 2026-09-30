@@ -1,10 +1,12 @@
 """OpenAI API proxy handling for petsitter."""
 
 import asyncio
+import inspect
 import json
 import logging
 from pathlib import Path
 import re
+import sys
 import time
 from typing import Any
 
@@ -28,6 +30,7 @@ from petsitter.observability import (
     start_request_meta,
 )
 from petsitter.trick import (
+    find_prompt_keyword_patterns,
     Trick,
     build_upstream_headers,
     build_upstream_payload,
@@ -70,6 +73,14 @@ def _anthropic_headers(incoming: dict) -> dict[str, str]:
     return headers
 
 
+def _tricksets_dir() -> Path:
+    """Where tricksets are saved: the directory the server resolved at startup
+    from -c / $PET_CONFIG_DIR. Never a hardcoded ~/.config, or a second
+    instance run with its own config writes into the first one's."""
+    from petsitter import server
+    return server.TRICKSETS_DIR
+
+
 class ProxyHandler:
 
     def __init__(
@@ -85,7 +96,7 @@ class ProxyHandler:
         self.api_key = api_key
         self.tricksets = tricksets or {}
         if tricks is not None and not self.tricksets:
-            ts = Trickset("_default", "0.3.0", {"X-Title": "*", "Model": "*"}, [], file_path=str(Path.home() / ".config" / "petsitter" / "tricksets" / "_default.json"))
+            ts = Trickset("_default", "0.3.0", {"X-Title": "*", "Model": "*"}, [], file_path=str(_tricksets_dir() / "_default.json"))
             ts.tricks = list(tricks)
             ts.trick_enabled = [True] * len(tricks)
             self.tricksets["_default"] = ts
@@ -100,7 +111,28 @@ class ProxyHandler:
         # needing to kill the shared process (which would drop everyone) or
         # wait for each client to restart.
         self.paused = False
+        # What traffic has actually come through, in memory only: which apps
+        # (X-Title) and models asked, and which tricksets each request landed
+        # in. The dashboard uses it to say a rule is live ("12 requests") and
+        # to suggest new rules from apps it has really seen.
+        self.traffic: dict[str, dict[str, dict]] = {"apps": {}, "models": {}, "tricksets": {}}
         configure(self.model_url, self.model_name or "", self.api_key)
+
+    TRAFFIC_KEEP = 50
+
+    def _note_traffic(self, x_title: str, model: str, tricksets: list[str]) -> None:
+        now = time.time()
+        for kind, keys in (("apps", [x_title]), ("models", [model]), ("tricksets", tricksets)):
+            bucket = self.traffic[kind]
+            for key in keys:
+                if not key:
+                    continue
+                entry = bucket.setdefault(key, {"count": 0, "last": 0.0})
+                entry["count"] += 1
+                entry["last"] = now
+            if len(bucket) > self.TRAFFIC_KEEP:
+                for stale in sorted(bucket, key=lambda k: bucket[k]["last"])[:len(bucket) - self.TRAFFIC_KEEP]:
+                    del bucket[stale]
 
     @property
     def tricks(self) -> list[Trick]:
@@ -113,6 +145,7 @@ class ProxyHandler:
         tricks: list[Trick] = []
         matched: Trickset | None = None
         default_ts = self.tricksets.get("_default")
+        hit: list[str] = []
         for name, ts in self.tricksets.items():
             if name == "_default":
                 continue
@@ -124,8 +157,12 @@ class ProxyHandler:
                 )
                 if matched is None:
                     matched = ts
+                hit.append(name)
                 tricks.extend(enabled)
-        if not tricks and default_ts:
+        # "Everything else" means no rule matched, not "no extensions ran": a
+        # matching rule claims the request even while it's empty or all its
+        # extensions are off, instead of quietly falling through to _default.
+        if not hit and default_ts:
             enabled = [t for i, t in enumerate(default_ts.tricks) if i < len(default_ts.trick_enabled) and default_ts.trick_enabled[i]]
             default_ts.get_logger().info(
                 "%strickset '_default' used as fallback (X-Title=%r, Model=%r) -> %d enabled tricks",
@@ -133,6 +170,8 @@ class ProxyHandler:
             )
             tricks.extend(enabled)
             matched = default_ts
+            hit.append("_default")
+        self._note_traffic(x_title, model, hit)
         return tricks, matched
 
     def _build_headers(self, model_cfg: dict | None = None) -> dict[str, str]:
@@ -351,53 +390,7 @@ class ProxyHandler:
         return capabilities
 
     def _find_prompt_keyword_patterns(self, text: str) -> list[dict]:
-        results: list[dict] = []
-        i = 0
-        while i < len(text):
-            if text[i] != '(':
-                i += 1
-                continue
-            j = i + 1
-            if j >= len(text) or not (text[j].isalnum() or text[j] == '_'):
-                i += 1
-                continue
-            while j < len(text) and (text[j].isalnum() or text[j] in ('_', '/')):
-                j += 1
-            kw_end = j
-            if j >= len(text):
-                i += 1
-                continue
-            if text[j] == ':':
-                j += 1
-                while j < len(text) and text[j].isspace():
-                    j += 1
-                depth = 1
-                k = j
-                while k < len(text) and depth > 0:
-                    if text[k] == '(':
-                        depth += 1
-                    elif text[k] == ')':
-                        depth -= 1
-                    k += 1
-                if depth != 0:
-                    i += 1
-                    continue
-                request = text[j:k - 1].strip()
-            elif text[j] == ')':
-                k = j + 1
-                request = ""
-            else:
-                i += 1
-                continue
-            keyword = text[i + 1:kw_end].strip()
-            results.append({
-                "start": i,
-                "end": k,
-                "keyword": keyword,
-                "request": request,
-            })
-            i = k
-        return results
+        return find_prompt_keyword_patterns(text)
 
     def _filter_prompt_keywords(self, messages: list, payload: dict | None = None) -> tuple[list, dict | None]:
         registry: dict[str, tuple[Trick, Trickset]] = {}
@@ -429,7 +422,13 @@ class ProxyHandler:
             this_is_live = is_live
             is_live = False
 
-            patterns = self._find_prompt_keyword_patterns(content)
+            patterns = [
+                p for p in self._find_prompt_keyword_patterns(content)
+                # "(x = 'a')" is far likelier to be code than a mistyped
+                # keyword, so the delimited form only counts once it names
+                # a keyword something actually registered.
+                if not p["delimited"] or p["keyword"].lower() in registry
+            ]
             if not patterns:
                 bare = content.strip().rstrip(".,!?")
                 if bare and bare.lower() in registry:
@@ -444,10 +443,15 @@ class ProxyHandler:
 
             recognized: list[dict] = []
             unrecognized: list[str] = []
+            kept: list[dict] = []
             for p in patterns:
                 keyword = p["keyword"].lower()
                 entry = registry.get(keyword)
-                if entry:
+                if entry and not entry[0].strip_prompt_keyword and keyword == entry[0].prompt_keyword.lower():
+                    # The trick rewrites this pattern itself in its pre_hook,
+                    # and needs it still sitting where the user typed it.
+                    kept.append(p)
+                elif entry:
                     recognized.append(p | {"trick": entry[0], "trickset": entry[1]})
                     if this_is_live:
                         entry[1].get_logger().info(
@@ -466,7 +470,9 @@ class ProxyHandler:
             # Strip patterns from content: all of them on the live turn
             # (including unrecognized ones, which get a system-prompt note
             # instead), only the recognized ones on an older turn.
-            strip = patterns if this_is_live else recognized
+            strip = [p for p in patterns if p not in kept] if this_is_live else recognized
+            if not strip:
+                continue
             for p in reversed(strip):
                 content = content[:p["start"]] + content[p["end"]:]
             content = re.sub(r' +', " ", content).strip()
@@ -559,7 +565,7 @@ class ProxyHandler:
     def _persist_ts(self, ts: Trickset) -> None:
         """Persist a trickset so dashboard edits survive restarts."""
         if not ts.file_path:
-            ts.file_path = str(Path.home() / ".config" / "petsitter" / "tricksets" / f"{ts.name}.json")
+            ts.file_path = str(_tricksets_dir() / f"{ts.name}.json")
         ts.save()
 
     def add_trick(self, path: str, ts_name: str | None = None) -> Trick:
@@ -570,7 +576,7 @@ class ProxyHandler:
         else:
             ts = self.get_default_trickset()
             if not ts:
-                ts = Trickset("_default", "0.3.0", {"X-Title": "*", "Model": "*"}, [], file_path=str(Path.home() / ".config" / "petsitter" / "tricksets" / "_default.json"))
+                ts = Trickset("_default", "0.3.0", {"X-Title": "*", "Model": "*"}, [], file_path=str(_tricksets_dir() / "_default.json"))
                 self.tricksets["_default"] = ts
         trick = ts.add_trick(path)
         try:
@@ -661,6 +667,7 @@ class ProxyHandler:
                     "required_models": list(t.required_models),
                     "config_fields": list(getattr(type(t), "config_fields", []) or []),
                     "config": ts.trick_configs.get(tid, {}),
+                    "readme": inspect.cleandoc(getattr(sys.modules.get(type(t).__module__), "__doc__", None) or ""),
                 })
         return result
 
@@ -676,7 +683,7 @@ class ProxyHandler:
                         ts.trick_enabled.append(True)
                     ts.trick_enabled[i] = enabled
                     if not ts.file_path:
-                        ts.file_path = str(Path.home() / ".config" / "petsitter" / "tricksets" / f"{ts.name}.json")
+                        ts.file_path = str(_tricksets_dir() / f"{ts.name}.json")
                     ts.save()
                     return True
         return False

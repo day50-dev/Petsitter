@@ -31,7 +31,7 @@ header {
 }
 
 header .brand { display: flex; align-items: center; }
-header .brand img { height: 32px; border-radius: 4px; }
+header .brand img { height: 30px; display: block; }
 header .info {
   display: flex;
   gap: 14px;
@@ -1534,7 +1534,8 @@ header .nav a:hover { background: #1a2a4d; }
    between tabs -- a landing screen that jumps as soon as you click anything
    reads as broken. The filter bar underneath is trickset vocabulary, so it
    keeps its box but not its contents. */
-body.on-intro #ts-bar { visibility: hidden; }
+/* Start here isn't about any one channel, so the channel title bar goes. */
+body.on-intro #ts-bar { display: none; }
 
 /* the explanation detect() already produced, which the card used to discard */
 .agent-why {
@@ -1751,8 +1752,6 @@ body.on-intro #ts-bar { visibility: hidden; }
 }
 
 /* Start here is the way in, not a peer of the management tabs */
-header .nav .nav-start { color: #8ab4ff; font-weight: 600; }
-header .nav .nav-start:hover { color: #cfe2ff; }
 
 /* A labelled control beats an unlabelled switch: the word says what will
    happen, the switch shows what is true now. */
@@ -1802,3 +1801,410 @@ header .nav .nav-start:hover { color: #cfe2ff; }
 }
 .tricks-context .tc-close:hover { color: #fff; background: #24304a; }
 .tricks-context .tc-close:focus-visible { outline: 2px solid #8ab4ff; outline-offset: 2px; }
+
+/* ---- extensions (the Tricks tab) ----
+   A list on the left, one extension's page on the right: the shape people
+   already know from their editor's extension panel. */
+.ext {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.ext > .card { margin-bottom: 0; }
+.ext-side {
+  position: sticky;
+  top: 12px;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  padding: 12px;
+}
+.ext-search {
+  width: 100%;
+  padding: 8px 10px;
+  background: #0f0f23;
+  border: 1px solid #1e2a3a;
+  border-radius: 6px;
+  color: #e0e0e0;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+.ext-search:focus { outline: none; border-color: #2a4a6a; }
+.ext-sec + .ext-sec { margin-top: 14px; }
+.ext-sec-h {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: #7a9ab5;
+  margin-bottom: 2px;
+}
+.ext-count { color: #4a6572; }
+.ext-sec-desc { font-size: 11px; color: #4a6572; margin-bottom: 6px; }
+.ext-empty { font-size: 12px; color: #5a7a8a; padding: 8px 2px; }
+.ext-empty a { color: #8ab4ff; }
+
+.ext-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  margin-bottom: 2px;
+  border-radius: 6px;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+}
+.ext-item:hover { background: #1a1a33; }
+.ext-item.selected { background: #1a2a4d; border-color: #2a4a6a; }
+.ext-item .info { flex: 1; min-width: 0; }
+.ext-item .name { font-size: 13px; font-weight: 500; color: #e0e0e0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ext-item .brief { margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ext-item.is-off .name, .ext-item.is-off .brief, .ext-item.is-off .ext-avatar { opacity: .5; }
+.ext-item.trick-item { justify-content: flex-start; }
+.ext-got { color: #6bff8a; font-size: 13px; }
+.ext-side .avail-category { margin-top: 10px; }
+.ext-side .avail-more { margin-top: 6px; }
+.ext-custom { margin-top: 14px; font-size: 12px; color: #5a7a8a; }
+.ext-custom summary { cursor: pointer; }
+.ext-custom summary:hover { color: #8ab4ff; }
+.ext-custom .custom-path { margin-top: 8px; }
+
+.ext-avatar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  color: hsl(var(--h) 85% 80%);
+  background: hsl(var(--h) 40% 20%);
+  border: 1px solid hsl(var(--h) 40% 30%);
+}
+.ext-avatar-lg { width: 64px; height: 64px; border-radius: 14px; font-size: 22px; }
+
+.ext-detail { min-height: 420px; padding: 24px; }
+.ext-head { display: flex; gap: 18px; align-items: flex-start; }
+.ext-title { flex: 1; min-width: 0; }
+.ext-title h2 { font-size: 22px; color: #fff; margin-bottom: 4px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ext-badge { font-size: 11px; font-weight: 600; color: #6bff8a; background: #1a3d2a; padding: 2px 8px; border-radius: 10px; }
+.ext-where { font-size: 12px; font-weight: 400; color: #5a7a8a; }
+.ext-sub { font-size: 14px; color: #a4b8d4; line-height: 1.4; }
+.ext-from { font-size: 12px; color: #5a7a8a; margin-top: 6px; }
+.ext-from a { color: #7a9ab5; }
+.ext-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
+.ext-install { padding: 7px 22px; font-size: 13px; font-weight: 600; background: #2a5aa0; color: #fff; }
+.ext-install:hover { background: #3468b8; }
+.ext-onoff { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: #a4b8d4; margin-right: 6px; }
+
+.ext-tabs { display: flex; gap: 4px; border-bottom: 1px solid #1e2a3a; margin: 22px 0 16px; }
+.ext-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #6b8299;
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 12px;
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+.ext-tab:hover { color: #c8d6e5; }
+.ext-tab.active { color: #fff; border-bottom-color: #8ab4ff; }
+
+.ext-how {
+  background: #12122a;
+  border: 1px solid #1e2a3a;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+}
+.ext-how h3 { color: #a4b8d4; margin-bottom: 8px; }
+.ext-how dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; font-size: 13px; line-height: 1.45; }
+.ext-how dt { color: #5a7a8a; }
+.ext-how dd { color: #c8d6e5; }
+.ext-how a { color: #8ab4ff; }
+.ext-how code, .ext-readme code { background: #1a1a33; padding: 1px 5px; border-radius: 3px; font-size: 12px; color: #f5c542; }
+.ext-note { font-size: 12px; color: #5a7a8a; margin-bottom: 10px; }
+
+.ext-readme { font-size: 14px; line-height: 1.6; color: #c8d6e5; max-width: 760px; }
+.ext-readme h1, .ext-readme h2, .ext-readme h3 { color: #e0e0e0; margin: 1.2em 0 .4em; }
+.ext-readme h1 { font-size: 18px; }
+.ext-readme h2 { font-size: 16px; }
+.ext-readme h3 { font-size: 14px; }
+.ext-readme p { margin: .6em 0; }
+.ext-readme ul, .ext-readme ol { margin: .5em 0; padding-left: 1.6em; }
+.ext-readme li { margin: .25em 0; }
+.ext-readme a { color: #8ab4ff; }
+.ext-readme pre { background: #0f0f23; border: 1px solid #1e2a3a; border-radius: 6px; padding: 10px 12px; overflow-x: auto; margin: .8em 0; }
+.ext-readme pre code { background: none; padding: 0; color: inherit; }
+
+.ext-welcome { max-width: 640px; }
+.ext-welcome h2 { font-size: 22px; color: #fff; margin-bottom: 10px; }
+.ext-welcome p { font-size: 14px; line-height: 1.6; color: #a4b8d4; margin-bottom: 8px; }
+.ext-welcome .ext-welcome-sub { color: #6b8299; }
+.ext-welcome h3 { margin-top: 22px; color: #7a9ab5; }
+.ext-starters { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; margin-top: 8px; }
+.ext-starter {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  text-align: left;
+  background: #1a1a33;
+  border: 1px solid #1e2a3a;
+  border-radius: 8px;
+  padding: 12px;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.ext-starter:hover { border-color: #2a4a6a; background: #1a2a4d; }
+.ext-starter b { display: block; color: #e0e0e0; font-size: 13px; font-weight: 600; }
+.ext-starter span span { display: block; font-size: 12px; color: #6b8299; margin-top: 2px; line-height: 1.35; }
+
+@media (max-width: 800px) {
+  .ext { grid-template-columns: minmax(0, 1fr); }
+  .ext-side { position: static; max-height: none; }
+  .ext-detail { padding: 16px; }
+  .ext-head { gap: 12px; }
+  .ext-avatar-lg { width: 48px; height: 48px; font-size: 17px; border-radius: 11px; }
+}
+
+/* ---- channels (tricksets) ----
+   A chat-app style rail on the left lists every channel with its traffic;
+   the selected one's name and topic sit above the tabs. */
+/* The rail is a real sidebar: pinned to the window's left edge, full height,
+   with the whole page (header included) shifted over to make room. */
+.app-main { min-width: 0; }
+.chan-rail {
+  position: fixed;
+  z-index: 30;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 220px;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: #12122a;
+  border-right: 1px solid #1e2a3a;
+  padding: 22px 10px 12px;
+  transition: width .18s ease;
+}
+@media (min-width: 801px) {
+  body { padding-left: 240px; transition: padding-left .18s ease; }
+  body.rail-collapsed { padding-left: 84px; }
+}
+.chan-h {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: #6b8299;
+  padding: 2px 8px 6px;
+}
+.chan-h-off { margin-top: 14px; color: #4a6572; }
+.chan-top { display: flex; align-items: center; gap: 4px; padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid #1e2a3a; }
+.chan-top .chan-home { flex: 1; margin: 0; }
+.chan-home { color: #c8d6e5; font-weight: 600; }
+.chan-home .chan-glyph { display: inline-flex; color: #8ab4ff; }
+.chan-home.active .chan-glyph { color: #8ab4ff; }
+.chan-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  background: none;
+  border: none;
+  border-radius: 5px;
+  color: #6b8299;
+  cursor: pointer;
+}
+.chan-toggle:hover { background: #1a2a4d; color: #c8d6e5; }
+.chan-abbr { display: none; }
+
+/* Collapsed: a narrow strip of channel initials, counts as a corner badge. */
+body.rail-collapsed .chan-rail { width: 64px; padding: 22px 6px 12px; }
+body.rail-collapsed .chan-top { flex-direction: column-reverse; gap: 8px; }
+body.rail-collapsed .chan-rail .chan-h:not(.chan-h-off),
+body.rail-collapsed .chan-name,
+body.rail-collapsed .chan-rail .chan-glyph,
+body.rail-collapsed .chan-off,
+body.rail-collapsed .chan-warn,
+body.rail-collapsed .chan-foot { display: none; }
+body.rail-collapsed .chan-h-off { display: block; font-size: 0; height: 1px; padding: 0; margin: 10px 6px; background: #1e2a3a; }
+body.rail-collapsed .chan { position: relative; justify-content: center; padding: 4px 0; background: none; }
+body.rail-collapsed .chan-abbr {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: #1a1a33;
+  border: 1px solid #2a3a4a;
+  font-size: 12px;
+  font-weight: 700;
+  color: #a4b8d4;
+}
+body.rail-collapsed .chan:hover .chan-abbr { border-color: #3a5a7a; color: #fff; }
+body.rail-collapsed .chan.active .chan-abbr { background: #1a2a4d; border-color: #8ab4ff; color: #fff; }
+body.rail-collapsed .chan.off .chan-abbr { opacity: .5; }
+body.rail-collapsed .chan-add .chan-abbr { background: none; border-style: dashed; color: #4a7a5a; font-size: 16px; }
+body.rail-collapsed .chan-count { position: absolute; top: 0; right: 0; font-size: 9px; padding: 0 5px; line-height: 15px; }
+.chan {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 5px;
+  padding: 6px 8px;
+  margin-bottom: 1px;
+  color: #8a9ab0;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.chan:hover { background: #1a1a33; color: #c8d6e5; }
+.chan.active { background: #1a2a4d; color: #fff; }
+.chan.is-new .chan-name { color: #8ab4ff; font-weight: 600; }
+.chan.off { color: #4a6572; }
+.chan-glyph { width: 14px; flex: none; text-align: center; color: #4a6572; font-weight: 600; }
+.chan.active .chan-glyph { color: #8ab4ff; }
+.chan-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chan-count {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: #7a9ab5;
+  background: #1e2a3a;
+  border-radius: 9px;
+  padding: 1px 7px;
+}
+.chan-count.live { color: #0f0f1a; background: #6bff8a; }
+.chan-off { flex: none; font-size: 10px; color: #4a6572; }
+.chan-add { color: #5a7a8a; margin-top: 6px; }
+.chan-add .chan-glyph { color: #4a7a5a; }
+.chan-warn { font-size: 11px; color: #ffb84d; padding: 4px 8px; line-height: 1.4; }
+.chan-warn b { color: #ffd08a; }
+.chan-foot { font-size: 11px; line-height: 1.45; color: #4a6572; border-top: 1px solid #1e2a3a; margin-top: auto; padding: 12px 8px 2px; }
+.chan-foot b { color: #6b8299; }
+
+.rule-bar { position: relative; margin: 0 0 12px; }
+.rule-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  min-height: 44px;
+  padding: 6px 2px 10px;
+  border-bottom: 1px solid #1e2a3a;
+}
+.chan-title { display: inline-flex; align-items: center; gap: 6px; font-size: 18px; font-weight: 700; color: #fff; }
+.chan-title .chan-glyph { color: #6b8299; font-size: 18px; width: auto; }
+.rule-sentence { font-size: 13px; color: #8a9ab0; padding-left: 12px; border-left: 1px solid #2a3a4a; }
+.rule-sentence b { color: #c8d6e5; font-weight: 600; }
+.rule-stats { color: #4a6572; }
+.rule-row #rule-edit-btn { margin-left: auto; }
+
+.rule-editor {
+  margin-top: 10px;
+  background: #16162a;
+  border: 1px solid #2a3a4a;
+  border-radius: 8px;
+  padding: 14px 16px;
+  max-width: 760px;
+}
+.rule-ed-title { font-size: 13px; font-weight: 600; color: #a4b8d4; margin-bottom: 10px; }
+.rule-ed-sentence { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 14px; color: #a4b8d4; }
+.rule-ed-sentence input, .rule-ed-name input {
+  background: #0f0f23;
+  border: 1px solid #2a3a4a;
+  border-radius: 5px;
+  color: #e0e0e0;
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 8px;
+  width: 170px;
+}
+.rule-ed-sentence input:focus, .rule-ed-name input:focus { outline: none; border-color: #3a5a7a; }
+.rule-ed-name { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 13px; color: #6b8299; }
+.rule-ed-hint { font-size: 11px; color: #4a6572; margin-top: 8px; }
+.rule-ed-hint code { color: #f5c542; }
+.rule-ed-preview { font-size: 12px; margin-top: 8px; }
+.rule-ed-preview.warn { color: #ffb84d; }
+.rule-ed-actions { display: flex; gap: 8px; margin-top: 12px; }
+.rule-ed-del { margin-left: auto; }
+.rule-suggest { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: #6b8299; margin-bottom: 12px; }
+.rule-chip {
+  font: inherit;
+  font-size: 12px;
+  color: #c8d6e5;
+  background: #1a1a33;
+  border: 1px solid #2a3a4a;
+  border-radius: 12px;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+.rule-chip:hover { border-color: #3a5a7a; background: #1a2a4d; }
+.rule-chip i { font-style: normal; color: #5a7a8a; margin-left: 4px; }
+
+@media (max-width: 800px) {
+  /* On a phone the rail becomes a row of channels you swipe through. */
+  .chan-rail {
+    position: static;
+    width: auto;
+    flex-direction: row;
+    gap: 4px;
+    overflow-x: auto;
+    padding: 6px;
+    margin-bottom: 12px;
+    border: 1px solid #1e2a3a;
+    border-radius: 8px;
+  }
+  body.rail-collapsed .chan-rail { width: auto; padding: 6px; }
+  .chan-rail .chan-toggle, .chan-rail .chan-h, .chan-rail .chan-foot, .chan-rail .chan-warn { display: none; }
+  .chan-rail .chan-top { padding: 0; margin: 0; border: none; }
+  .chan { width: auto; flex: none; margin: 0; }
+  .chan-add { margin-top: 0; }
+}
+@media (max-width: 620px) {
+  .rule-sentence { flex-basis: 100%; border-left: none; padding-left: 0; }
+  .rule-ed-sentence input { width: 100%; }
+}
+
+/* Scrollbars in the extensions list, code blocks and rule menu: a real,
+   full-width scrollbar with a visible track, in the dashboard's colours
+   rather than the OS's light grey. Chrome ignores ::-webkit-scrollbar as
+   soon as the standard scrollbar-* properties are set (and those only offer
+   "thin"), so the standard ones are for Firefox alone. */
+.ext-side::-webkit-scrollbar, .ext-detail pre::-webkit-scrollbar, .chan-rail::-webkit-scrollbar { width: 14px; height: 14px; }
+.ext-side::-webkit-scrollbar-track, .ext-detail pre::-webkit-scrollbar-track, .chan-rail::-webkit-scrollbar-track {
+  background: #0f0f23;
+  border-left: 1px solid #1e2a3a;
+}
+.ext-side::-webkit-scrollbar-thumb, .ext-detail pre::-webkit-scrollbar-thumb, .chan-rail::-webkit-scrollbar-thumb {
+  background: #34465a;
+  border-radius: 7px;
+  border: 2px solid #0f0f23;
+  border-left-width: 3px;
+  min-height: 40px;
+}
+.ext-side::-webkit-scrollbar-thumb:hover, .ext-detail pre::-webkit-scrollbar-thumb:hover, .chan-rail::-webkit-scrollbar-thumb:hover { background: #4a6a8a; }
+.ext-side::-webkit-scrollbar-thumb:active, .ext-detail pre::-webkit-scrollbar-thumb:active, .chan-rail::-webkit-scrollbar-thumb:active { background: #5a82aa; }
+.ext-side::-webkit-scrollbar-corner, .ext-detail pre::-webkit-scrollbar-corner { background: #0f0f23; }
+@supports not selector(::-webkit-scrollbar) {
+  .ext-side, .ext-detail pre, .chan-rail { scrollbar-color: #34465a #0f0f23; }
+}

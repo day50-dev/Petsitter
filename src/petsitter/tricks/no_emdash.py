@@ -1,7 +1,24 @@
-"""No Em-Dash trick.
+"""Stops the model from using em-dashes, replacing any that slip through with a plain hyphen.
 
-Modifies the system prompt to ask the model not to use em-dashes,
-and post-filters responses to replace any em-dashes with hyphens.
+Many people find the long dash (U+2014, the em-dash) a telltale sign of AI-written text, and some
+terminals, commit hooks and style guides don't want it either. This trick asks
+the model not to use it and cleans up any that appear anyway:
+
+```
+Before:  The fix is simple\u2014just retry.
+After:   The fix is simple-just retry.
+```
+
+## How to use
+
+Nothing to type or configure. Add it to a trickset and it applies to every
+response.
+
+## How it works
+
+- `system_prompt`: asks the model to use a regular hyphen instead of em-dashes.
+- `post_hook`: replaces every U+2014 in the final assistant message with `-`.
+  It does not touch en-dashes (U+2013) or tool call arguments.
 """
 
 from petsitter.trick import Trick

@@ -1,10 +1,35 @@
-"""Self-improver trick: use the (petsitter: ...) prompt keyword to invoke an
-agent that can add, modify, and list tricks — all at runtime.
+"""Lets you ask petsitter, from inside any chat, to write or change a trick for you.
 
-Usage:
-    Include ``(petsitter: <request>)`` in any user message. The pattern is
-    stripped before the model sees it, and the request is handled by an
-    agent loop using the default model.
+Instead of opening an editor to add a new trick, describe what you want and an
+agent (running on your default model) writes the Python file. It can create new
+trick files, overwrite existing ones, and list what's there. It's also the
+reference example of a prompt keyword that hands a whole task to its own agent.
+
+## How to use
+
+```
+(petsitter: add a trick that logs every request to a file)
+```
+
+petsitter replies with the agent's final answer, typically what it created and
+how to load it. The whole message goes to the agent: any other text in it is not
+answered by your normal model, so send the request on its own.
+
+This agent writes files with no confirmation step, so use it only on a machine
+and model you trust.
+
+## How it works
+
+- Prompt keyword `petsitter`. The handler runs an agent loop of up to
+  `max_iterations` model calls (constructor arg, default 10) with
+  `callmodel_sync` on the default model. It sees only the request, not the chat.
+- System prompt: `src/petsitter/.agents/skills/self-improver/SKILL.md` (the
+  trick API and conventions), plus JSON-RPC `tools/call` instructions. Tools:
+  `add_trick` (refuses to overwrite), `modify_trick`, `list_tricks`.
+- Paths are relative to the proxy's working directory (default `tricks/`), and
+  are not restricted to it.
+- The loop ends at the first reply without a tool call, which becomes the
+  response.
 """
 
 import json

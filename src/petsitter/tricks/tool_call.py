@@ -1,9 +1,34 @@
-"""Tool calling trick for models without native support.
+"""Lets models without built-in tool calling use tools anyway, by teaching them a simple JSON format and translating their replies into real tool calls.
 
-Enables tool calling by:
-1. Injecting tool definitions into the prompt
-2. Parsing model responses for tool call patterns
-3. Converting to OpenAI tool_call format
+Coding agents (opencode, Claude Code, Codex and friends) work by having the model
+call tools: read a file, run a command, search. Many local and older models have
+no native tool calling, so the agent just gets text back and stalls. This trick
+bridges the gap: the model writes a JSON-RPC line, and your tool receives a
+normal OpenAI `tool_calls` entry.
+
+```
+Model writes:  {"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"read_file","arguments":{"path":"app.py"}}}
+Tool receives: tool_calls: [{"type": "function", "function": {"name": "read_file", ...}}]
+```
+
+## How to use
+
+Nothing to type. Add it to the trickset used by your agent. If the model turns out
+to support tools natively, the trick notices and steps out of the way.
+
+## How it works
+
+- `system_prompt`: explains the JSON-RPC `tools/call` format and warns against
+  repeating the same call.
+- `pre_hook`: appends the full tool definitions (JSON) to the system prompt,
+  once. Tools are cached from the last request that carried them.
+- `post_hook`: parses the reply as one JSON object, then line by line, then by
+  scanning for balanced `{...}` objects; every `tools/call` found becomes a
+  `tool_calls` entry and the text content is set to `None`.
+- If a reply already has native `tool_calls`, they are cleaned (e.g. Ollama's
+  extra `index` field dropped) and the trick stops adding JSON-RPC instructions
+  for the rest of the process. That flag and the tool cache live on the
+  instance, so they are shared across requests.
 """
 
 import json

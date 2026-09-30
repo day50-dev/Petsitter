@@ -1,16 +1,37 @@
-"""Multi-model consultant trick.
+"""Has two different models improve and judge each other's answers, and returns the one they agree is better.
 
-Two models cross-validate and improve each other's responses through
-iterative refinement and voting. Uses "default" as model1 and
-"consultant" as model2 from the modelset.
+Every model has blind spots. Asking a second model to review and rewrite the
+first one's answer, and letting both vote on the result, tends to catch mistakes
+either would make alone. The cost is several extra model calls per reply, so it
+suits questions where quality matters more than speed.
 
-Flow per round:
-  1. model1's response (from proxy) is sent to model2 for improvement
-  2. model2 generates a fresh response to the original prompt
-  3. model1 improves model2's fresh response
-  4. Both models vote on the two improved outputs
-  5. If they agree, return the winner; if not, repeat once more
-  6. On second disagreement, randomly pick one as fallback
+## How to use
+
+You need a second model under the name `consultant` (the first is your usual
+`default` model):
+
+```bash
+pet model consultant url http://localhost:11434 --trickset consult
+pet model consultant model qwen3:8b --trickset consult
+```
+
+After that, nothing to type: every reply in the trickset goes through the
+process.
+
+## How it works
+
+`post_hook`, per round (up to `max_rounds`, constructor arg, default 2):
+
+1. The default model's reply is improved by the consultant.
+2. The consultant writes its own fresh answer to your last message.
+3. The default model improves that fresh answer.
+4. Both models vote "A" or "B" between the two improved answers (an unclear vote
+   is a coin flip).
+5. If the votes agree, the winner replaces the reply. Otherwise another round.
+
+If they never agree, one of the last two candidates is picked at random. The
+fresh answer only sees your last message, not the whole conversation. Only `url`
+and `model` are read from the model configs.
 """
 
 import random

@@ -1,9 +1,38 @@
-"""Conversational tool calling trick for small models.
+"""Lets tiny models call tools by having a conversation with a helper called ANDYBOT, instead of writing JSON.
 
-Uses an iterative conversational approach:
-1. Shows only function names and descriptions
-2. Collects parameters one-by-one through dialogue
-3. Handles confusion by retrying with original context
+Small models (3B and under) and older ones often can't produce reliable tool-call
+JSON. They can, however, ask for something by name and answer simple questions.
+This trick turns a tool call into that kind of dialogue:
+
+1. The model says `DEAR ANDYBOT, GET_WEATHER`
+2. ANDYBOT asks: "ANDYBOT WOULD LIKE TO KNOW: location (required)?"
+3. The model answers `Paris`
+4. ANDYBOT builds the real tool call and hands it to your agent
+
+The model can also pass arguments inline (`DEAR ANDYBOT, GET_WEATHER location=Paris`),
+skip optional parameters, or say "I am confused" to start over.
+
+## How to use
+
+Nothing to type. Add it to the trickset your agent uses, as the only
+tool-calling trick. The ANDYBOT persona is only added once your agent has sent
+tools.
+
+## How it works
+
+- `system_prompt`: lists tool names (uppercased) and descriptions, no schemas,
+  and explains `DEAR ANDYBOT, <FUNCTION_NAME>`.
+- `pre_hook`: caches tools, remembers the first user message, and rewrites every
+  `role: "tool"` message as "ANDYBOT RESPONDS: ..." plus that original request.
+- `post_hook`: matches `DEAR ANDYBOT, <name> [args]` (name match ignores case and
+  underscores), then replaces the reply with one question per missing
+  parameter, required ones first. When nothing is missing it emits a
+  `tool_calls` entry and clears the content.
+- "I am confused" / "I do not know" / "skip" / "none" / "not required" skips an
+  optional parameter; on a required one it resets and restates the request.
+- Collection state (pending tool, collected params) and the tool cache live on
+  the instance, so concurrent conversations through one trickset can collide.
+  Native `tool_calls` in a reply disable the persona for the rest of the process.
 """
 
 import json

@@ -1,8 +1,29 @@
-"""JSON mode enforcement trick.
+"""Makes the model answer with valid JSON only, and retries when it doesn't.
 
-Ensures the model returns valid JSON by:
-1. Adding instructions to the system prompt
-2. Retrying with feedback if the response is not valid JSON
+Useful when a script or another program reads the model's output. Small models
+love to wrap JSON in a Markdown code fence or add "Here is your JSON:" in front,
+which breaks a parser. With this trick:
+
+```
+Before:  Sure! Here you go:  ```json {"ok": true} ```
+After:   {"ok": true}
+```
+
+## How to use
+
+Nothing to type. Every response in the trickset is held to the rule, so put it in
+a trickset used only by the tool that expects JSON.
+
+## How it works
+
+- `system_prompt`: tells the model to respond with raw JSON, no prose, no
+  Markdown, no code blocks.
+- `post_hook`: if the reply starts with a Markdown code fence, the fence lines are
+  stripped. The result is parsed with `json.loads`; on failure the model is told
+  "Your response was not valid JSON" and asked again (`callmodel_sync`, default
+  model).
+- Up to `max_attempts` tries in total (constructor arg, default 3). If it still
+  isn't valid JSON, the last reply is passed through unchanged.
 """
 
 import json

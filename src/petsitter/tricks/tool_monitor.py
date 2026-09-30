@@ -1,42 +1,41 @@
-"""Tool monitor trick.
+"""Streams a live feed of which tools your AI tool offered the model, which ones other tricks hid, and which ones the model actually called.
 
-Publishes a datagram per request describing the tool traffic around a model
-call, so an external viewer can show what the model was actually offered and
-what it did with it.
+Agents hand the model a list of tools on every request, and some tricks narrow
+that list step by step to walk the model through a process. When a tool call
+goes wrong it helps to see, per request: what was offered, what was withheld (and
+by which trick), and what fired. This trick publishes that, and the bundled
+viewer draws it.
 
-Two records go out per request::
+## How to use
 
-    {"event": "request",  ...}   # pre_hook: what arrived from the client
-    {"event": "response", ...}   # post_hook: what went upstream, what fired
+Run the viewer in a terminal, then use your AI tool as normal:
 
-The interesting field is ``withheld``.  Sophisticated agentic flows do not hand
-the model every tool it owns; they gate the list per step, so the model is
-walked through a flow chart rather than turned loose.  When another trick does
-that gating, this trick reports the difference between the list the client sent
-and the list that actually went upstream.
+```bash
+./contrib/toolwatch.py            # listen on the default socket
+./contrib/toolwatch.py --demo     # see it with made-up traffic first
+```
 
-It reports *which* trick withheld each tool, not just that it vanished.  The
-framework only says that a given trick's ``pre_hook`` has run; this trick
-subscribes to that event and samples the tool list itself each time one
-arrives, so a change is attributed to whichever trick had just finished.  All of
-that lives here rather than in the pipeline, because only a trick that cares
-about tools has any reason to look at them.
+Put this trick **first** in the trickset, so its "offered" list is what your tool
+really sent, before other tricks change it. Nothing is recorded when no viewer is
+running. Turn on `include_schemas` to also see each tool's full parameter schema
+(events get much larger).
 
-A gating trick that also wants to explain *why* can say so itself with
-``trace_event("gate", self, reason=...)``; anything a trick emits that way is
-forwarded to the viewer as a note.
+## How it works
 
-**Position this trick first in the trickset.**  ``pre_hook`` snapshots the
-incoming tool list before any other trick has rewritten it, and ``post_hook``
-re-reads the live payload to see the end state.  Placed later, the "offered"
-baseline is whatever the tricks ahead of it already did.
-
-Transport is a unix datagram socket, chosen so that publishing costs nothing
-when nobody is listening: if no viewer has bound the path, ``sendto`` fails
-immediately and the event is dropped.  The socket is non-blocking, so a slow or
-wedged viewer can never apply back-pressure to the request path.  Nothing about
-the events is specific to this transport -- swap ``_emit`` for Redis, D-Bus, or
-whatever your viewer speaks.
+- Two datagrams per request: `request` from `pre_hook` (offered tools, pending
+  tool results, conversation key) and `response` from `post_hook` (final tool
+  list, `withheld`, `added`, `fired` calls with arguments, `by_trick`, `notes`).
+- Attribution: `startup()` subscribes to pipeline events. After each trick's
+  `pre_hook` the live tool list is re-sampled, so a change is credited to the
+  trick that just ran. A trick can explain itself with
+  `trace_event("gate", self, reason=...)`; non-pipeline events arrive as notes.
+- Per-request state lives in `request_meta()`, not on the instance.
+- Transport: non-blocking unix datagram socket at `socket_path` (default
+  `~/.cache/petsitter/toolmon.sock`). No listener or a full buffer means the event
+  is dropped; it never blocks the request. Oversized events (over 60 KB) drop
+  descriptions and are marked `truncated`. Swap `_emit` to use another transport.
+- The conversation key hashes `x_title` plus the first user message, to stitch a
+  tool call and its result (separate requests) together.
 """
 
 import hashlib

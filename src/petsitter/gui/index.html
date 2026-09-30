@@ -15,10 +15,9 @@
 
 <header>
 <div class="brand">
-<img src="/static/petsitter-type.avif" alt="PetSitter">
+<img src="/static/petsitter-logo-dark.svg" alt="Petsitter">
 </div>
 <div class="nav">
-<a href="#" class="nav-start" onclick="switchTab('intro');return false">Start here</a>
 <a href="https://github.com/day50-dev/Petsitter" target="_blank">GitHub</a>
 <a href="/docs">API</a>
 <a href="#" onclick="switchTab('help');return false">Help</a>
@@ -43,23 +42,28 @@
 <button class="btn btn-sm" onclick="togglePause()">Resume</button>
 </div>
 
-<div class="ts-pills" id="ts-pills"></div>
+<div class="app-shell">
+<!-- Channels are tricksets. Each one is a lane of traffic: requests from the
+     apps (and models) it matches run through its extensions. They are all
+     live at once; picking one here only chooses what the tabs show. -->
+<nav class="chan-rail" id="chan-rail" aria-label="Channels"></nav>
+<div class="app-main">
+<!-- The selected channel, like a chat app's channel topic bar. -->
+<div class="rule-bar" id="ts-bar">
+<div class="rule-row">
+<span class="chan-title"><span class="chan-glyph" id="chan-glyph">#</span><span id="rule-name">Everything else</span></span>
+<span class="rule-sentence" id="rule-sentence"></span>
+<button class="btn btn-sm btn-secondary" id="rule-edit-btn" onclick="openRuleEditor(false)">Edit channel</button>
+</div>
+<div class="rule-editor" id="rule-editor" hidden></div>
+</div>
 
 <div class="tabs">
-<div class="tab active" data-tab="tricks" onclick="switchTab('tricks')">Tricks</div>
+<div class="tab active" data-tab="tricks" onclick="switchTab('tricks')">Extensions</div>
 <div class="tab" data-tab="models" onclick="switchTab('models')">Models</div>
 <div class="tab" data-tab="agents" onclick="switchTab('agents')">Agents</div>
 <div class="tab" data-tab="logs" onclick="switchTab('logs')">Logs</div>
 <div class="tab" data-tab="settings" onclick="switchTab('settings')">Settings</div>
-</div>
-
-<div class="ts-bar" id="ts-bar">
-<div class="ts-filters">
-<span onclick="editFilter(this,'X-Title')" title="Filter by X-Title header value">X-Title: <span class="val" id="ts-fx">*</span></span>
-<span onclick="editFilter(this,'Model')" title="Filter by Model header value">Model: <span class="val" id="ts-fm">*</span></span>
-<span onclick="editName()" title="Rename this trickset">Name: <span class="val" id="ts-name"></span></span>
-<span class="ts-delete" onclick="if (confirm('Delete trickset \"' + selectedTrickset + '\"? This cannot be undone.')) deleteTrickset()" title="Delete this trickset">delete</span>
-</div>
 </div>
 
 <!-- === START HERE TAB === -->
@@ -167,46 +171,31 @@
 </div>
 </div>
 
-<!-- === TRICKS TAB === -->
+<!-- === TRICKS TAB (shown as "Extensions") === -->
 <div class="tab-pane" id="tab-tricks">
 <div class="tricks-context" id="tricks-context" hidden></div>
-<div class="two-col">
-<div class="card">
-<h2>Loaded Tricks</h2>
-<div class="section-desc">Active tricks in the current trickset. Drag to reorder, toggle on/off, or remove.</div>
+<div class="ext">
+<aside class="card ext-side">
+<input type="search" id="trick-search" class="ext-search" placeholder="Search extensions" title="Search by name, what it does, or keyword" oninput="filterAvailable()" spellcheck="false">
+<div class="ext-sec">
+<div class="ext-sec-h"><span>Installed</span><span class="ext-count" id="ext-installed-count"></span></div>
+<div class="ext-sec-desc">Run top to bottom on every request. Drag to reorder.</div>
 <div id="loaded-tricks"><div class="loader">Loading...</div></div>
 </div>
-<div class="card">
-<div class="card-title">
-<h2>Available Tricks</h2>
-<div class="card-tools">
-<input type="text" id="trick-search" class="input-sm" placeholder="Search..." title="Filter available tricks by name, keyword, or description" oninput="filterAvailable()">
-<div class="btn-group" id="sort-group">
-<button class="btn btn-sm btn-sort active" data-sort="alpha" onclick="setSort('alpha')" title="Alphabetical">
-<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><text x="2" y="20" font-size="18" font-family="sans-serif" font-weight="700">A</text><line x1="16" y1="6" x2="22" y2="6"/><line x1="16" y1="11" x2="22" y2="11"/><line x1="16" y1="16" x2="22" y2="16"/></svg>
-</button>
-<button class="btn btn-sm btn-sort" data-sort="chrono" onclick="setSort('chrono')" title="Chronological">
-<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><polyline points="12,7 12,12 16,14"/></svg>
-</button>
-</div>
-</div>
-</div>
-<div class="section-desc">Add a trick to the trickset selected above.</div>
+<div class="ext-sec">
+<div class="ext-sec-h"><span>Browse</span></div>
 <div id="available-tricks"><div class="loader">Loading...</div></div>
 <div class="browse-status" id="avail-status"></div>
-<div class="source-panel" id="trick-source-panel" style="display:none">
-<div class="agent-log-header">
-<span id="trick-source-title">Source</span>
-<button class="btn btn-sm btn-secondary" onclick="closeTrickSource()" title="Close">Close</button>
 </div>
-<div class="section-desc">Read before you run. A trick executes inside petsitter with your API keys, the same way a pip package executes inside your interpreter.</div>
-<pre class="browse-source"><code id="trick-source-body" class="language-python"></code></pre>
-</div>
+<details class="ext-custom">
+<summary>Load from a file&hellip;</summary>
 <div class="custom-path">
-<input type="text" id="custom-path" placeholder="Path to trick .py file" title="Absolute path to a custom trick Python file">
-<button class="btn btn-neutral" onclick="loadCustomTrick()" title="Load custom trick from path">Add</button>
+<input type="text" id="custom-path" placeholder="/path/to/my_trick.py" title="Absolute path to a trick Python file" spellcheck="false">
+<button class="btn btn-neutral btn-sm" onclick="loadCustomTrick()" title="Install from this file">Install</button>
 </div>
-</div>
+</details>
+</aside>
+<main class="card ext-detail" id="ext-detail"></main>
 </div>
 </div>
 
@@ -331,6 +320,8 @@ file back exactly as it was. Your tool keeps using its own account &mdash; petsi
 <div id="help-content"><div class="loader">Loading help...</div></div>
 </div>
 </div>
+</div>
+</div>
 
 <script>
 // ---- utils ----
@@ -364,6 +355,7 @@ function switchTab(name) {
   // inline style because switchTrickset() clears ts-bar's inline display
   // whenever it runs, which on boot happens after this.
   document.body.classList.toggle('on-intro', name === 'intro');
+  if (typeof renderChannelRail === 'function') renderChannelRail();
   if (name === 'intro') refreshIntro();
   if (name === 'help') loadHelpContent();
   if (name === 'models') renderModels(selectedTrickset, _cachedConfiguredModels);
@@ -378,7 +370,9 @@ function switchTab(name) {
 }
 
 function updateHash() {
-  location.hash = currentTab + '/' + selectedTrickset;
+  // An open extension page gets its own link, so it can be shared.
+  const ext = (currentTab === 'tricks' && _extSel) ? '/' + encodeURIComponent(_extSel) : '';
+  location.hash = currentTab + '/' + selectedTrickset + ext;
 }
 
 function parseHash() {
@@ -386,10 +380,11 @@ function parseHash() {
   var parts = raw.split('/');
   var tab = parts[0] || 'intro';
   var ts = parts[1] || '_default';
+  var ext = parts[2] ? decodeURIComponent(parts.slice(2).join('/')) : null;
   if (tab === 'help' || tab === 'intro') ts = '_default';
   var hasPane = !!document.getElementById('tab-' + tab);
   if (!hasPane) { tab = 'intro'; ts = '_default'; }
-  return {tab, ts};
+  return {tab, ts, ext};
 }
 
 let _helpLoaded = false;
@@ -440,10 +435,16 @@ async function renderMermaidDiagrams() {
 
 window.addEventListener('hashchange', function() {
   var p = parseHash();
+  if (p.tab === 'tricks' && p.ext !== _extSel) {
+    _extSel = p.ext;
+    _extView = 'details';
+    document.querySelectorAll('.ext-item').forEach(el => el.classList.toggle('selected', el.dataset.key === _extSel));
+    renderExtDetail();
+  }
   switchTab(p.tab);
   if (p.ts !== '_default' || p.tab === 'tricks' || p.tab === 'models' || p.tab === 'settings') {
     selectedTrickset = p.ts;
-    if (document.querySelector('#ts-pills .pill[data-name="' + p.ts + '"]')) switchTrickset(p.ts);
+    if (loadedTricksets[p.ts] || _availTricksets.some(a => a.name === p.ts)) switchTrickset(p.ts);
   }
 });
 
@@ -660,23 +661,76 @@ async function togglePause() {
 // ---- tricks ----
 let _dragName = null;
 
+// ---- extensions ----
+// The dashboard calls tricks "extensions": the store-and-detail-page shape
+// people know from their editor. Code, CLI and config still say trick.
+//
+// Two lists feed one detail pane. _installed is what the selected trickset
+// runs; _catalog is everything that could be installed (bundled files plus
+// the community index). An entry is identified by extKey(), so an installed
+// trick and its catalog entry land on the same page.
+let _installed = [];
+let _catalog = [];
+let _extSel = null;          // extKey of the extension shown in the detail pane
+let _extView = 'details';    // details | source
+let _readmeCache = {};       // community readmes, fetched on first view
+
+function extKey(path) {
+  const m = /^pkg:(.+)@[^@]+$/.exec(path || '');
+  return m ? 'pkg:' + m[1] : 'file:' + (path || '');
+}
+
+const _catHue = {};
+function extAvatar(name, category, big) {
+  const cat = category || 'Other';
+  if (!(cat in _catHue)) {
+    let h = 0; for (const c of cat) h = (h * 31 + c.charCodeAt(0)) % 360;
+    _catHue[cat] = h;
+  }
+  const words = String(name || '?').replace(/[^A-Za-z0-9 ]/g, ' ').trim().split(/\s+/);
+  const letters = (words.length > 1 ? words[0][0] + words[1][0] : words[0].slice(0, 2)).toUpperCase();
+  return `<span class="ext-avatar${big ? ' ext-avatar-lg' : ''}" style="--h:${_catHue[cat]}" aria-hidden="true">${escapeHtml(letters)}</span>`;
+}
+
+// The first line of an extension's readme is a plain sentence written for
+// people; __brief__ is often shorthand. Prefer the sentence.
+function extTagline(e) {
+  const first = (e.readme || '').split('\n')[0].trim();
+  return first || e.brief || '';
+}
+
+function _matchesSearch(e) {
+  if (!trickSearch) return true;
+  const hay = [e.display_name, e.name, e.path, e.brief, extTagline(e), e.category, e.prompt_keyword, ...(e.keywords || [])].join(' ').toLowerCase();
+  return hay.includes(trickSearch);
+}
+
 async function fetchTricks() {
+  const el = document.getElementById('loaded-tricks');
   try {
     const all = await fetchJSON('/api/tricks');
-    const tricks = all.filter(t => t.trickset === selectedTrickset);
-    const el = document.getElementById('loaded-tricks');
-    if (!tricks.length) { el.innerHTML = '<div class="empty">No tricks loaded for this trickset</div>'; return; }
-    el.innerHTML = tricks.map(t => {
+    _installed = all.filter(t => t.trickset === selectedTrickset);
+  } catch(e) { el.innerHTML = '<div class="loader">Error loading extensions</div>'; return; }
+  document.getElementById('ext-installed-count').textContent = _installed.length || '';
+  const shown = _installed.filter(_matchesSearch);
+  if (!_installed.length) {
+    el.innerHTML = '<div class="ext-empty">Nothing installed yet. Pick one from Browse below.</div>';
+  } else if (!shown.length) {
+    el.innerHTML = '<div class="ext-empty">No installed extension matches.</div>';
+  } else {
+    el.innerHTML = shown.map(t => {
       const on = t.enabled !== false;
-      const badges = [];
-      const triggerHtml = t.prompt_keyword ? `<span class="trigger-word" onclick="editKeyword('${escapeHtml(t.id || '')}','${escapeHtml(t.name)}','${escapeHtml(t.prompt_keyword)}')" title="Click to override keyword">${escapeHtml(t.prompt_keyword)}</span>` : '';
-      if (t.keywords && t.keywords.length) badges.push(...t.keywords.map(k => `<span class="badge badge-kw">${escapeHtml(k)}</span>`));
-      if (t.required_models && t.required_models.length) badges.push(...t.required_models.map(m => `<span class="badge badge-models">${escapeHtml(m)}</span>`));
-      if (t.trickset && t.trickset !== '_default') badges.push(`<span class="badge badge-ts">${escapeHtml(t.trickset)}</span>`);
-      const gearHtml = (t.config_fields && t.config_fields.length) ? `<button class="btn btn-neutral btn-sm btn-gear" onclick="openTrickConfig('${escapeHtml(t.id || '')}')" title="Configure ${escapeHtml(t.display_name || t.name)}">\u2699</button>` : '';
-      return `<div class="trick-item" draggable="true" data-name="${escapeHtml(t.name)}" data-id="${escapeHtml(t.id || '')}"><div class="grip" title="Drag to reorder"><svg width="10" height="16" viewBox="0 0 10 16" aria-hidden="true"><circle cx="2.5" cy="3" r="1.3"/><circle cx="7.5" cy="3" r="1.3"/><circle cx="2.5" cy="8" r="1.3"/><circle cx="7.5" cy="8" r="1.3"/><circle cx="2.5" cy="13" r="1.3"/><circle cx="7.5" cy="13" r="1.3"/></svg></div><div class="info"><div><span class="name">${escapeHtml(t.display_name || t.name)}</span><span class="path">${escapeHtml(t.path || t.module)}</span></div><div class="brief">${escapeHtml(t.brief || '')}</div><div class="trick-meta">${badges.join('')}</div></div><div class="actions">${triggerHtml}${gearHtml}<button class="toggle ${on ? 'on' : 'off'}" onclick="toggleTrick(this,'${escapeHtml(t.name)}',${!on})" title="${on ? 'Disable' : 'Enable'}">${on ? 'ON' : 'OFF'}</button><button class="btn btn-danger btn-sm" onclick="unloadTrick('${escapeHtml(t.id || '')}','${escapeHtml(t.name)}')" title="Remove">\u2715</button></div></div>`;
+      const key = extKey(t.path);
+      const nm = t.display_name || t.name;
+      return `<div class="trick-item ext-item${key === _extSel ? ' selected' : ''}${on ? '' : ' is-off'}" draggable="true" data-name="${escapeHtml(t.name)}" data-id="${escapeHtml(t.id || '')}" data-key="${escapeHtml(key)}" onclick="selectExt(this.dataset.key)" title="${escapeHtml(extTagline(t) || nm)}">`
+        + extAvatar(nm, t.category)
+        + `<div class="info"><div class="name">${escapeHtml(nm)}</div><div class="brief">${escapeHtml(extTagline(t))}</div></div>`
+        + `<button class="toggle ${on ? 'on' : 'off'}" onclick="event.stopPropagation();toggleTrick(this,'${escapeHtml(t.name)}',${!on})" title="${on ? 'Turn off' : 'Turn on'}" aria-label="${on ? 'Turn off' : 'Turn on'} ${escapeHtml(nm)}"></button>`
+        + `</div>`;
     }).join('');
-  } catch(e) { document.getElementById('loaded-tricks').innerHTML = '<div class="loader">Error loading tricks</div>'; }
+  }
+  renderAvailable();
+  renderExtDetail();
 }
 
 document.getElementById('loaded-tricks').addEventListener('dragstart', function(e) {
@@ -715,12 +769,15 @@ document.getElementById('loaded-tricks').addEventListener('drop', function(e) {
 });
 
 async function toggleTrick(btn, name, enabled) {
+  const item = btn.closest('.trick-item');
+  await setTrickEnabled(item ? item.dataset.id : '', name, enabled);
+}
+
+async function setTrickEnabled(id, name, enabled) {
   try {
-    const item = btn.closest('.trick-item');
-    const id = item ? item.dataset.id : '';
-    if (!id) { showToast('Cannot toggle: missing trick ID', true); return; }
+    if (!id) { showToast('Cannot toggle: missing extension ID', true); return; }
     const d = await fetchJSON('/api/tricksets/' + encodeURIComponent(selectedTrickset), { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({tricks: [{id, enabled}]}) });
-    if (d.success) showToast(name + ': ' + (enabled ? 'enabled' : 'disabled'));
+    if (d.success) showToast(name + ': ' + (enabled ? 'on' : 'off'));
     fetchTricks();
   } catch(e) { showToast(e.message, true); }
 }
@@ -746,140 +803,266 @@ async function editKeyword(id, name, current) {
   } catch(e) { showToast(e.message, true); }
 }
 
-let sortMode = 'alpha';
 let trickSearch = '';
 
 let _availTimer = null;
 function filterAvailable() {
   trickSearch = document.getElementById('trick-search').value.toLowerCase();
   clearTimeout(_availTimer);
-  _availTimer = setTimeout(fetchAvailable, 180);
+  _availTimer = setTimeout(() => { fetchTricks(); fetchAvailable(); }, 180);
 }
 
-function setSort(mode) {
-  sortMode = mode;
-  document.querySelectorAll('#sort-group .btn-sort').forEach(b => b.classList.toggle('active', b.dataset.sort === mode));
-  fetchAvailable();
-}
-
+let _remoteMeta = null;
 async function fetchAvailable() {
-  const el = document.getElementById('available-tricks');
-  const status = document.getElementById('avail-status');
-
-  // Two sources, one list: local .py files and the community index. Which one
-  // a trick came from changes the button, not where you look for it.
+  // Two sources, one catalog: bundled .py files and the community index.
+  // Where an extension came from changes its page, not where you look for it.
   const localP = fetchJSON('/api/tricks/available').catch(() => null);
   const params = new URLSearchParams();
   if (trickSearch) params.set('q', trickSearch);
   if (browseAll) params.set('all', '1');
   const remoteP = fetchJSON('/api/registry?' + params.toString()).catch(e => ({error: e.message, tricks: []}));
-
   const [local, remote] = await Promise.all([localP, remoteP]);
 
   if (local === null && (!remote || !remote.tricks.length)) {
-    el.innerHTML = '<div class="loader">Error loading</div>';
-    status.textContent = '';
+    document.getElementById('available-tricks').innerHTML = '<div class="loader">Error loading</div>';
     return;
   }
+  _remoteMeta = remote;
+  const locals = (local || []).map(f => Object.assign({}, f, {source: 'bundled', key: extKey(f.path)}));
+  const remotes = ((remote && remote.tricks) || []).map(t => Object.assign({}, t, {
+    source: 'community', key: 'pkg:' + t.name,
+    path: 'pkg:' + t.name + '@' + t.version,
+  }));
+  _catalog = locals.concat(remotes);
+  renderAvailable();
+  renderExtDetail();
+}
 
-  const locals = (local || []).filter(f => {
-    if (!trickSearch) return true;
-    const hay = [f.display_name, f.path, f.brief, f.category, f.prompt_keyword, ...(f.keywords || [])].join(' ').toLowerCase();
-    return hay.includes(trickSearch);
-  }).sort((a, b) => {
-    if (sortMode === 'chrono') return (b.mtime || 0) - (a.mtime || 0);
-    return (a.display_name || a.path).localeCompare(b.display_name || b.path);
-  });
+function renderAvailable() {
+  const el = document.getElementById('available-tricks');
+  const status = document.getElementById('avail-status');
+  const installedKeys = new Set(_installed.map(t => extKey(t.path)));
+  const locals = _catalog.filter(e => e.source === 'bundled' && !installedKeys.has(e.key) && _matchesSearch(e))
+    .sort((a, b) => (a.display_name || a.path).localeCompare(b.display_name || b.path));
+  const remotes = _catalog.filter(e => e.source === 'community' && !installedKeys.has(e.key));
+  const remote = _remoteMeta;
 
-  const remotes = (remote && remote.tricks) || [];
+  const item = e => {
+    const nm = e.display_name || e.name || e.path;
+    return `<div class="ext-item${e.key === _extSel ? ' selected' : ''}" data-key="${escapeHtml(e.key)}" onclick="selectExt(this.dataset.key)" title="${escapeHtml(extTagline(e) || nm)}">`
+      + extAvatar(nm, e.category)
+      + `<div class="info"><div class="name">${escapeHtml(nm)}</div><div class="brief">${escapeHtml(extTagline(e))}</div></div>`
+      + `</div>`;
+  };
 
-  if (!locals.length && !remotes.length) {
-    el.innerHTML = trickSearch
-      ? `<div class="empty">Nothing matching &ldquo;${escapeHtml(trickSearch)}&rdquo;${browseAll ? '' : ' &mdash; try All'}</div>`
-      : '<div class="empty">No tricks found</div>';
-  } else {
-    const hidden = (remote && !browseAll && !trickSearch) ? (remote.total || 0) - remotes.length : 0;
-    const more = hidden > 0
-      ? `<div class="avail-more" onclick="setScope(true)">Show ${hidden} more community trick${hidden === 1 ? '' : 's'}</div>`
-      : (browseAll && remote && remote.total ? '<div class="avail-more" onclick="setScope(false)">Show featured only</div>' : '');
-    const communityHeader = (locals.length && remotes.length) ? '<div class="avail-category">Community</div>' : '';
-    el.innerHTML = renderGroupedByCategory(locals) + communityHeader + remotes.map(renderRemoteTrick).join('') + more;
+  // Categories are whatever the authors chose; there's no fixed list. Group
+  // by what's here, alphabetically, "Other" last, and skip headers when a
+  // search has narrowed everything to a single group.
+  const groups = new Map();
+  for (const e of locals) {
+    const cat = (e.category || '').trim() || 'Other';
+    if (!groups.has(cat)) groups.set(cat, []);
+    groups.get(cat).push(e);
   }
+  const names = [...groups.keys()].sort((a, b) => a === 'Other' ? 1 : b === 'Other' ? -1 : a.localeCompare(b));
+  let out = groups.size <= 1
+    ? locals.map(item).join('')
+    : names.map(n => `<div class="avail-category">${escapeHtml(n)}</div>` + groups.get(n).map(item).join('')).join('');
+  if (remotes.length) out += '<div class="avail-category">Community</div>' + remotes.map(item).join('');
+
+  const hidden = (remote && !browseAll && !trickSearch) ? (remote.total || 0) - remotes.length : 0;
+  if (hidden > 0) out += `<div class="avail-more" onclick="setScope(true)">Show ${hidden} more from the community</div>`;
+  else if (browseAll && remote && remote.total) out += '<div class="avail-more" onclick="setScope(false)">Show featured only</div>';
+
+  el.innerHTML = out || (trickSearch
+    ? `<div class="ext-empty">Nothing matching &ldquo;${escapeHtml(trickSearch)}&rdquo;${browseAll ? '' : ' &mdash; <a href="#" onclick="setScope(true);return false">search the whole community index</a>'}</div>`
+    : '<div class="ext-empty">No extensions found</div>');
 
   if (remote && (remote.unavailable || remote.error)) {
     // Nothing is broken locally; the community index is just not reachable.
-    status.innerHTML = `${locals.length} local &middot; <span class="path" title="${escapeHtml(remote.unavailable || remote.error)}">community index unavailable</span>`;
-  } else if (remote) {
-    const when = remote.generated ? ' &middot; indexed ' + escapeHtml(remote.generated.slice(0, 10)) : '';
-    status.innerHTML = `${locals.length} local &middot; ${remotes.length} community of ${remote.total}${when}`;
+    status.innerHTML = `<span title="${escapeHtml(remote.unavailable || remote.error)}">Community index unavailable</span>`;
   } else {
     status.textContent = '';
   }
 }
 
-function renderGroupedByCategory(locals) {
-  // Categories are whatever the installed tricks' authors chose -- there is
-  // no fixed list. Group by what's actually here, alphabetically, with
-  // uncategorized tricks under "Other" at the end. A single group (e.g. a
-  // search narrowed everything to one category, or no trick sets one at all)
-  // isn't worth a header, so skip grouping entirely in that case.
-  const groups = new Map();
-  for (const f of locals) {
-    const cat = (f.category || '').trim() || 'Other';
-    if (!groups.has(cat)) groups.set(cat, []);
-    groups.get(cat).push(f);
+function selectExt(key) {
+  if (_extSel !== key) _extView = 'details';
+  _extSel = key;
+  document.querySelectorAll('.ext-item').forEach(el => el.classList.toggle('selected', el.dataset.key === key));
+  renderExtDetail();
+  updateHash();
+  if (window.matchMedia('(max-width: 800px)').matches) {
+    document.getElementById('ext-detail').scrollIntoView({behavior: 'smooth', block: 'start'});
   }
-  if (groups.size <= 1) return locals.map(renderLocalTrick).join('');
-  const names = [...groups.keys()].sort((a, b) => {
-    if (a === 'Other') return 1;
-    if (b === 'Other') return -1;
-    return a.localeCompare(b);
-  });
-  return names.map(name =>
-    `<div class="avail-category">${escapeHtml(name)}</div>` + groups.get(name).map(renderLocalTrick).join('')
-  ).join('');
 }
 
-function renderLocalTrick(f) {
-  const name = escapeHtml(f.display_name || f.path);
-  const path = escapeHtml(f.path);
-  const brief = f.brief ? `<div class="brief">${escapeHtml(f.brief)}</div>` : '';
-  const badges = (f.keywords || []).map(k => `<span class="badge badge-kw">${escapeHtml(k)}</span>`).join('');
-  const trigger = f.prompt_keyword ? `<span class="trigger-word">${escapeHtml(f.prompt_keyword)}</span>` : '';
-  const meta = (badges || trigger) ? `<div class="trick-meta">${badges}${trigger}</div>` : '';
-  const loadPath = f.path.replace(/'/g, "\\'");
-  return `<div class="avail-item"><div><span class="name">${name}</span><span class="path">${path}</span>${brief}${meta}</div>`
-       + `<div class="browse-actions"><button class="btn btn-neutral btn-sm" onclick="loadTrick('${loadPath}')" title="Load this trick into the selected trickset">Load</button></div></div>`;
+// One record for the page: what the catalog knows about it, overlaid with
+// this trickset's copy if it's installed (id, on/off, settings, keyword).
+function _extRecord(key) {
+  const cat = _catalog.find(e => e.key === key) || null;
+  const inst = _installed.find(t => extKey(t.path) === key) || null;
+  if (!cat && !inst) return null;
+  return {cat, inst, e: Object.assign({}, cat || {}, inst || {}, {
+    readme: (inst && inst.readme) || (cat && cat.readme) || '',
+    source: cat ? cat.source : (key.startsWith('pkg:') ? 'community' : 'file'),
+  })};
 }
 
-function renderRemoteTrick(t) {
-  const nm = escapeHtml(t.display_name || t.name);
-  const pkg = escapeHtml(t.name + '@' + t.version);
-  const brief = t.brief ? `<div class="brief">${escapeHtml(t.brief)}</div>` : '';
-  const badges = (t.keywords || []).map(k => `<span class="badge badge-kw">${escapeHtml(k)}</span>`).join('');
-  const trigger = t.prompt_keyword ? `<span class="trigger-word">${escapeHtml(t.prompt_keyword)}</span>` : '';
-  const star = t.featured ? '<span class="badge badge-kw" title="Featured">&#9733;</span>' : '';
-  const repo = t.repo ? `<a class="path" href="${escapeHtml(t.repo)}" target="_blank" rel="noopener noreferrer">${escapeHtml(t.repo.replace('https://github.com/',''))}</a>` : '';
-  const meta = `<div class="trick-meta">${star}${badges}${trigger}<span class="path">&#9733; ${t.stars || 0}</span>${repo}</div>`;
-  const a = JSON.stringify(t.name), v = JSON.stringify(t.version);
+// Readmes are Markdown written by whoever wrote the extension, community ones
+// included, so they get their own renderer: raw HTML is shown as text and
+// only http(s), relative and #anchor links survive. Anything looser would let
+// a README run script in a page that can install code.
+const _safeMd = new marked.Marked({
+  gfm: true,
+  renderer: {
+    html(t) { return escapeHtml(t.text || ''); },
+    link(t) {
+      const href = /^(https?:|#|\/(?!\/)|\.)/i.test(t.href || '') ? t.href : '';
+      const text = this.parser.parseInline(t.tokens);
+      return href ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${text}</a>` : text;
+    },
+    image(t) { return escapeHtml(t.text || ''); },
+  },
+});
 
-  let action;
-  if (t.installed === t.version) {
-    action = `<button class="btn btn-neutral btn-sm" onclick="addInstalled(${a},${v})" title="Add this installed trick to the selected trickset">Add</button>`;
-  } else if (t.installed) {
-    action = `<button class="btn btn-neutral btn-sm" onclick="installFromIndex(${a},${v})" title="Installed ${escapeHtml(t.installed)}, update to ${escapeHtml(t.version)}">Update</button>`;
+function _howToUse(e, installed) {
+  const rows = [];
+  const kw = e.prompt_keyword;
+  if (e.keywords && e.keywords.length) {
+    rows.push(['Turns on', `only for messages that mention ${e.keywords.map(k => `<code>${escapeHtml(k)}</code>`).join(' or ')}.`]);
   } else {
-    action = `<button class="btn btn-neutral btn-sm" onclick="installFromIndex(${a},${v})" title="Download, verify the checksum, and add to the selected trickset">Install</button>`;
+    rows.push(['Turns on', 'by itself. Once installed, it works on every request from the tools using this trickset. Nothing to type.']);
   }
-  const read = `<button class="btn btn-secondary btn-sm" onclick="viewTrickSource(${a},${v})" title="Read the source without installing">Read</button>`;
-  return `<div class="avail-item"><div><span class="name">${nm}</span><span class="path">${pkg}</span>${brief}${meta}</div><div class="browse-actions">${read}${action}</div></div>`;
+  if (kw) {
+    rows.push(['In a message', `type <code>(${escapeHtml(kw)}: &hellip;)</code> anywhere, and petsitter handles it before the model sees it.`]);
+  }
+  const extra = (e.required_models || []).filter(m => m !== 'default');
+  if (extra.length) {
+    rows.push(['Needs', `extra models named ${extra.map(m => `<code>${escapeHtml(m)}</code>`).join(', ')}. <a href="#" onclick="switchTab('models');return false">Set them up in Models</a>.`]);
+  }
+  if ((e.config_fields || []).length) {
+    const labels = e.config_fields.map(f => escapeHtml(f.label || f.key)).join(', ');
+    rows.push(['Settings', installed
+      ? `${labels}. <a href="#" onclick="openTrickConfig('${escapeHtml(e.id || '')}');return false">Change them</a>.`
+      : `${labels}. You can change these after installing.`]);
+  }
+  return `<div class="ext-how"><h3>At a glance</h3><dl>`
+    + rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('') + `</dl></div>`;
+}
+
+function renderExtDetail() {
+  const pane = document.getElementById('ext-detail');
+  if (!pane) return;
+  const rec = _extSel ? _extRecord(_extSel) : null;
+  if (!rec) { pane.innerHTML = _extWelcome(); return; }
+  const {cat, inst, e} = rec;
+  const nm = e.display_name || e.name || e.path;
+  const on = inst && inst.enabled !== false;
+
+  let from = '';
+  if (e.source === 'bundled') from = 'Built in';
+  else if (e.source === 'community') {
+    const repo = e.repo ? `<a href="${escapeHtml(e.repo)}" target="_blank" rel="noopener noreferrer">${escapeHtml(e.repo.replace('https://github.com/', ''))}</a>` : escapeHtml(e.name || '');
+    from = `Community &middot; ${repo}${e.stars ? ` &middot; &#9733; ${e.stars}` : ''}`;
+  } else from = `From <code>${escapeHtml(e.path || '')}</code>`;
+
+  const where = Object.keys(loadedTricksets || {}).length > 1 ? ` <span class="ext-where">in ${escapeHtml(selectedTrickset)}</span>` : '';
+  let actions;
+  if (inst) {
+    actions = `<label class="ext-onoff"><button class="toggle ${on ? 'on' : 'off'}" onclick="setTrickEnabled('${escapeHtml(inst.id || '')}','${escapeHtml(inst.name)}',${!on})" aria-label="${on ? 'Turn off' : 'Turn on'}"></button><span>${on ? 'On' : 'Off'}</span></label>`
+      + ((e.config_fields || []).length || e.prompt_keyword ? `<button class="btn btn-secondary" onclick="openTrickConfig('${escapeHtml(inst.id || '')}')">Settings</button>` : '')
+      + `<button class="btn btn-secondary" onclick="togglePlayground()" title="Send a test message through this trickset">Try it</button>`
+      + `<button class="btn btn-danger" onclick="unloadTrick('${escapeHtml(inst.id || '')}','${escapeHtml(inst.name)}')">Uninstall</button>`;
+  } else if (e.source === 'community') {
+    const a = escapeHtml(JSON.stringify(e.name)), v = escapeHtml(JSON.stringify(e.version));
+    actions = e.installed === e.version
+      ? `<button class="btn btn-primary ext-install" onclick="addInstalled(${a},${v})">Install</button>`
+      : `<button class="btn btn-primary ext-install" onclick="installFromIndex(${a},${v})" title="Download, verify the checksum, and install">${e.installed ? 'Update &amp; install' : 'Install'}</button>`;
+  } else {
+    actions = `<button class="btn btn-primary ext-install" onclick="loadTrick(${escapeHtml(JSON.stringify(e.path))})">Install</button>`;
+  }
+
+  const tabs = `<div class="ext-tabs">`
+    + `<button class="ext-tab${_extView === 'details' ? ' active' : ''}" onclick="setExtView('details')">Details</button>`
+    + (e.source !== 'file' ? `<button class="ext-tab${_extView === 'source' ? ' active' : ''}" onclick="setExtView('source')">Source code</button>` : '')
+    + `</div>`;
+
+  let body;
+  if (_extView === 'source') {
+    body = `<div class="ext-note">Read before you run. An extension runs inside petsitter with your API keys, the same way a pip package runs inside your Python.</div><pre class="browse-source"><code id="ext-source" class="language-python">Loading&hellip;</code></pre>`;
+  } else {
+    let readme = e.readme;
+    if (!readme && e.source === 'community') readme = _readmeCache[e.name + '@' + e.version];
+    const md = readme === undefined
+      ? '<div class="loader">Loading&hellip;</div>'
+      : readme ? _safeMd.parse(readme.split('\n').slice(1).join('\n').trim() || '') : '';
+    body = _howToUse(e, !!inst) + (md ? `<div class="ext-readme">${md}</div>` : '');
+  }
+
+  pane.innerHTML = `<div class="ext-head">${extAvatar(nm, e.category, true)}<div class="ext-title">`
+    + `<h2>${escapeHtml(nm)}${inst ? `<span class="ext-badge">Installed</span>${where}` : ''}</h2>`
+    + `<div class="ext-sub">${escapeHtml(extTagline(e))}</div>`
+    + `<div class="ext-from">${e.category ? escapeHtml(e.category) + ' &middot; ' : ''}${from}</div>`
+    + `<div class="ext-actions">${actions}</div></div></div>` + tabs + `<div class="ext-body">${body}</div>`;
+
+  if (_extView === 'source') _loadExtSource(e);
+  else if (e.source === 'community' && !e.readme && _readmeCache[e.name + '@' + e.version] === undefined) _loadCommunityReadme(e);
+  pane.querySelectorAll('.ext-readme pre code').forEach(b => { if (window.hljs) hljs.highlightElement(b); });
+}
+
+function setExtView(v) { _extView = v; renderExtDetail(); }
+
+async function _loadCommunityReadme(e) {
+  const k = e.name + '@' + e.version;
+  try {
+    const d = await fetchJSON('/api/registry/readme?name=' + encodeURIComponent(e.name) + '&version=' + encodeURIComponent(e.version));
+    _readmeCache[k] = d.readme || '';
+  } catch(err) { _readmeCache[k] = ''; }
+  if (_extSel === e.key) renderExtDetail();
+}
+
+async function _loadExtSource(e) {
+  const url = e.source === 'community'
+    ? '/api/registry/source?name=' + encodeURIComponent(e.name) + '&version=' + encodeURIComponent(e.version)
+    : '/api/tricks/source?path=' + encodeURIComponent(e.path);
+  const key = e.key;
+  let text;
+  try {
+    const r = await fetch(url);
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || r.statusText); }
+    text = await r.text();
+  } catch(err) { text = "Couldn't fetch the source: " + err.message; }
+  const code = document.getElementById('ext-source');
+  if (!code || _extSel !== key || _extView !== 'source') return;
+  code.textContent = text;
+  if (window.hljs) hljs.highlightElement(code);
+}
+
+// What the pane says before anything is picked: what an extension is, in
+// one breath, and a few worth starting with.
+const EXT_STARTERS = ['tricks/secrets_protector.py', 'tricks/tool_call.py', 'tricks/json_mode.py', 'tricks/logger.py'];
+function _extWelcome() {
+  const starters = EXT_STARTERS.map(p => _catalog.find(e => e.path === p)).filter(Boolean);
+  const cards = starters.map(e => {
+    const nm = e.display_name || e.name;
+    return `<button class="ext-starter" onclick="selectExt(${escapeHtml(JSON.stringify(e.key))})">${extAvatar(nm, e.category)}<span><b>${escapeHtml(nm)}</b><span>${escapeHtml(extTagline(e))}</span></span></button>`;
+  }).join('');
+  return `<div class="ext-welcome"><h2>Extensions</h2>`
+    + `<p>An extension changes what your AI tools send to the model, or what comes back, without changing the tools. `
+    + `Install one and it works right away for every tool connected to petsitter.</p>`
+    + `<p class="ext-welcome-sub">Pick any extension on the left to see what it does and how to use it.</p>`
+    + (cards ? `<h3>Good ones to start with</h3><div class="ext-starters">${cards}</div>` : '')
+    + `</div>`;
 }
 
 async function loadTrick(path) {
   try {
     const d = await fetchJSON('/api/tricks/load', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path, trickset: selectedTrickset}) });
-    showToast('Loaded: ' + d.name);
-    fetchTricks(); fetchAvailable(); fetchModels();
+    _extSel = extKey(path);
+    const e = _catalog.find(x => x.key === _extSel);
+    showToast('Installed ' + ((e && e.display_name) || d.name));
+    fetchTricks(); fetchModels();
   } catch(e) { showToast(e.message, true); }
 }
 
@@ -1043,7 +1226,7 @@ function pgKey(e) {
 function renderPlaygroundLog() {
   const log = document.getElementById('pg-log');
   if (!pgLog.length) {
-    log.innerHTML = '<div class="pg-hint">Send a message through the selected trickset. Tricks that fire light up in Loaded Tricks.</div>';
+    log.innerHTML = '<div class="pg-hint">Send a message through the selected trickset. Installed extensions that change it light up.</div>';
     return;
   }
   log.innerHTML = '';
@@ -1193,35 +1376,14 @@ async function installFromIndex(name, version) {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({name, version, trickset: selectedTrickset})
     });
-    showToast(d.fresh ? `Installed ${name}@${version}` : `Added ${name}@${version}`);
+    showToast(`Installed ${name}@${version}`);
+    _extSel = 'pkg:' + name;
     fetchTricks(); fetchAvailable(); fetchModels();
   } catch(e) { showToast(e.message, true); }
 }
 
 async function addInstalled(name, version) {
   await loadTrick('pkg:' + name + '@' + version);
-}
-
-async function viewTrickSource(name, version) {
-  const panel = document.getElementById('trick-source-panel');
-  const body = document.getElementById('trick-source-body');
-  document.getElementById('trick-source-title').textContent = name + '@' + version;
-  body.textContent = 'Loading...';
-  panel.style.display = '';
-  panel.scrollIntoView({behavior: 'smooth', block: 'nearest'});
-  try {
-    const r = await fetch('/api/registry/source?name=' + encodeURIComponent(name) + '&version=' + encodeURIComponent(version));
-    if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.error || r.statusText); }
-    body.textContent = await r.text();
-    body.className = 'language-python';
-    if (window.hljs) hljs.highlightElement(body);
-  } catch(e) {
-    body.textContent = "Couldn't fetch the source: " + e.message;
-  }
-}
-
-function closeTrickSource() {
-  document.getElementById('trick-source-panel').style.display = 'none';
 }
 
 async function loadCustomTrick() {
@@ -1235,8 +1397,9 @@ async function loadCustomTrick() {
 async function unloadTrick(id, name) {
   try {
     await fetchJSON('/api/tricks/unload', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id, name, trickset: selectedTrickset}) });
-    showToast('Removed: ' + name);
-    fetchTricks(); fetchAvailable();
+    const t = _installed.find(x => x.id === id);
+    showToast('Uninstalled ' + ((t && t.display_name) || name));
+    fetchTricks();
   } catch(e) { showToast(e.message, true); }
 }
 
@@ -1256,15 +1419,230 @@ function _markNewTricksets(names) {
   _seenTricksets = new Set(names);
 }
 
-function _sharedPills(loaded, avail, selected, onSwitch, showAdd) {
-  const loadedNames = new Set(loaded.map(ts => ts.name));
-  const names = [...new Set(['_default', ...loadedNames, ...avail.map(ts => ts.name)])];
-  const el = document.getElementById('ts-pills');
-  el.innerHTML = names.map(n => {
-    const cls = 'pill' + (n === selected ? ' active' : '') + (!loadedNames.has(n) ? ' pill-unloaded' : '')
-      + (_newTricksets.has(n) ? ' pill-new' : '');
-    return `<span class="${cls}" data-name="${escapeHtml(n)}" onclick="${onSwitch}(this.dataset.name)">${escapeHtml(n)}</span>`;
-  }).join('') + (showAdd ? '<span class="pill pill-add" onclick="addTrickset()" title="Create a new trickset">+ Add</span>' : '');
+// ---- rules (tricksets) ----
+// In the dashboard a trickset is a rule: "for requests from OpenCode, use
+// these extensions". Every loaded rule whose filters match a request applies;
+// "_default" is shown as "Everything else" because it only runs when nothing
+// else matched. Tricksets saved on disk but not loaded don't run at all.
+let _availTricksets = [];
+let _traffic = {apps: [], models: [], tricksets: []};
+let _ruleEditingNew = false;
+
+function ruleLabel(name) { return name === '_default' ? 'Everything else' : name; }
+
+function _isGlob(v) { return /[*?[]/.test(v); }
+
+function ruleSentence(name) {
+  if (name === '_default') return 'Requests that no other rule matches';
+  const ts = loadedTricksets[name];
+  if (!ts) return 'Saved, but off. Open it to turn it on.';
+  const app = (ts.filters || {})['X-Title'] || '*';
+  const model = (ts.filters || {})['Model'] || '*';
+  if (app === '*' && model === '*') return 'Every request';
+  let out = 'Requests';
+  if (app !== '*') out += _isGlob(app) ? ` from apps matching <b>${escapeHtml(app)}</b>` : ` from <b>${escapeHtml(app)}</b>`;
+  if (model !== '*') out += _isGlob(model) ? ` using a <b>${escapeHtml(model)}</b> model` : ` using <b>${escapeHtml(model)}</b>`;
+  return out;
+}
+
+function _ago(sec) {
+  if (sec < 60) return 'just now';
+  if (sec < 3600) return Math.floor(sec / 60) + 'm ago';
+  if (sec < 86400) return Math.floor(sec / 3600) + 'h ago';
+  return Math.floor(sec / 86400) + 'd ago';
+}
+
+function ruleStats(name) {
+  if (!loadedTricksets[name]) return '';
+  const t = (_traffic.tricksets || []).find(x => x.name === name);
+  if (!t) return 'no requests yet';
+  return `${t.count} request${t.count === 1 ? '' : 's'} &middot; last ${_ago(t.ago)}`;
+}
+
+// Loaded rules in the order they're checked, "Everything else" last, then
+// the ones saved on disk but off.
+function _ruleNames() {
+  const loaded = Object.keys(loadedTricksets).filter(n => n !== '_default');
+  const off = _availTricksets.map(a => a.name).filter(n => n !== '_default' && !loadedTricksets[n]);
+  return [...loaded, '_default', ...[...new Set(off)]];
+}
+
+function _setTricksetList(loaded, avail) {
+  loadedTricksets = {};
+  loaded.forEach(ts => loadedTricksets[ts.name] = ts);
+  _availTricksets = avail || [];
+  renderRuleBar();
+}
+
+async function fetchTraffic() {
+  try { _traffic = await fetchJSON('/api/traffic'); } catch(e) {}
+  renderRuleBar();
+}
+
+function renderRuleBar() {
+  const name = selectedTrickset;
+  document.getElementById('chan-glyph').textContent = name === '_default' ? '∗' : '#';
+  document.getElementById('rule-name').textContent = ruleLabel(name);
+  const stats = ruleStats(name);
+  document.getElementById('rule-sentence').innerHTML = ruleSentence(name) + (stats ? ` <span class="rule-stats">&middot; ${stats}</span>` : '');
+  document.getElementById('rule-edit-btn').style.display = name === '_default' ? 'none' : '';
+  renderChannelRail();
+}
+
+// The channel list: every trickset, always on screen, each with its traffic.
+// A dot means it caught a request in the last minute.
+const _homeIcon = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg>';
+function renderChannelRail() {
+  const rail = document.getElementById('chan-rail');
+  if (!rail) return;
+  // A channel matching every request means "Everything else" never runs.
+  const catchAll = Object.values(loadedTricksets).find(ts => ts.name !== '_default'
+    && ((ts.filters || {})['X-Title'] || '*') === '*' && ((ts.filters || {})['Model'] || '*') === '*');
+  const item = n => {
+    const off = !loadedTricksets[n];
+    const t = (_traffic.tricksets || []).find(x => x.name === n);
+    const live = t && t.ago < 60;
+    const sentence = ruleSentence(n).replace(/<[^>]+>/g, '');
+    let tip = sentence + (t ? ` · ${t.count} request${t.count === 1 ? '' : 's'}, last ${_ago(t.ago)}` : off ? '' : ' · no requests yet');
+    if (n === '_default' && catchAll) tip += ` · never used while ${catchAll.name} matches every request`;
+    const words = ruleLabel(n).replace(/[^A-Za-z0-9]+/g, ' ').trim().split(' ');
+    const abbr = n === '_default' ? '∗' : (words.length > 1 ? words[0][0] + words[1][0] : words[0].slice(0, 2)).toUpperCase();
+    return `<button class="chan${n === selectedTrickset && !home ? ' active' : ''}${off ? ' off' : ''}${_newTricksets.has(n) ? ' is-new' : ''}" data-name="${escapeHtml(n)}" onclick="openChannel(this.dataset.name)" title="${escapeHtml(ruleLabel(n) + ': ' + tip)}">`
+      + `<span class="chan-abbr" aria-hidden="true">${escapeHtml(abbr)}</span>`
+      + `<span class="chan-glyph">${n === '_default' ? '∗' : '#'}</span>`
+      + `<span class="chan-name">${escapeHtml(ruleLabel(n))}</span>`
+      + (off ? '<span class="chan-off">off</span>'
+             : t ? `<span class="chan-count${live ? ' live' : ''}">${t.count > 999 ? '999+' : t.count}</span>` : '')
+      + `</button>`;
+  };
+  const names = _ruleNames();
+  const live = names.filter(n => loadedTricksets[n] && n !== '_default');
+  const off = names.filter(n => !loadedTricksets[n]);
+  const collapsed = document.body.classList.contains('rail-collapsed');
+  const home = currentTab === 'intro';
+  // "Start here" is the rail's Home, above the channels, like a chat app's.
+  rail.innerHTML = `<div class="chan-top">`
+    + `<button class="chan chan-home${home ? ' active' : ''}" onclick="switchTab('intro')" title="Start here">`
+    + `<span class="chan-abbr" aria-hidden="true">${_homeIcon}</span><span class="chan-glyph" aria-hidden="true">${_homeIcon}</span><span class="chan-name">Start here</span></button>`
+    + `<button class="chan-toggle" onclick="toggleRail()" title="${collapsed ? 'Show channels' : 'Collapse channels'}" aria-label="${collapsed ? 'Show channels' : 'Collapse channels'}" aria-expanded="${collapsed ? 'false' : 'true'}">`
+    + `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/>${collapsed ? '<polyline points="13 10 15 12 13 14"/>' : '<polyline points="16 10 14 12 16 14"/>'}</svg></button></div>`
+    + `<div class="chan-h">Channels</div>`
+    + live.map(item).join('')
+    + item('_default')
+    + (catchAll ? `<div class="chan-warn">Everything else never runs while <b>#${escapeHtml(catchAll.name)}</b> matches every request.</div>` : '')
+    + `<button class="chan chan-add" onclick="openRuleEditor(true)" title="Add channel"><span class="chan-abbr" aria-hidden="true">+</span><span class="chan-glyph">+</span><span class="chan-name">Add channel</span></button>`
+    + (off.length ? `<div class="chan-h chan-h-off">Saved, off</div>` + off.map(item).join('') : '')
+    + `<div class="chan-foot">Each app's requests go through every channel that matches it. <b>Everything else</b> gets what no channel matches.</div>`;
+}
+
+// From a page that isn't about any channel (Start here, Help), opening a
+// channel means seeing what it does, so it lands on its extensions.
+function openChannel(name) {
+  if (currentTab === 'intro' || currentTab === 'help') switchTab('tricks');
+  switchTrickset(name);
+}
+
+// The rail folds down to a strip of channel initials, like an editor's
+// sidebar. The choice is per browser, and the page works without storage.
+function toggleRail(force) {
+  const collapsed = force !== undefined ? force : !document.body.classList.contains('rail-collapsed');
+  document.body.classList.toggle('rail-collapsed', collapsed);
+  try { localStorage.setItem('petsitter.railCollapsed', collapsed ? '1' : '0'); } catch(e) {}
+  renderChannelRail();
+}
+try { if (localStorage.getItem('petsitter.railCollapsed') === '1') document.body.classList.add('rail-collapsed'); } catch(e) {}
+
+// Counts on the rail should move while you watch, without a stream: a
+// light poll while the page is visible.
+setInterval(() => { if (!document.hidden) fetchTraffic(); }, 10000);
+
+function openRuleEditor(isNew) {
+  _ruleEditingNew = isNew;
+  const ts = isNew ? null : loadedTricksets[selectedTrickset];
+  if (!isNew && (!ts || ts.name === '_default')) return;
+  const app = ts ? ((ts.filters || {})['X-Title'] || '*') : '*';
+  const model = ts ? ((ts.filters || {})['Model'] || '*') : '*';
+  const val = v => v === '*' ? '' : escapeHtml(v);
+  const covered = new Set(Object.values(loadedTricksets).map(t => (t.filters || {})['X-Title']).filter(Boolean));
+  const seenApps = (_traffic.apps || []).filter(a => !covered.has(a.name));
+  const suggest = isNew && seenApps.length
+    ? `<div class="rule-suggest"><span>Apps petsitter has seen:</span>${seenApps.slice(0, 8).map(a =>
+        `<button class="rule-chip" onclick="fillRuleApp(${escapeHtml(JSON.stringify(a.name))})">${escapeHtml(a.name)} <i>${a.count}</i></button>`).join('')}</div>`
+    : (isNew ? '<div class="rule-suggest"><span>Once an app sends requests through petsitter, it shows up here to pick from.</span></div>' : '');
+  const opts = list => (list || []).map(x => `<option value="${escapeHtml(x.name)}"></option>`).join('');
+  const ed = document.getElementById('rule-editor');
+  ed.innerHTML = `<div class="rule-ed-title">${isNew ? 'New channel' : 'Edit channel'}</div>`
+    + suggest
+    + `<div class="rule-ed-sentence">`
+    + `<span>For requests from</span><input type="text" id="rule-app" list="rule-app-list" value="${val(app)}" placeholder="any app" spellcheck="false" oninput="ruleEdPreview()">`
+    + `<span>using</span><input type="text" id="rule-model" list="rule-model-list" value="${val(model)}" placeholder="any model" spellcheck="false" oninput="ruleEdPreview()">`
+    + `<span>, use this channel&rsquo;s extensions.</span></div>`
+    + `<datalist id="rule-app-list">${opts(_traffic.apps)}</datalist><datalist id="rule-model-list">${opts(_traffic.models)}</datalist>`
+    + `<label class="rule-ed-name"><span>Name</span><input type="text" id="rule-name-input" value="${ts ? escapeHtml(ts.name) : ''}" placeholder="e.g. claude-code" spellcheck="false"></label>`
+    + `<div class="rule-ed-hint">The app is what your tool sends as its X-Title header. Leave a box empty for any. <code>*</code> works as a wildcard, as in <code>claude*</code>.</div>`
+    + `<div class="rule-ed-preview" id="rule-ed-preview"></div>`
+    + `<div class="rule-ed-actions"><button class="btn btn-sm btn-neutral" onclick="saveRule()">${isNew ? 'Create channel' : 'Save'}</button>`
+    + `<button class="btn btn-sm btn-secondary" onclick="closeRuleEditor()">Cancel</button>`
+    + (isNew ? '' : `<button class="btn btn-sm btn-danger rule-ed-del" onclick="deleteTrickset()">Delete channel</button>`)
+    + `</div>`;
+  ed.hidden = false;
+  ruleEdPreview(isNew);
+  (isNew ? document.getElementById('rule-app') : document.getElementById('rule-name-input')).focus();
+}
+
+function fillRuleApp(name) {
+  document.getElementById('rule-app').value = name;
+  const n = document.getElementById('rule-name-input');
+  if (!n.value) n.value = name.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-|-$/g, '');
+  ruleEdPreview();
+}
+
+function ruleEdPreview(quiet) {
+  const app = document.getElementById('rule-app').value.trim() || '*';
+  const model = document.getElementById('rule-model').value.trim() || '*';
+  const el = document.getElementById('rule-ed-preview');
+  if (quiet !== true && app === '*' && model === '*') {
+    el.innerHTML = 'This matches <b>every</b> request, so <b>Everything else</b> would never run.';
+    el.className = 'rule-ed-preview warn';
+  } else {
+    el.innerHTML = '';
+    el.className = 'rule-ed-preview';
+  }
+}
+
+function closeRuleEditor() {
+  const ed = document.getElementById('rule-editor');
+  if (ed) { ed.hidden = true; ed.innerHTML = ''; }
+}
+
+async function saveRule() {
+  const app = document.getElementById('rule-app').value.trim() || '*';
+  const model = document.getElementById('rule-model').value.trim() || '*';
+  const name = document.getElementById('rule-name-input').value.trim();
+  if (!name) { showToast('Give the channel a name', true); return; }
+  if (name === '_default') { showToast('That name is reserved', true); return; }
+  if (_ruleEditingNew && app === '*' && model === '*') { ruleEdPreview(); showToast('Pick an app or a model for this channel', true); return; }
+  const filters = {'X-Title': app, 'Model': model};
+  try {
+    if (_ruleEditingNew) {
+      const d = await fetchJSON('/api/tricksets/create', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name, filters}),
+      });
+      showToast('Created #' + d.name);
+      selectedTrickset = d.name || name;
+    } else {
+      const orig = selectedTrickset;
+      await fetchJSON('/api/tricksets/' + encodeURIComponent(orig), {
+        method: 'PUT', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(name !== orig ? {filters, name} : {filters}),
+      });
+      selectedTrickset = name;
+      showToast('Saved #' + name);
+    }
+    closeRuleEditor();
+    fetchTricksets();
+  } catch(e) { showToast(e.message, true); }
 }
 
 async function fetchTricksets() {
@@ -1273,10 +1651,9 @@ async function fetchTricksets() {
       fetchJSON('/api/tricksets'),
       fetchJSON('/api/tricksets/available'),
     ]);
-    loadedTricksets = {};
-    loaded.forEach(ts => loadedTricksets[ts.name] = ts);
     _markNewTricksets(loaded.map(ts => ts.name));
-    _sharedPills(loaded, avail, selectedTrickset, 'switchTrickset', true);
+    _setTricksetList(loaded, avail);
+    fetchTraffic();
     const loadedNames = new Set(loaded.map(ts => ts.name));
     if (!loadedNames.has(selectedTrickset) && loaded.length) selectedTrickset = loaded[0].name;
     if (loaded.length) switchTrickset(selectedTrickset);
@@ -1286,13 +1663,11 @@ async function fetchTricksets() {
 async function switchTrickset(name) {
   if (name !== selectedTrickset) dismissTricksContext();
   selectedTrickset = name;
-  if (_newTricksets.delete(name)) {
-    const pill = document.querySelector('#ts-pills .pill[data-name="' + name + '"]');
-    if (pill) pill.classList.remove('pill-new');
-  }
+  _newTricksets.delete(name);
+  closeRuleEditor();
   updateHash();
   updatePgTarget();
-  document.querySelectorAll('#ts-pills .pill[data-name]').forEach(p => p.classList.toggle('active', p.dataset.name === name));
+  renderRuleBar();
   const isLoaded = !!loadedTricksets[name];
   if (!isLoaded) {
     try {
@@ -1313,9 +1688,6 @@ async function switchTrickset(name) {
   try {
     const ts = loadedTricksets[name];
     document.getElementById('ts-bar').style.display = '';
-    document.getElementById('ts-fx').textContent = ts.filters['X-Title'] || '*';
-    document.getElementById('ts-fm').textContent = ts.filters['Model'] || '*';
-    document.getElementById('ts-name').textContent = ts.name;
     document.getElementById('ts-settings-scope').textContent = ts.name;
     document.getElementById('ts-logfile').value = ts.logfile || '';
     document.getElementById('ts-loglevel').value = ts.loglevel || 'INFO';
@@ -1329,50 +1701,6 @@ async function switchTrickset(name) {
       fetchTricks();
     }
   } catch(e) { console.error(e); }
-}
-
-function editFilter(el, key) {
-  const valSpan = el.querySelector('.val') || el;
-  const orig = valSpan.textContent;
-  const inp = document.createElement('input');
-  inp.type = 'text';
-  inp.value = orig;
-  inp.onblur = function() { saveFilter(valSpan, key, inp.value, orig, el); };
-  inp.onkeydown = function(e) { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { valSpan.textContent = orig; } };
-  valSpan.textContent = '';
-  valSpan.appendChild(inp);
-  inp.focus();
-  inp.select();
-}
-
-async function saveFilter(valSpan, key, val, orig, parentEl) {
-  valSpan.textContent = val || '*';
-  try {
-    const filters = {
-      'X-Title': document.getElementById('ts-fx').textContent,
-      'Model': document.getElementById('ts-fm').textContent,
-      [key]: val || '*',
-    };
-    await fetchJSON('/api/tricksets/' + encodeURIComponent(selectedTrickset), {
-      method: 'PUT',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({filters}),
-    });
-  } catch(e) { showToast(e.message, true); valSpan.textContent = orig; }
-}
-
-function editName() {
-  const valSpan = document.getElementById('ts-name');
-  const orig = valSpan.textContent;
-  const inp = document.createElement('input');
-  inp.type = 'text';
-  inp.value = orig;
-  inp.onblur = function() { saveName(valSpan, inp.value, orig); };
-  inp.onkeydown = function(e) { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { valSpan.textContent = orig; } };
-  valSpan.textContent = '';
-  valSpan.appendChild(inp);
-  inp.focus();
-  inp.select();
 }
 
 async function saveLogfile() {
@@ -1403,47 +1731,20 @@ async function saveLoglevel(val) {
   } catch(e) { showToast(e.message, true); }
 }
 
-async function saveName(valSpan, val, orig) {
-  valSpan.textContent = val || orig;
-  if (!val || val === orig) return;
-  try {
-    await fetchJSON('/api/tricksets/' + encodeURIComponent(orig), {
-      method: 'PUT',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name: val}),
-    });
-    selectedTrickset = val;
-    showToast('Renamed to ' + val);
-    fetchTricksets();
-  } catch(e) { showToast(e.message, true); valSpan.textContent = orig; }
-}
-
 async function deleteTrickset() {
-  if (!confirm('Delete trickset "' + selectedTrickset + '"? This cannot be undone.')) return;
+  if (!confirm('Delete #' + selectedTrickset + ' and its extension list? This cannot be undone.')) return;
   try {
     await fetchJSON('/api/tricksets/' + encodeURIComponent(selectedTrickset), {
       method: 'DELETE',
     });
-    showToast('Deleted');
+    showToast('Deleted channel');
+    closeRuleEditor();
     selectedTrickset = '_default';
     fetchTricksets();
   } catch(e) { showToast(e.message, true); }
 }
 
-async function addTrickset() {
-  const name = prompt('Enter trickset name:');
-  if (!name) return;
-  try {
-    const d = await fetchJSON('/api/tricksets/create', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name, filters: {'X-Title': '*', 'Model': '*'}}),
-    });
-    showToast('Created: ' + d.name);
-    selectedTrickset = name;
-    fetchTricksets();
-  } catch(e) { showToast(e.message, true); }
-}
+function addTrickset() { openRuleEditor(true); }
 
 async function installExamples() {
   const btn = document.getElementById('btn-install-examples');
@@ -1866,7 +2167,7 @@ async function fetchModels() {
     _cachedConfiguredModels = modelsData.configured_models || {};
     _tsModels = {};
     loaded.forEach(ts => _tsModels[ts.name] = ts.models || {});
-    _sharedPills(loaded, avail, selectedTrickset, 'switchTrickset', true);
+    _setTricksetList(loaded, avail);
     renderModels(selectedTrickset, _cachedConfiguredModels);
   } catch(e) { document.getElementById('model-list').innerHTML = '<div class="loader">Error loading models</div>'; }
 }
@@ -2327,8 +2628,11 @@ async function shutdownPetsitter() {
 
 // ---- init ----
 var initHash = parseHash();
-switchTab(initHash.tab);
+if (initHash.tab === 'tricks' && initHash.ext) _extSel = initHash.ext;
+// Before switchTab(): it writes the hash back, and would overwrite a linked
+// rule with _default before we ever read it.
 if (initHash.ts !== '_default') selectedTrickset = initHash.ts;
+switchTab(initHash.tab);
 trickSearch = (document.getElementById('trick-search').value || '').toLowerCase();
 initModelMethod();
 fetchInfo(); fetchTricksets(); fetchAvailable(); fetchModels(); fetchAgents(); startPauseStream();
@@ -2370,9 +2674,9 @@ async function openTrickConfig(id) {
   try {
     const all = await fetchJSON('/api/tricks');
     const t = all.find(x => x.id === id && x.trickset === selectedTrickset) || all.find(x => x.id === id);
-    if (!t || !(t.config_fields || []).length) { showToast('This trick has no configuration', true); return; }
+    if (!t || !((t.config_fields || []).length || t.prompt_keyword)) { showToast('This extension has no settings', true); return; }
     _configTrick = t;
-    document.getElementById('config-modal-title').textContent = 'Configure ' + (t.display_name || t.name);
+    document.getElementById('config-modal-title').textContent = (t.display_name || t.name) + ' settings';
     const vals = t.config || {};
     const kwField = t.prompt_keyword
       ? `<label class="cfg-field"><span class="cfg-label">Prompt keyword</span><input type="text" id="cfg-_keyword" value="${escapeHtml(t.prompt_keyword || '')}" spellcheck="false" placeholder="e.g. rules"><div class="cfg-desc">Use <code>(keyword: ...)</code> in a message to trigger this</div></label>`
@@ -2434,7 +2738,7 @@ async function saveTrickConfig() {
 </div>
 </div>
 <div class="pg-log" id="pg-log">
-<div class="pg-hint">Send a message through the selected trickset. Tricks that fire light up in Loaded Tricks.</div>
+<div class="pg-hint">Send a message through the selected trickset. Installed extensions that change it light up.</div>
 </div>
 <div class="pg-input">
 <textarea id="pg-text" rows="2" placeholder="Type a message&#8230;  (Enter to send, Shift+Enter for a newline)" spellcheck="false" onkeydown="pgKey(event)"></textarea>

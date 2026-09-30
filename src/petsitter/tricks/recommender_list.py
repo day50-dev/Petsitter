@@ -1,26 +1,48 @@
-"""Recommender list trick.
+"""Tells the model which software you want it to use (your database, package manager, HTTP client) and what to avoid, so it stops suggesting whatever was most popular in its training data.
 
-Keeps a list of the software the user actually wants used - their database,
-their package manager, their HTTP client - and injects it into the system
-prompt so the model picks from that list instead of defaulting to whatever
-is most common in its training data. When the model reaches for "a database"
-it reaches for the one on the list.
+Ask a model to "add a database" and it will often reach for whatever it saw most
+online, not what you already run. This trick keeps a short list of your choices
+and puts it in front of the model on every request. If the model wants to use
+something else, it has to say which listed tool it's passing over and why (or,
+with `strict` on, ask you instead).
 
-The list is configured per-trickset via the ``recommender_path`` config field
-(a plain text file) and/or the inline ``recommendations`` field, and can be
-edited at runtime with the ``(recommend: ...)`` prompt keyword.
+## How to use
 
-File format - one entry per line, ``#`` starts a comment::
+Point the `recommender_path` setting at a text file, put entries in the
+`recommendations` setting (separated by `;`), or both. One entry per line:
 
-    database: postgres (already in prod)
-    python package manager: uv
-    avoid: mongodb (ops burden)
-    !jquery
-    ripgrep
+```
+# my stack
+database: postgres (already in prod)
+package manager: uv
+avoid: mongodb (ops burden)
+!jquery
+ripgrep
+```
 
-A line with a colon is a category choice, a line starting with ``!`` or
-``avoid:``/``never:`` is something to steer away from, and a bare line is a
-general preference with no category.
+`category: choice` (or `=`) is a choice for a job; `!x`, `avoid: x` or `never x`
+is something to steer away from; a bare line is a general preference. A trailing
+`(...)` is passed along as the reason. Edit the list from any chat:
+
+```
+(recommend)                        show the list
+(recommend: http client = httpx)   add or replace
+(recommend: avoid jquery)
+(recommend: drop database)
+(recommend: reload)                re-read the file after editing it
+```
+
+Changes are saved back to the file when one is set; otherwise they last until
+restart. With an empty list the trick does nothing.
+
+## How it works
+
+- Entries merge file, then inline, then runtime; later wins per key. A category
+  holds one choice; uncategorized entries are keyed by name.
+- The avoid prefixes also accept `no`, `ban` and `not`; drop also accepts
+  `remove`, `forget` and `unset`. ` #` starts a comment, so `c#` survives.
+- Saving rewrites the whole file from the merged list (comments are lost) and
+  folds inline and runtime entries into it.
 """
 
 import logging

@@ -1,3 +1,47 @@
+"""Splits each request across three small models: one thinks, one picks the tool to call, and one writes the answer.
+
+A single small model often can't reason, choose tools and write well all at once.
+Kennel gives each job to a model suited for it, so a few small local models
+(together under about 6B parameters) can behave more like one larger one:
+
+- **thinker** reasons step by step about the conversation
+- **toolcall** decides whether a tool should be called, and with what arguments
+- **default** (the emitter) writes the final reply, with the thinker's reasoning
+  in front of it
+
+It is also a reference implementation of multi-model routing: a trick can call
+any model you've configured, not just the one your AI tool pointed at.
+
+## How to use
+
+Configure the three models (ideally scoped to this trickset), for example:
+
+```bash
+pet model thinker  model VibeThinker-3B-GGUF:q4_K_M --trickset kennel-demo
+pet model toolcall model LFM2.5-230M --trickset kennel-demo
+pet model default  model Qwen3.5-2B --trickset kennel-demo
+```
+
+Set each model's `url` the same way, or use the dashboard's Models tab.
+
+## How it works
+
+1. `pre_hook`: the thinker gets the conversation; its reply is appended to the
+   system prompt inside `<thinking>` tags.
+2. If the request has tools, the tool-caller gets the conversation plus the tool
+   list and must answer `{"name": ..., "arguments": {...}}` or `NO_TOOL`. A
+   chosen tool is noted in the system prompt as `[Tool selected: name]`.
+3. The normal upstream call to `default` produces the reply.
+4. `post_hook`: if a tool was chosen, the reply is replaced by that tool call
+   (content set to `None`). Otherwise the tool-caller is asked again with the
+   reply included.
+
+Only `url` and `model` are read from the thinker/toolcall configs (not `key`).
+The tool decision and tool list are kept on the instance, so they are shared
+across concurrent requests, and the cached tool list persists after a request
+that carried tools.
+"""
+
 import json
 import secrets
 

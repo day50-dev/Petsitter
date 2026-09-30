@@ -3,7 +3,7 @@
 import json
 import logging
 import uuid
-from fnmatch import fnmatch
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
 
@@ -81,7 +81,9 @@ class Trickset:
     def matches(self, x_title: str, model: str) -> bool:
         for key, pattern in self.filters.items():
             val = x_title if key == "X-Title" else model
-            if not fnmatch(val, pattern):
+            # Case-insensitive on every OS. Plain fnmatch() follows the
+            # platform, so "opencode*" caught "OpenCode" on Windows only.
+            if not fnmatchcase((val or "").lower(), (pattern or "").lower()):
                 return False
         return True
 

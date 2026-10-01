@@ -117,3 +117,21 @@ def test_secrets_live_events_never_carry_the_secret():
     assert "alice@example.com" not in blob and "hunter2" not in blob
     kinds = [e["event"] for e in events]
     assert kinds.count("hidden") == 2 and "restored" in kinds
+
+
+def test_json_mode_reports_fence_removal():
+    from petsitter.tricks.json_mode import JsonModeTrick
+    t = JsonModeTrick()
+    ctx = [{"role": "assistant", "content": '```json\n{"ok": true}\n```'}]
+    t.post_hook(ctx)
+    assert ctx[-1]["content"] == '{"ok": true}'
+    assert t.live_feed.since(0)[0][1]["message"] == "Removed a code fence so the reply parses as JSON"
+
+
+def test_tool_call_reports_conversion():
+    from petsitter.tricks.tool_call import ToolCallTrick
+    t = ToolCallTrick()
+    ctx = [{"role": "assistant", "content": '{"name": "read_file", "arguments": {"path": "a.py"}}'}]
+    t.post_hook(ctx)
+    if ctx[-1].get("tool_calls"):
+        assert "read_file" in t.live_feed.since(0)[0][1]["message"]

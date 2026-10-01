@@ -23,7 +23,6 @@
 <a href="#" onclick="switchTab('help');return false">Help</a>
 </div>
 <div class="info">
-<span id="info-listen" title="Petsitter listening address"></span>
 <span><span class="label">v</span><span id="info-version">--</span></span>
 <div class="try-btn btn" id="try-btn" onclick="togglePlayground()" title="Try it &mdash; send a message through this trickset">
 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.9 8.9 0 0 1-3.8-.9L3 21l1.9-5.1A8.4 8.4 0 0 1 12 3a8.4 8.4 0 0 1 9 8.5z"/></svg>
@@ -248,6 +247,32 @@ the default model. Set an API key to false (passthrough) to let the client suppl
 </div>
 </div>
 
+<!-- === CONNECTING: the address tools point at === -->
+<div class="tab-pane" id="tab-connecting">
+<div class="connecting">
+<section class="info-card">
+<div class="info-card-head">
+<span class="info-card-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6"/><path d="M15 2v6"/><path d="M6 8h12v4a6 6 0 0 1-12 0V8z"/><path d="M12 18v4"/></svg></span>
+<div>
+<h2>Base URL</h2>
+<div class="info-card-sub">Point your tools here</div>
+</div>
+</div>
+<div class="copy-row">
+<code id="base-url"></code>
+<button class="btn btn-primary" onclick="copyText('base-url', this)">Copy</button>
+</div>
+<p>In your tool, pick the <b>OpenAI compatible</b> or <b>local</b> provider and paste this.</p>
+<div class="info-card-divider"></div>
+<p class="connecting-sub">Tools that only read an environment variable:</p>
+<div class="copy-row">
+<code id="base-url-env"></code>
+<button class="btn btn-secondary" onclick="copyText('base-url-env', this)">Copy</button>
+</div>
+</section>
+</div>
+</div>
+
 <!-- === AGENTS TAB === -->
 <div class="tab-pane" id="tab-agents">
 <div class="card">
@@ -370,7 +395,7 @@ function html(strings, ...vals) {
 let currentTab = 'intro';
 
 let _prevTab = null;
-const NO_CHANNEL_TABS = ['intro', 'help', 'newchannel', 'agents', 'models'];
+const NO_CHANNEL_TABS = ['intro', 'help', 'newchannel', 'connecting', 'agents', 'models'];
 function switchTab(name) {
   if (typeof currentTab !== 'undefined' && currentTab !== name) _prevTab = currentTab;
   if (name !== 'tricks') dismissTricksContext();
@@ -388,6 +413,7 @@ function switchTab(name) {
   if (typeof queueFitExtPanes === 'function') queueFitExtPanes();
   if (name === 'intro') refreshIntro();
   if (name === 'help') loadHelpContent();
+  if (name === 'connecting') paintBaseUrl();
   if (name === 'newchannel') openRuleEditor(true);
   if (name === 'models') renderModels('_default', _cachedConfiguredModels);
   if (name === 'settings') renderChannelModels();
@@ -636,11 +662,43 @@ async function obConnectTool(id) {
   paintOnboard();
 }
 
+// ---- base URL ----
+// The address the browser used is the one other tools on the same network use.
+function paintBaseUrl() {
+  const base = location.origin + '/v1';
+  document.getElementById('base-url').textContent = base;
+  document.getElementById('base-url-env').textContent = `OPENAI_BASE_URL=${base} your-program`;
+}
+
+function copyText(id, btn) {
+  const text = document.getElementById(id).textContent;
+  const done = ok => {
+    if (!btn) return;
+    const was = btn.textContent;
+    btn.textContent = ok ? 'Copied' : 'Select and copy';
+    setTimeout(() => { btn.textContent = was; }, 1400);
+  };
+  // navigator.clipboard only exists on https or localhost; over plain http
+  // to another machine, fall back to the old select-and-copy.
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(() => done(true), () => done(false));
+    return;
+  }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch(e) {}
+  ta.remove();
+  done(ok);
+}
+
 // ---- info ----
 async function fetchInfo() {
     try {
       const d = await fetchJSON('/api/info');
-      document.getElementById('info-listen').textContent = d.listen_on || '';
       document.getElementById('info-version').textContent = d.version || '--';
     } catch(e) { console.error(e); }
   }
@@ -1682,6 +1740,7 @@ function renderRuleBar() {
 // The channel list: every trickset, always on screen, each with its traffic.
 // A dot means it caught a request in the last minute.
 const _homeIcon = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg>';
+const _plugIcon = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6"/><path d="M15 2v6"/><path d="M6 8h12v4a6 6 0 0 1-12 0V8z"/><path d="M12 18v4"/></svg>';
 const _modelsIcon = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/><line x1="9" y1="2" x2="9" y2="6"/><line x1="15" y1="2" x2="15" y2="6"/><line x1="9" y1="18" x2="9" y2="22"/><line x1="15" y1="18" x2="15" y2="22"/><line x1="2" y1="9" x2="6" y2="9"/><line x1="2" y1="15" x2="6" y2="15"/><line x1="18" y1="9" x2="22" y2="9"/><line x1="18" y1="15" x2="22" y2="15"/></svg>';
 const _agentsIcon = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>';
 function renderChannelRail() {
@@ -1717,6 +1776,8 @@ function renderChannelRail() {
     + `<span class="chan-abbr" aria-hidden="true">${_homeIcon}</span><span class="chan-glyph" aria-hidden="true">${_homeIcon}</span><span class="chan-name">Start here</span></button>`
     + `<button class="chan-toggle" onclick="toggleRail()" title="${collapsed ? 'Show channels' : 'Collapse channels'}" aria-label="${collapsed ? 'Show channels' : 'Collapse channels'}" aria-expanded="${collapsed ? 'false' : 'true'}">`
     + `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/>${collapsed ? '<polyline points="13 10 15 12 13 14"/>' : '<polyline points="16 10 14 12 16 14"/>'}</svg></button></div>`
+    + `<button class="chan chan-page${currentTab === 'connecting' ? ' active' : ''}" onclick="switchTab('connecting')" title="Connecting: the base URL your tools point at">`
+    + `<span class="chan-abbr" aria-hidden="true">${_plugIcon}</span><span class="chan-glyph" aria-hidden="true">${_plugIcon}</span><span class="chan-name">Connecting</span></button>`
     + `<button class="chan chan-page${currentTab === 'agents' ? ' active' : ''}" onclick="switchTab('agents')" title="Agents: the coding tools connected to petsitter">`
     + `<span class="chan-abbr" aria-hidden="true">${_agentsIcon}</span><span class="chan-glyph" aria-hidden="true">${_agentsIcon}</span><span class="chan-name">Agents</span></button>`
     + `<button class="chan chan-page${currentTab === 'models' ? ' active' : ''}" onclick="switchTab('models')" title="Models: your provider, and the models petsitter sends to">`

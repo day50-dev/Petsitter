@@ -61,6 +61,7 @@ class ExportItTrick(Trick):
 
         with open(filepath, "w") as f:
             json.dump(conversation, f, indent=2)
+        self.report(f"Exported {len(conversation)} messages to {filepath}")
 
         note = f"\nNote: {request}" if request else ""
         return {

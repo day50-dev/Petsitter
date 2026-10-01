@@ -70,7 +70,6 @@ header .info .pause-btn.active { color: #ffb84d; background: #2a220f; }
 }
 .paused-banner.visible { display: flex; }
 .paused-banner button { margin-left: auto; }
-header #info-listen { background: #0f1a2a; padding: 1px 6px; border-radius: 3px; color: #5a8ab5; font-family: monospace; }
 header .nav { display: flex; gap: 6px; align-items: center; }
 header .nav a {
   color: #5a8ab5;
@@ -2395,3 +2394,47 @@ body.chan-off:not(.no-channel) .tabs,
 body.chan-off:not(.no-channel) #tab-tricks,
 body.chan-off:not(.no-channel) #tab-logs,
 body.chan-off:not(.no-channel) #tab-settings { display: none !important; }
+
+/* Connecting: the base URL, as an information card with copy buttons. */
+.connecting { max-width: 780px; padding: 8px 4px; }
+.info-card {
+  background: #16162a;
+  border: 1px solid #1e2a3a;
+  border-top: 3px solid #2a5aa0;
+  border-radius: 10px;
+  padding: 20px 22px 22px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .25);
+}
+.info-card-head { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+.info-card-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  background: #1a2a4d;
+  border: 1px solid #2a4a6a;
+  color: #8ab4ff;
+}
+.info-card h2 { font-size: 19px; color: #fff; margin: 0; }
+.info-card-sub { font-size: 13px; color: #6b8299; margin-top: 1px; }
+.info-card p { font-size: 14px; color: #a4b8d4; margin: 12px 0 0; }
+.info-card p b { color: #e0e0e0; }
+.info-card-divider { height: 1px; background: #1e2a3a; margin: 20px 0 0; }
+.info-card .connecting-sub { color: #6b8299; margin-top: 16px; }
+.copy-row { display: flex; gap: 10px; align-items: stretch; margin-top: 10px; flex-wrap: wrap; }
+.copy-row code {
+  flex: 1;
+  min-width: 0;
+  padding: 12px 14px;
+  background: #12122a;
+  border: 1px solid #2a3a4a;
+  border-radius: 8px;
+  color: #8ab4ff;
+  font: 15px ui-monospace, "SF Mono", Consolas, monospace;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.copy-row .btn { padding: 0 18px; font-size: 13px; min-height: 42px; }

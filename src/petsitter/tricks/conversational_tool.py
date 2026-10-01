@@ -369,6 +369,8 @@ class ConversationalToolTrick(Trick):
             }
         ]
         last_message["content"] = None
+        self.report(f"Built a call to {self._pending_tool} from the conversation",
+                    arguments=dict(self._collected_params))
         
         self._reset_state()
         

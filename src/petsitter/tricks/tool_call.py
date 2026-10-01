@@ -149,6 +149,9 @@ class ToolCallTrick(Trick):
             ]
             # Remove content since we have tool calls
             last_message["content"] = None
+            names = ", ".join(tc["name"] for tc in tool_calls)
+            self.report(f"Turned the model's text into a tool call: {names}",
+                        arguments={tc["name"]: tc["arguments"] for tc in tool_calls})
 
         return context
 

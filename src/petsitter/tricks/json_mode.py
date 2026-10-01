@@ -59,6 +59,9 @@ class JsonModeTrick(Trick):
 
         # Try to parse as JSON
         attempts = self.max_attempts
+        original = content
+        retries = 0
+        valid = False
         while attempts > 0:
             try:
                 # Strip markdown code blocks if present
@@ -69,6 +72,7 @@ class JsonModeTrick(Trick):
                         content = "\n".join(lines[1:-1]) if lines[-1] == "```" else "\n".join(lines[1:])
                 
                 json.loads(content)
+                valid = True
                 break  # Valid JSON
             except (json.JSONDecodeError, IndexError):
                 attempts -= 1
@@ -77,6 +81,7 @@ class JsonModeTrick(Trick):
                     break
                 
                 # Retry with feedback
+                retries += 1
                 context = callmodel_sync(
                     context,
                     "Your response was not valid JSON. Please respond with valid JSON only, "
@@ -87,6 +92,11 @@ class JsonModeTrick(Trick):
 
         # Update the last message with cleaned content
         context[-1]["content"] = content
+        if retries:
+            self.report(f"Asked the model again {retries}x for valid JSON"
+                        + ("" if valid else ", and gave up: passed the last reply through"))
+        elif valid and content != original:
+            self.report("Removed a code fence so the reply parses as JSON")
         return context
 
     def info(self, capabilities: dict) -> dict:

@@ -110,6 +110,8 @@ class RulesFileTrick(Trick):
     def system_prompt(self, to_add: str) -> str:
         if not self._rules_content:
             return ""
+        # Repeats fold into one row (x N) on the Live page.
+        self.report(f"Added your rules ({len(self._rules_content)} chars) to the system prompt")
         return (
             "The following rules MUST be followed for every response:\n\n"
             + self._rules_content

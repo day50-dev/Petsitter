@@ -991,3 +991,22 @@ class TestRuleMatching:
         h = self._handler({"X-Title": "opencode*", "Model": "*"})
         _, matched = h._matching_tricks("OpenCode", "m")
         assert matched.name == "claude"
+
+
+class TestUpstreamStatus:
+    """The last call to the provider is recorded, failure detail included."""
+
+    async def test_unreachable_is_recorded(self, monkeypatch):
+        import httpx
+        from petsitter.proxy import ProxyHandler
+        from petsitter.trick import configure_modelset
+        configure_modelset({"default": {"url": "http://127.0.0.1:9/v1", "model": "m"}})
+        h = ProxyHandler("http://127.0.0.1:9/v1", "m", tricks=[])
+        try:
+            await h.chat_completions({"model": "m", "messages": [{"role": "user", "content": "hi"}]})
+        except ValueError:
+            pass
+        st = h.upstream_status
+        assert st["ok"] is False and st["target"] == "http://127.0.0.1:9/v1/chat/completions"
+        assert "ConnectError" in st["error"]
+        configure_modelset({})

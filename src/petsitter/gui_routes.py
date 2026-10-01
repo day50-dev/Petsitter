@@ -145,6 +145,9 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
             # instead of asking again on every reload. Whether a key exists is
             # all the browser needs; the key itself never leaves the server.
             "provider_id": (matched or {}).get("id", ""),
+            # The last call to the provider: the dashboard flags a failure.
+            "upstream": (dict(handler.upstream_status, ago=round(time.time() - handler.upstream_status["at"]))
+                         if handler.upstream_status else None),
             "api_key_set": bool(api_key),
         })
     app.add_route("/api/info", gui_info, methods=["GET"])

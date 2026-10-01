@@ -2519,3 +2519,37 @@ body.rail-collapsed .chan-alert { position: absolute; bottom: 2px; right: 2px; w
   .disc-row > span:last-child { border-bottom: 1px solid #1e2a3a; padding-bottom: 10px; justify-content: flex-start; }
 }
 
+
+/* Connecting: the last call to the provider failed. */
+.upstream-error {
+  background: #2a1a1f;
+  border: 1px solid #5a2a35;
+  border-left: 3px solid #ff6b8a;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+.upstream-error-head { display: flex; gap: 12px; align-items: flex-start; }
+.upstream-error-head .chan-alert { background: #ff6b8a; color: #1a0a0f; margin-top: 2px; }
+.upstream-error b { color: #ffd0d8; font-weight: 600; }
+.upstream-error code { color: #ffb0c0; font-size: 13px; overflow-wrap: anywhere; }
+.upstream-error-sub { font-size: 12px; color: #c08a96; margin-top: 2px; }
+.upstream-error pre {
+  margin: 10px 0 0 29px;
+  padding: 8px 10px;
+  background: #1a0f13;
+  border: 1px solid #4a2530;
+  border-radius: 6px;
+  color: #ffc0cc;
+  font: 12px ui-monospace, "SF Mono", Consolas, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow: auto;
+}
+
+/* Below the card: the plain-line bypass URL. */
+.bypass { margin-top: 26px; padding: 0 4px; }
+.bypass h3 { font-size: 14px; color: #a4b8d4; margin: 0 0 4px; }
+.bypass p { font-size: 13px; color: #6b8299; margin: 0; }
+.bypass .copy-row code { font-size: 14px; color: #8a9ab0; background: transparent; }

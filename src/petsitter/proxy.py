@@ -121,9 +121,17 @@ class ProxyHandler:
         # Every program seen (by X-Title), kept across restarts once the server
         # gives it a file (create_app); in memory until then.
         self.discovered = DiscoveredPrograms(None)
+        # How the last call to the provider (the final hop) went, for the
+        # dashboard: {"ok", "target", "status", "error", "at"}. None until the
+        # first request.
+        self.upstream_status: dict | None = None
         configure(self.model_url, self.model_name or "", self.api_key)
 
     TRAFFIC_KEEP = 50
+
+    def _note_upstream(self, target: str, ok: bool, status: int | None = None, error: str = "") -> None:
+        self.upstream_status = {"ok": ok, "target": target, "status": status,
+                                "error": (error or "")[:2000], "at": time.time()}
 
     def _note_traffic(self, x_title: str, model: str, tricksets: list[str]) -> None:
         try:
@@ -863,6 +871,7 @@ class ProxyHandler:
                             timeout=120.0,
                         )
                 except httpx.TransportError as e:
+                    self._note_upstream(target, False, error=f"{type(e).__name__}: {e}")
                     raise ValueError(f"Error: {target} can't be reached: {e}") from e
 
                 if (response.status_code not in UPSTREAM_RETRY_STATUSES
@@ -894,6 +903,7 @@ class ProxyHandler:
                 log.error("%supstream %s from %s: %s", request_tag(),
                           response.status_code, target, detail[:2000] or "(empty body)")
                 tried = f" after {attempts} attempts" if attempts > 1 else ""
+                self._note_upstream(target, False, response.status_code, detail or "(empty body)")
                 raise ValueError(
                     f"Upstream {target} returned {response.status_code}{tried}: "
                     f"{detail[:2000] or '(empty body)'}"
@@ -905,6 +915,7 @@ class ProxyHandler:
                 raise ValueError(f"Upstream returned empty response (status {response.status_code})")
 
             result = response.json()
+            self._note_upstream(target, True, response.status_code)
 
             log.debug("%supstream response: %s", request_tag(), json.dumps(result, indent=2))
 
@@ -1027,13 +1038,19 @@ class ProxyHandler:
 
             log.info("%scalling upstream: %s", request_tag(), target)
             trace_event("upstream", url=target, model=body.get("model", ""))
-            async with httpx.AsyncClient() as client:
-                response = await client.post(target, json=body, headers=headers, timeout=600.0)
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(target, json=body, headers=headers, timeout=600.0)
+            except httpx.TransportError as e:
+                self._note_upstream(target, False, error=f"{type(e).__name__}: {e}")
+                raise
 
             if response.status_code >= 400:
                 detail = (response.text or "").strip()[:500]
                 log.error("%supstream %s: %s", request_tag(), response.status_code, detail)
+                self._note_upstream(target, False, response.status_code, detail or "(empty body)")
                 raise ValueError(f"Anthropic returned {response.status_code}: {detail}")
+            self._note_upstream(target, True, response.status_code)
 
             result = response.json()
             assistant = ac.response_to_assistant_message(result)
@@ -1057,15 +1074,21 @@ class ProxyHandler:
             base = default_cfg["url"]
             if not base:
                 raise ValueError("No upstream model configured. Set a model URL via the dashboard.")
-            target = f"{base}/v1/models"
+            # Same base-URL forms as chat (with or without /v1).
+            target = chat_completions_url(base)[: -len("/chat/completions")] + "/models"
             headers = self._build_headers(default_cfg)
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(target, headers=headers, timeout=30.0)
+                if response.status_code >= 400:
+                    self._note_upstream(target, False, response.status_code,
+                                        (response.text or "").strip() or "(empty body)")
                 response.raise_for_status()
                 result = response.json()
         except httpx.TransportError as e:
+            self._note_upstream(target, False, error=f"{type(e).__name__}: {e}")
             raise ValueError(f"Error: {target} can't be reached: {e}") from e
+        self._note_upstream(target, True, response.status_code)
         for name in self.tricksets:
             result.setdefault("data", []).append({
                 "id": f"trickset/{name}",

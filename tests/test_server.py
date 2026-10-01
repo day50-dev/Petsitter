@@ -693,3 +693,37 @@ class TestCLI:
         ts_list = mock_create.call_args[1]["trickset_paths"]
         assert len(ts_list) == 1 and isinstance(ts_list[0], dict)
         assert ts_list[0]["name"] == "inline_ts"
+
+
+class TestV1PathTolerance:
+    """However a tool's base URL was written, the API endpoints answer."""
+
+    def test_paths(self):
+        from starlette.applications import Starlette
+        from starlette.responses import PlainTextResponse
+        from starlette.testclient import TestClient
+        from petsitter.server import _NormalizeV1Path
+
+        app = Starlette()
+        for ep in ("chat/completions", "messages", "models"):
+            app.add_route(f"/v1/{ep}", lambda r, ep=ep: PlainTextResponse(ep), methods=["GET", "POST"])
+        app.add_route("/v1/other", lambda r: PlainTextResponse("other"))
+        app.add_middleware(_NormalizeV1Path)
+        c = TestClient(app)
+        for path in ("/v1/chat/completions", "/chat/completions", "/v1/v1/chat/completions",
+                     "/v1/v1/v1/chat/completions/"):
+            assert c.post(path).text == "chat/completions", path
+        assert c.post("/messages").text == "messages"
+        assert c.post("/v1/v1/messages").text == "messages"
+        assert c.get("/models?x=1").text == "models"
+        assert c.get("/v1/v1/other").status_code == 404     # only the API endpoints are rewritten
+
+
+class TestBypassRoute:
+    def test_shape(self):
+        from petsitter.server import create_app  # noqa: F401  (route lives in create_app)
+        import re
+        rx = re.compile(r"^/bypass(?:/v1)*/(chat/completions|models|messages)/?$")
+        for p in ("/bypass/v1/chat/completions", "/bypass/chat/completions", "/bypass/v1/v1/models", "/bypass/v1/messages"):
+            assert rx.match(p), p
+        assert not rx.match("/bypass/v1/other")

@@ -252,6 +252,7 @@ the default model. Set an API key to false (passthrough) to let the client suppl
 <!-- === CONNECTING: the address tools point at === -->
 <div class="tab-pane" id="tab-connecting">
 <div class="connecting">
+<div id="upstream-error"></div>
 <section class="info-card">
 <div class="info-card-head">
 <span class="info-card-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6"/><path d="M15 2v6"/><path d="M6 8h12v4a6 6 0 0 1-12 0V8z"/><path d="M12 18v4"/></svg></span>
@@ -272,6 +273,14 @@ the default model. Set an API key to false (passthrough) to let the client suppl
 <button class="btn btn-secondary" onclick="copyText('base-url-env', this)">Copy</button>
 </div>
 </section>
+<div class="bypass">
+<h3>Bypass petsitter processing</h3>
+<p>Requests to this base URL go straight to your provider, like a traditional proxy. Useful for easy model rerouting and secrets management.</p>
+<div class="copy-row">
+<code id="bypass-url"></code>
+<button class="btn btn-secondary" onclick="copyText('bypass-url', this)">Copy</button>
+</div>
+</div>
 </div>
 </div>
 
@@ -737,6 +746,7 @@ function paintBaseUrl() {
   const base = baseUrl();
   document.getElementById('base-url').textContent = base;
   document.getElementById('base-url-env').textContent = `OPENAI_BASE_URL=${base} your-program`;
+  document.getElementById('bypass-url').textContent = location.origin + '/bypass/v1';
 }
 
 function copyText(id, btn, after) {
@@ -771,9 +781,28 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ---- info ----
+let _upstream = null;   // the last call to the provider, from /api/info
+
+// A failed last hop gets a "!" on Connecting and the actual error on its page:
+// "can't reach", a 401 from a bad key, a gateway's 502 body, whatever it was.
+function paintUpstream() {
+  const el = document.getElementById('upstream-error');
+  if (!el) return;
+  const u = _upstream;
+  if (!u || u.ok) { el.innerHTML = ''; return; }
+  el.innerHTML = `<section class="upstream-error">`
+    + `<div class="upstream-error-head"><span class="chan-alert">!</span>`
+    + `<div><b>Unable to reach <code>${escapeHtml(u.target)}</code></b>`
+    + `<div class="upstream-error-sub">${u.status ? 'HTTP ' + u.status + ' &middot; ' : ''}${_ago(u.ago)}. Clears on the next request that gets through.</div></div></div>`
+    + `<pre>${escapeHtml(u.error || '(no detail)')}</pre></section>`;
+}
+
 async function fetchInfo() {
     try {
       const d = await fetchJSON('/api/info');
+      _upstream = d.upstream || null;
+      paintUpstream();
+      if (typeof renderChannelRail === 'function') renderChannelRail();
       // The version lives in the logo's tooltip now; the header shows the base URL.
       document.getElementById('brand-logo').title = 'Petsitter v' + (d.version || '?');
     } catch(e) { console.error(e); }
@@ -1855,7 +1884,9 @@ function renderChannelRail() {
     + `<button class="chan-toggle" onclick="toggleRail()" title="${collapsed ? 'Show channels' : 'Collapse channels'}" aria-label="${collapsed ? 'Show channels' : 'Collapse channels'}" aria-expanded="${collapsed ? 'false' : 'true'}">`
     + `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/>${collapsed ? '<polyline points="13 10 15 12 13 14"/>' : '<polyline points="16 10 14 12 16 14"/>'}</svg></button></div>`
     + `<button class="chan chan-page${currentTab === 'connecting' ? ' active' : ''}" onclick="switchTab('connecting')" title="Connecting: the base URL your tools point at">`
-    + `<span class="chan-abbr" aria-hidden="true">${_plugIcon}</span><span class="chan-glyph" aria-hidden="true">${_plugIcon}</span><span class="chan-name">Connecting</span></button>`
+    + `<span class="chan-abbr" aria-hidden="true">${_plugIcon}</span><span class="chan-glyph" aria-hidden="true">${_plugIcon}</span><span class="chan-name">Connecting</span>`
+    + (_upstream && !_upstream.ok ? `<span class="chan-alert" title="Unable to reach ${escapeHtml(_upstream.target)}">!</span>` : '')
+    + `</button>`
     + `<button class="chan chan-page${currentTab === 'agents' ? ' active' : ''}" onclick="switchTab('agents')" title="Agents: the coding tools connected to petsitter">`
     + `<span class="chan-abbr" aria-hidden="true">${_agentsIcon}</span><span class="chan-glyph" aria-hidden="true">${_agentsIcon}</span><span class="chan-name">Agents</span>`
     + ((_traffic.programs || []).length ? `<span class="chan-count" title="Discovered programs">${(_traffic.programs || []).length}</span>` : '')
@@ -1932,7 +1963,7 @@ async function refreshChannelList() {
 
 // Counts on the rail should move while you watch, without a stream: a
 // light poll while the page is visible.
-setInterval(() => { if (!document.hidden) { fetchTraffic(); refreshChannelList(); } }, 10000);
+setInterval(() => { if (!document.hidden) { fetchTraffic(); refreshChannelList(); fetchInfo(); } }, 10000);
 
 let _newChanPrefill = null;   // {xtitle, model} from "New channel for this"
 
@@ -1957,11 +1988,11 @@ function openRuleEditor(isNew) {
     + `<label class="rule-field"><span class="rule-label">Name</span>`
     + `<input type="text" id="rule-name-input" value="${escapeHtml(name)}" placeholder="e.g. claude-code" spellcheck="false"></label>`
     + `<label class="rule-field"><span class="rule-label">X-Title header</span>`
-    + `<input type="text" id="rule-app" list="rule-app-list" value="${val(app)}" placeholder="* (start typing to see options)" spellcheck="false" autocomplete="off" oninput="ruleEdPreview()">`
+    + `<input type="text" id="rule-app" list="rule-app-list" value="${val(app)}" placeholder="${programs.length ? '* (start typing to see options)' : '* (no traffic seen yet)'}" spellcheck="false" autocomplete="off" oninput="ruleEdPreview()">`
     + `<span class="rule-help">The X-Title header the program sends.</span>`
     + `</label>`
     + `<label class="rule-field"><span class="rule-label">Model</span>`
-    + `<input type="text" id="rule-model" list="rule-model-list" value="${val(model)}" placeholder="* (start typing to see options)" spellcheck="false" autocomplete="off" oninput="ruleEdPreview()">`
+    + `<input type="text" id="rule-model" list="rule-model-list" value="${val(model)}" placeholder="${models.length ? '* (start typing to see options)' : '* (no traffic seen yet)'}" spellcheck="false" autocomplete="off" oninput="ruleEdPreview()">`
     + `<span class="rule-help">The model named in the request.</span>`
     + `</label>`
     + `</div>`

@@ -499,6 +499,29 @@ def install_examples(force: bool = False) -> list[dict]:
     return results
 
 
+# Tools disagree about whether the base URL includes /v1, so a client given
+# "http://host:8080/v1" may call /v1/v1/chat/completions and one given
+# "http://host:8080" may call /chat/completions. Both mean the same endpoint;
+# accept any number of leading /v1 (including none) for the API routes.
+_API_PATH_RE = re.compile(r"^(?:/v1)*/(chat/completions|messages|models)/?$")
+
+
+class _NormalizeV1Path:
+    """ASGI layer: route /chat/completions, /v1/v1/messages etc. to /v1/<endpoint>."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http":
+            m = _API_PATH_RE.match(scope.get("path", ""))
+            if m:
+                path = "/v1/" + m.group(1)
+                if path != scope["path"]:
+                    scope = dict(scope, path=path, raw_path=path.encode())
+        await self.app(scope, receive, send)
+
+
 def _load_saved_tricksets(skip: set[str]) -> dict[str, Trickset]:
     """Load every trickset file in TRICKSETS_DIR that's on and not in *skip*."""
     loaded: dict[str, Trickset] = {}
@@ -602,6 +625,7 @@ def create_app(
         _restore_agents()
 
     app = Starlette(lifespan=lifespan)
+    app.add_middleware(_NormalizeV1Path)
 
     async def stream_chat_completions(handler: ProxyHandler, payload: dict, x_title: str, upstream_request_url: str = "", forward_headers: dict | None = None):
         try:
@@ -772,6 +796,38 @@ def create_app(
         pause_notify()
         return JSONResponse({"paused": handler.paused})
     app.add_route("/api/pause", set_pause_state, methods=["POST"])
+
+    # ----- /bypass: skip petsitter processing for one tool -----
+    # Point a tool at http://host:port/bypass/v1 and its requests go straight
+    # to the configured provider (or Anthropic, for /messages): no extensions,
+    # no channel matching, bytes in and bytes out. The same raw passthrough
+    # Pause uses, but for whichever tools are pointed here instead of all.
+    # /v1 is optional or repeatable, as on the main endpoints.
+
+    _BYPASS_RE = re.compile(r"^/bypass(?:/v1)*/(chat/completions|models|messages)/?$")
+
+    async def bypass(request: Request) -> Response:
+        m = _BYPASS_RE.match(request.url.path)
+        if not m:
+            return JSONResponse({"error": "bypass serves chat/completions, models and messages",
+                                 "type": "invalid_request"}, status_code=404)
+        endpoint = m.group(1)
+        if endpoint == "messages":
+            return await _generic_proxy(f"{ANTHROPIC_UPSTREAM}/v1/messages", request, timeout=600.0)
+        default_cfg = get_model_config("default") or {}
+        upstream_url = default_cfg.get("url")
+        if not upstream_url:
+            return JSONResponse({"error": "No upstream model configured. Set a model URL via the dashboard.",
+                                 "type": "setup_required"}, status_code=503)
+        base = chat_completions_url(upstream_url)[: -len("/chat/completions")]
+        # The client's own key wins; the configured key fills in otherwise.
+        extra_headers = {}
+        api_key = default_cfg.get("key")
+        if api_key is not False and api_key:
+            extra_headers["authorization"] = f"Bearer {api_key}"
+        logging.getLogger("petsitter").info("/bypass -> %s/%s (no processing)", base, endpoint)
+        return await _generic_proxy(f"{base}/{endpoint}", request, timeout=600.0, extra_headers=extra_headers)
+    app.add_route("/bypass/{rest:path}", bypass, methods=["GET", "POST"])
 
     # ----- /p/ path-prefix transparent proxy -----
     # http://localhost:8080/p/<host>/<rest> proxies to https://<host>/<rest>

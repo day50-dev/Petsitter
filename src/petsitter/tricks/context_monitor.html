@@ -85,14 +85,18 @@
   .chan { font-size: 11px; color: var(--accent); background: var(--accent-ground); padding: 0 7px; border-radius: 9px; white-space: nowrap; }
 
   /* detail */
-  .detail { padding: 16px 18px 20px; display: grid; gap: 18px; }
+  .detail { padding: 16px 18px 20px; display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); }
+  /* Grid and flex children default to their content's width; a single long
+     unwrapped line (a message preview) would push the whole pane wider. */
+  .detail > *, .msgs > *, details.block, details.block > summary { min-width: 0; }
+  .comp { min-width: 0; }
   .d-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: baseline; }
   .d-head h2 { margin: 0; font-size: 18px; color: var(--ink-strong); font-weight: 650; text-wrap: balance; }
   .d-head .when { font: 12px var(--mono); color: var(--muted); }
   .source { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 18px; font-size: 13px; }
   .source dt { color: var(--muted); }
   .source dd { margin: 0; font-family: var(--mono); font-size: 12.5px; color: var(--ink); overflow-wrap: anywhere; }
-  .source dd .none { color: var(--warn); font-family: var(--sans); }
+  .source dd .dim { color: var(--faint); }
 
   h3 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); font-weight: 600; display: flex; gap: 8px; align-items: baseline; }
   h3 .note { text-transform: none; letter-spacing: 0; color: var(--faint); font-weight: 400; }
@@ -105,7 +109,7 @@
   .legend .pct { color: var(--muted); font-family: var(--mono); font-size: 12px; margin-left: 3px; }
 
   .chart-box { position: relative; }
-  svg.chart { display: block; width: 100%; height: 190px; overflow: visible; }
+  svg.chart { display: block; width: 100%; height: 190px; }
   .tip { position: absolute; pointer-events: none; background: var(--raised); border: 1px solid var(--line-strong); border-radius: 6px;
          padding: 6px 9px; font-size: 12px; white-space: nowrap; transform: translate(-50%, -110%); }
   .tip b { font-family: var(--mono); color: var(--ink-strong); }
@@ -122,7 +126,9 @@
   .pill.changed { color: var(--warn); background: var(--warn-ground); }
   pre.text { margin: 0; padding: 10px 14px 14px; font: 12.5px/1.55 var(--mono); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 340px; overflow-y: auto; border-top: 1px solid var(--line); }
 
-  .msgs { display: grid; gap: 6px; }
+  /* Its own scrolling box, opened at the newest message (the bottom). */
+  .msgs { display: grid; gap: 6px; max-height: 520px; overflow-y: auto; padding-right: 4px; align-content: start; }
+  .mt { font: 11.5px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
   .role { font: 600 11px var(--mono); text-transform: uppercase; letter-spacing: .05em; padding: 0 7px; border-radius: 4px; }
   .role.system { color: #0d1626; background: var(--c-system); }
   .role.user, .role.assistant { color: #071a12; background: var(--c-history); }
@@ -230,7 +236,7 @@ function renderList() {
     const delta = d === null ? "" : `<span class="delta ${d < 0 ? "down" : "up"}">${d < 0 ? "\u2212" + fmtK(-d) : "+" + fmtK(d)}</span>`;
     return `<button class="req" data-id="${esc(r.id)}" aria-current="${r.id === state.sel}">`
       + `<span class="t">${fmtTime(r.ts).slice(0, 5)}</span>`
-      + `<span class="who">${r.x_title ? esc(r.x_title) : `<span class="none">no X-Title</span> ${esc(product(r.user_agent))}`}</span>`
+      + `<span class="who">${esc(progLabel(r))}</span>`
       + `<span class="sz">${fmtK(r.total)}</span>`
       + `<span class="meta"><span class="chan">${esc(chanLabel(r.channel))}</span><span class="bar"><i style="width:${(r.total / max * 100).toFixed(1)}%"></i></span>${delta}</span>`
       + `</button>`;
@@ -255,22 +261,24 @@ function renderDetail() {
   } else if (!f) {
     body = `<div class="empty" style="padding:6px 0">Loading the full text&hellip;</div>`;
   } else {
-    const msgs = f.messages.map(m =>
-      `<details class="block"><summary><span class="role ${esc(m.role)}">${esc(m.role)}</span><span class="preview">${esc((m.text.trim().split("\n")[0] || "(empty)"))}</span><span class="sub">${fmtK(Math.round(m.chars / 4))} tok</span></summary><pre class="text">${esc(m.text)}</pre></details>`).join("");
+    // Text goes in when a message is opened: a long session can have hundreds
+    // of messages and megabytes of tool output.
+    const msgs = f.messages.map((m, i) =>
+      `<details class="block msg" data-i="${i}"><summary><span class="mt" title="First seen by petsitter">${m.seen ? fmtTime(m.seen) : ""}</span><span class="role ${esc(m.role)}">${esc(m.role)}</span><span class="preview">${esc((m.text.trim().split("\n")[0] || "(empty)").slice(0, 300))}</span><span class="sub">${fmtK(Math.round(m.chars / 4))} tok</span></summary><pre class="text"></pre></details>`).join("");
     body = `<details class="block" ${r.system_changed ? "open" : ""}><summary><span class="name">System prompt</span>`
       + (r.seq > 1 ? `<span class="pill ${r.system_changed ? "changed" : "same"}">${r.system_changed ? "changed since the last request" : "same as the last request"}</span>` : "")
       + `<span class="sub">${fmtK(r.parts.system)} tok &middot; ${r.system_chars.toLocaleString()} chars</span></summary><pre class="text">${esc(f.system || "(none)")}</pre></details>`
       + `<details class="block"><summary><span class="name">Tools offered</span><span class="sub">${f.tools.length} tools &middot; ${fmtK(r.parts.tools)} tok</span></summary>`
       + (f.tools.length ? `<div class="tools">${f.tools.map(t => `<span class="tool">${esc(t.name)}<i>${fmtK(Math.round(t.chars / 4))}</i></span>`).join("")}</div>` : `<div class="tools"><span style="color:var(--muted)">None</span></div>`)
       + `</details>`
-      + `<div><h3>Messages <span class="note">${f.messages.length}, oldest first &middot; click one to read it</span></h3><div class="msgs">${msgs}</div></div>`;
+      + `<div><h3>Messages <span class="note">${f.messages.length}, oldest first &middot; times are when petsitter first saw each one &middot; click one to read it</span></h3><div class="msgs" id="msgs">${msgs}</div></div>`;
   }
   el.innerHTML = `
     <div class="d-head"><h2>${esc(progLabel(r))} &middot; request ${r.seq} of this conversation</h2><span class="when">${fmtTime(r.ts)}</span></div>
     <dl class="source">
       <dt>From</dt><dd>${esc(r.from || "unknown")}</dd>
-      <dt>X-Title</dt><dd>${r.x_title ? esc(r.x_title) : '<span class="none">none sent</span>'}</dd>
-      <dt>User-Agent</dt><dd>${r.user_agent ? esc(r.user_agent) : '<span class="none">none sent</span>'}</dd>
+      <dt>X-Title</dt><dd>${r.x_title ? esc(r.x_title) : '<span class="dim">&mdash;</span>'}</dd>
+      <dt>User-Agent</dt><dd>${r.user_agent ? esc(r.user_agent) : '<span class="dim">&mdash;</span>'}</dd>
       <dt>Channel</dt><dd>${esc(chanLabel(r.channel))}</dd>
       <dt>Model</dt><dd>${esc(r.model || "unknown")}</dd>
     </dl>
@@ -285,6 +293,12 @@ function renderDetail() {
     </div>
     ${body}`;
   drawChart(r);
+  const box = el.querySelector("#msgs");
+  if (box) box.scrollTop = box.scrollHeight;
+  el.querySelectorAll("details.msg").forEach(d => d.addEventListener("toggle", () => {
+    const pre = d.querySelector("pre");
+    if (d.open && !pre.textContent) pre.textContent = f.messages[+d.dataset.i].text || "(empty)";
+  }));
   if (!f) action({ action: "detail", id: r.id }).then(d => { full.set(r.id, d); if (state.sel === r.id) renderDetail(); }).catch(() => {});
 }
 
@@ -292,9 +306,11 @@ function renderDetail() {
 function drawChart(sel) {
   const pts = REQS.filter(r => r.conv === sel.conv).sort((a, b) => a.seq - b.seq);
   const box = document.getElementById("chart-box");
-  const W = 640, H = 190, L = 44, R = 14, T = 12, B = 26;
+  // Drawn at the box's real pixel width: a fixed viewBox stretched to fit
+  // distorts the axis text whenever the pane is much wider or narrower.
+  const W = Math.max(280, Math.round(box.clientWidth || 640)), H = 190, L = 44, R = 14, T = 12, B = 26;
   const maxV = Math.max(1, ...pts.map(p => p.total));
-  const step = maxV > 40000 ? 20000 : maxV > 8000 ? 5000 : maxV > 2000 ? 1000 : maxV > 400 ? 200 : 50;
+  const step = maxV > 100000 ? 50000 : maxV > 40000 ? 20000 : maxV > 8000 ? 5000 : maxV > 2000 ? 1000 : maxV > 400 ? 200 : 50;
   const top = Math.ceil(maxV / step) * step;
   const x = i => L + (pts.length === 1 ? (W - L - R) / 2 : (i / (pts.length - 1)) * (W - L - R));
   const y = v => T + (1 - v / top) * (H - T - B);
@@ -310,7 +326,7 @@ function drawChart(sel) {
   const area = line + `L${x(pts.length - 1).toFixed(1)},${y(0)}L${x(0).toFixed(1)},${y(0)}Z`;
   const si = pts.findIndex(p => p.id === sel.id);
   const marks = pts.map((p, i) => `<circle cx="${x(i)}" cy="${y(p.total)}" r="${i === si ? 5.5 : 3}" fill="${i === si ? "var(--accent)" : "var(--ground)"}" stroke="var(--accent)" stroke-width="2"/>`).join("");
-  box.innerHTML = `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Context size per request in this conversation">
+  box.innerHTML = `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Context size per request in this conversation">
       ${grid}
       <path d="${area}" fill="var(--accent)" fill-opacity=".08"/>
       <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"/>
@@ -354,6 +370,11 @@ document.getElementById("clear").addEventListener("click", () => {
   action({ action: "clear" }).catch(() => {});
   REQS.length = 0; full.clear(); state.sel = null; state.follow = true; render();
 });
+
+let _rz;
+window.addEventListener("resize", () => { clearTimeout(_rz); _rz = setTimeout(() => {
+  const r = REQS.find(x => x.id === state.sel); if (r && document.getElementById("chart-box")) drawChart(r);
+}, 150); });
 
 const source = new EventSource("events");
 source.onopen = () => document.getElementById("dot").classList.add("live");

@@ -5,77 +5,73 @@ import pytest
 from petsitter.tricks.secrets_protector import SecretsProtectorTrick
 
 
+import re
+
+from petsitter.tricks.secrets_protector import MARKER_PREFIX
+
+STAND_IN = re.compile(rf"__{MARKER_PREFIX}__[0-9a-f-]{{36}}")
+
+
+def hides(text: str, value: str) -> bool:
+    """value is gone from the sanitized text, replaced by a stand-in."""
+    out = SecretsProtectorTrick()._sanitize(text)
+    return value not in out and bool(STAND_IN.search(out))
+
+
 class TestSecretsProtectorTrick:
 
-    def test_detects_openai_key(self):
-        trick = SecretsProtectorTrick()
-        sanitized = trick._sanitize("My key is sk-proj-AbcDefGhiJklMnoPqrStuVwxYz1234567890")
-        assert "sk-proj-" in sanitized
-        assert "AbcDefGhiJklMnoPqrStuVwxYz1234567890" not in sanitized
+    @pytest.mark.parametrize("text, value", [
+        # by the name it sits under (detect-secrets' keyword detector)
+        ('{"emporia_vue": {"username": "bogus@yahoo.com", "password": "magical9bjyX"}}', "magical9bjyX"),
+        ('DB_PASSWORD="hunter2xyz"', "hunter2xyz"),
+        ("api_key = 'abc123def456'", "abc123def456"),
+        # unquoted .env / YAML (our own pattern)
+        ("DB_PASSWORD=hunter2xyz", "hunter2xyz"),
+        ("export API_TOKEN=tok_9f8e7d", "tok_9f8e7d"),
+        ("db:\n  password: s3cretValue\n", "s3cretValue"),
+        # vendor keys (gitleaks' rules, and ours)
+        ('token = "ghp_abcdefghijklmnopqrstuvwxyz0123456789"', "ghp_abcdefghijklmnopqrstuvwxyz0123456789"),
+        ("xoxb-1234567890-1234567890123-abcdefghijABCDEFGHIJabcd", "abcdefghijABCDEFGHIJabcd"),
+        ("My key is sk-proj-AbcDefGhiJklMnoPqrStuVwxYz1234567890", "AbcDefGhiJklMnoPqrStuVwxYz1234567890"),
+        ("AWS key: AKIAIOSFODNN7EXAMPLE", "AKIAIOSFODNN7EXAMPLE"),
+        ("token: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8", "eyJhbGci"),
+        ("postgres://admin:Tr0ub4dor@db.example.com:5432/app", "Tr0ub4dor"),
+        # personal details
+        ("Email me at alice@example.com", "alice@example.com"),
+        ("Call me at 555-123-4567", "555-123-4567"),
+        ("My SSN is 123-45-6789", "123-45-6789"),
+        ("Card: 4111-1111-1111-1111", "4111-1111-1111-1111"),
+        ("Server at 192.168.1.1", "192.168.1.1"),
+    ])
+    def test_hides(self, text, value):
+        assert hides(text, value)
 
-    def test_detects_email(self):
-        trick = SecretsProtectorTrick()
-        sanitized = trick._sanitize("Email me at alice@example.com")
-        assert "@sanitized.local" in sanitized
-        assert "alice@example.com" not in sanitized
+    @pytest.mark.parametrize("text", [
+        "Hello, I would like to know about machine learning models.",
+        "max_tokens = 4096",
+        'password = os.environ["DB_PASSWORD"]',
+        "password = getpass()",
+        'self.api_key = config.get("api_key")',
+        'password: str = field(default="")',
+        "token: ${GITHUB_TOKEN}",
+        "const tokenizer = new Tokenizer(vocabulary_size)",
+        'sha256 = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"',
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+    ])
+    def test_leaves_alone(self, text):
+        assert SecretsProtectorTrick()._sanitize(text) == text
 
-    def test_consistent_pseudonym_for_same_secret(self):
+    def test_same_value_same_stand_in(self):
         trick = SecretsProtectorTrick()
-        s1 = trick._sanitize("alice@example.com")
-        s2 = trick._sanitize("alice@example.com")
-        assert s1 == s2
-
-    def test_different_pseudonyms_for_different_secrets(self):
-        trick = SecretsProtectorTrick()
-        s1 = trick._sanitize("alice@example.com")
-        s2 = trick._sanitize("bob@example.com")
-        assert s1 != s2
-
-    def test_restores_after_sanitize(self):
-        trick = SecretsProtectorTrick()
-        sanitized = trick._sanitize("My email is alice@example.com")
-        restored = trick._restore(sanitized)
-        assert "alice@example.com" in restored
+        assert trick._sanitize("alice@example.com") == trick._sanitize("alice@example.com")
+        assert trick._sanitize("alice@example.com") != trick._sanitize("bob@example.com")
 
     def test_restores_exact_original(self):
         trick = SecretsProtectorTrick()
-        original = "My email is alice@example.com and key is sk-proj-AbcDefGhiJklMnoPqrStuVwxYz1234567890"
+        original = '{"user": "alice@example.com", "password": "magical9bjyX", "key": "sk-proj-AbcDefGhiJklMnoPqrStuVwxYz1234567890"}'
         sanitized = trick._sanitize(original)
-        restored = trick._restore(sanitized)
-        assert restored == original
-
-    def test_detects_aws_key(self):
-        trick = SecretsProtectorTrick()
-        sanitized = trick._sanitize("AWS key: AKIAIOSFODNN7EXAMPLE")
-        assert "AKIA" in sanitized
-        assert "AKIAIOSFODNN7EXAMPLE" not in sanitized
-
-    def test_detects_jwt(self):
-        trick = SecretsProtectorTrick()
-        sanitized = trick._sanitize("token: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8")
-        assert "eyJ" not in sanitized
-
-    def test_detects_phone(self):
-        trick = SecretsProtectorTrick()
-        sanitized = trick._sanitize("Call me at 555-123-4567")
-        assert "555-" in sanitized
-        assert "555-123-4567" not in sanitized
-
-    def test_detects_ssn(self):
-        trick = SecretsProtectorTrick()
-        sanitized = trick._sanitize("My SSN is 123-45-6789")
-        assert "123-45-6789" not in sanitized
-
-    def test_detects_credit_card(self):
-        trick = SecretsProtectorTrick()
-        sanitized = trick._sanitize("Card: 4111-1111-1111-1111")
-        assert "4111-1111-1111-1111" not in sanitized
-
-    def test_detects_ip_address(self):
-        trick = SecretsProtectorTrick()
-        sanitized = trick._sanitize("Server at 192.168.1.1")
-        assert "192.168.1.1" not in sanitized
-        assert "10." in sanitized
+        assert STAND_IN.search(sanitized) and "magical9bjyX" not in sanitized
+        assert trick._restore(sanitized) == original
 
     def test_pre_hook_sanitizes_user_messages(self):
         trick = SecretsProtectorTrick()
@@ -85,9 +81,7 @@ class TestSecretsProtectorTrick:
         ]
         result = trick.pre_hook(context, {})
         assert "alice@example.com" not in result[0]["content"]
-        assert "sk-proj-" not in result[0]["content"]
         assert "AbcDefGhiJklMnoPqrStuVwxYz1234567890" not in result[1]["content"]
-        assert "sk-proj-" in result[1]["content"]
 
     def test_pre_hook_leaves_safe_text_unchanged(self):
         trick = SecretsProtectorTrick()
@@ -97,58 +91,32 @@ class TestSecretsProtectorTrick:
 
     def test_post_hook_restores_content(self):
         trick = SecretsProtectorTrick()
-        trick._vault[("email", "alice@example.com")] = "user.0001@sanitized.local"
-        trick._reverse["user.0001@sanitized.local"] = "alice@example.com"
-        context = [
-            {"role": "assistant", "content": "I will email user.0001@sanitized.local"}
-        ]
-        result = trick.post_hook(context)
-        assert "alice@example.com" in result[-1]["content"]
+        stand_in = trick._sanitize("alice@example.com")
+        result = trick.post_hook([{"role": "assistant", "content": f"I will email {stand_in}"}])
+        assert result[-1]["content"] == "I will email alice@example.com"
 
     def test_post_hook_restores_tool_call_args(self):
         trick = SecretsProtectorTrick()
-        trick._vault[("email", "alice@example.com")] = "user.0001@sanitized.local"
-        trick._reverse["user.0001@sanitized.local"] = "alice@example.com"
-        context = [
-            {
-                "role": "assistant",
-                "content": None,
-                "tool_calls": [
-                    {
-                        "id": "call_001",
-                        "type": "function",
-                        "function": {
-                            "name": "send_email",
-                            "arguments": '{"to": "user.0001@sanitized.local", "subject": "Hello"}',
-                        },
-                    }
-                ],
-            }
-        ]
+        stand_in = trick._sanitize("alice@example.com")
+        context = [{"role": "assistant", "content": None, "tool_calls": [{
+            "id": "call_001", "type": "function",
+            "function": {"name": "send_email", "arguments": f'{{"to": "{stand_in}", "subject": "Hello"}}'},
+        }]}]
         result = trick.post_hook(context)
         args = result[-1]["tool_calls"][0]["function"]["arguments"]
-        assert "alice@example.com" in args
+        assert '"to": "alice@example.com"' in args
+
+    def test_only_the_stand_in_format_is_swapped_back(self):
+        """Something that merely resembles a hidden value is never touched."""
+        trick = SecretsProtectorTrick()
+        trick._sanitize("alice@example.com")
+        reply = "user.0001@sanitized.local and __96178c403fd9__00000000-0000-4000-8000-000000000000"
+        assert trick.post_hook([{"role": "assistant", "content": reply}])[-1]["content"] == reply
 
     def test_info_declares_capability(self):
         trick = SecretsProtectorTrick()
         caps = trick.info({})
         assert caps.get("secrets_protection") is True
-
-    def test_no_false_positive_on_normal_text(self):
-        trick = SecretsProtectorTrick()
-        text = "Hello, I would like to know about machine learning models."
-        sanitized = trick._sanitize(text)
-        assert sanitized == text
-
-    def test_pseudonyms_are_format_preserving(self):
-        """Pseudonyms should keep the same general format as the original."""
-        trick = SecretsProtectorTrick()
-        sanitized = trick._sanitize("alice@example.com")
-        assert "@" in sanitized
-        assert ".local" in sanitized
-
-        sanitized2 = trick._sanitize("555-123-4567")
-        assert sanitized2.count("-") >= 2
 
 
 class TestMarkedSecrets:

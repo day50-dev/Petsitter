@@ -43,3 +43,16 @@ def test_programs_without_x_title_use_user_agent():
     t = ContextMonitorTrick()
     e = _run(t, [{"role": "user", "content": "hi"}], x_title="", ua="goose/1.5.2")
     assert e["x_title"] == "" and e["user_agent"] == "goose/1.5.2"
+
+
+def test_messages_get_first_seen_times():
+    import time
+    t = ContextMonitorTrick()
+    sys = {"role": "system", "content": "s"}
+    e1 = _run(t, [sys, {"role": "user", "content": "first"}])
+    time.sleep(0.01)
+    e2 = _run(t, [sys, {"role": "user", "content": "first"}, {"role": "assistant", "content": "ok"},
+                  {"role": "user", "content": "ok"}])
+    msgs = t.ui_action({"action": "detail", "id": e2["id"]})["messages"]
+    assert msgs[0]["seen"] == e1["ts"]                 # carried over from the earlier request
+    assert msgs[1]["seen"] == msgs[2]["seen"] == e2["ts"]   # new this request (two "ok"s kept apart)

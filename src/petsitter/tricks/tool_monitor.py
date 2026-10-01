@@ -137,6 +137,7 @@ class ToolMonitorTrick(Trick):
     __brief__ = "Shows live which tools were offered, hidden, and called"
     __display_name__ = "Tool Monitor"
     __category__ = "Diagnostics"
+    needs_window = 0   # only looks at replies, so they can stream
     ui_page = "tool_monitor.html"
     config_fields = [
         {

@@ -314,13 +314,6 @@ def _parse_p_path(path: str) -> tuple[str, str] | None:
     return host, ("/" + sub.lstrip("/") if sep else "")
 
 
-def _chunk_text(text: str, size: int = 64) -> list[str]:
-    """Split text into fixed-size pieces, preserving whitespace/content exactly."""
-    if not text:
-        return []
-    return [text[i:i + size] for i in range(0, len(text), size)]
-
-
 async def _generic_proxy(target: str, request: Request, timeout: float = 120.0,
                           extra_headers: dict | None = None) -> Response:
     """Transparently forward a request to *target* and stream back the response.
@@ -640,44 +633,13 @@ def create_app(
     app.add_middleware(_NormalizeV1Path)
 
     async def stream_chat_completions(handler: ProxyHandler, payload: dict, x_title: str, upstream_request_url: str = "", forward_headers: dict | None = None):
+        # Streams for real when no active trick needs the whole reply; otherwise
+        # buffers with keep-alive heartbeats (see ProxyHandler.chat_completions_stream).
         try:
-            result = await handler.chat_completions(payload, x_title=x_title, upstream_request_url=upstream_request_url, forward_headers=forward_headers)
-            message = result["choices"][0]["message"]
-            base = {
-                "id": result.get("id", "chatcmpl-petsitter"),
-                "object": "chat.completion.chunk",
-                "created": result.get("created", __import__("time").time()),
-                "model": result.get("model", "unknown"),
-            }
-
-            def emit(delta: dict, finish_reason: str | None = None) -> str:
-                chunk = dict(base)
-                chunk["choices"] = [{
-                    "index": 0,
-                    "delta": delta,
-                    "finish_reason": finish_reason,
-                }]
-                return f"data: {json.dumps(chunk)}\n\n"
-
-            yield emit({"role": "assistant", "content": ""})
-            reasoning = message.get("reasoning_content")
-            if reasoning:
-                for part in _chunk_text(reasoning):
-                    yield emit({"reasoning_content": part})
-            content = message.get("content")
-            if content:
-                for part in _chunk_text(content):
-                    yield emit({"content": part})
-            if "tool_calls" in message and message["tool_calls"]:
-                # Streamed tool calls must each carry "index": clients use it to
-                # tell one call's pieces from another's, and strict ones
-                # (Goose, the OpenAI SDK) mangle or reject calls without it.
-                yield emit({"tool_calls": [
-                    {**tc, "index": i} if isinstance(tc, dict) else tc
-                    for i, tc in enumerate(message["tool_calls"])
-                ]})
-            yield emit({}, finish_reason=result["choices"][0].get("finish_reason", "stop"))
-            yield "data: [DONE]\n\n"
+            async for line in handler.chat_completions_stream(
+                    payload, x_title=x_title, upstream_request_url=upstream_request_url,
+                    forward_headers=forward_headers):
+                yield line
         except Exception as e:
             import traceback
             logging.getLogger("petsitter").error(f"Error in stream_chat_completions: {e}\n{traceback.format_exc()}")
@@ -765,16 +727,16 @@ def create_app(
             return await _generic_proxy(f"{ANTHROPIC_UPSTREAM}/v1/messages", request, timeout=600.0)
 
         if streaming:
+            # Streams Anthropic's own events when no trick needs the whole
+            # reply; otherwise holds it, sending pings so the client waits.
             async def event_stream():
                 try:
-                    result = await handler.messages(payload, x_title=x_title,
-                                                    forward_headers=forward)
+                    async for chunk in handler.messages_stream(payload, x_title=x_title,
+                                                               forward_headers=forward):
+                        yield chunk
                 except Exception as e:
                     logging.getLogger("petsitter").exception("/v1/messages failed")
                     yield ac.error_event(str(e))
-                    return
-                for chunk in ac.stream_events(result):
-                    yield chunk
             return StreamingResponse(event_stream(), media_type="text/event-stream")
 
         try:

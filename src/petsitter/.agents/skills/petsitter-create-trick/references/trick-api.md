@@ -112,6 +112,61 @@ fetch("action", {method: "POST", headers: {"Content-Type": "application/json"},
   built-in demo) and `tricks/secrets_protector.py` + `secrets_protector.html`
   (a small activity log).
 
+## Reporting problems
+
+If a trick can't do all it says (a missing optional dependency, a setting
+that can't work), return what's wrong from `problems()`:
+
+```python
+def problems(self) -> list[str]:
+    if not shutil.which("rg"):
+        return ["ripgrep isn't installed, so searches fall back to grep and are "
+                "much slower. Install it with `apt install ripgrep`."]
+    return []
+```
+
+Each entry is a sentence saying what's wrong and how to fix it. Text in
+backticks is shown as code. The dashboard puts a "!" on the extension and on
+its channel in the sidebar, and shows the sentences in a card on the
+extension's page. It's called whenever the dashboard lists extensions, so keep
+it cheap. Return `[]` when all is well (the default).
+
+## Streaming replies
+
+A reply streams to the client as the model writes it. A trick with a
+`post_hook` says how much of the reply it needs to see at once with
+`needs_window`:
+
+| `needs_window` | Meaning | Examples |
+|---|---|---|
+| `-1` (default) | The whole reply. It's held until complete. | Code Validator, JSON mode |
+| `0` | None. The `post_hook` only looks, and runs once the reply has been sent, on the reassembled reply. What it changes is ignored. | Traffic Logger, Tool Monitor |
+| `N` | The last `N` characters. The reply streams with only those held back. | No em-dash (`1`), Secrets Protector (its longest stand-in) |
+
+The channel uses the largest window among its tricks, and `-1` wins outright.
+With a window of `N`, the held-back tail plus the newly arrived text goes through
+the rewriting `post_hook`s as an ordinary assistant message. Everything but the
+last `N` characters of the result is sent. So anything a trick looks for that is
+at most `N` characters long is always seen whole before any of it is sent. Tool
+calls are held to the end and reach the `post_hook` whole.
+
+A trick with a window must meet two conditions:
+
+- **Local:** its `post_hook` is right on any stretch of the reply, not only on
+  the whole thing. Replacing a character is local; capitalizing the first word
+  isn't.
+- **Idempotent:** run again on its own output, it changes nothing, because the
+  held-back tail goes through more than once.
+
+`needs_window` can be a property when the size depends on state. Secrets
+Protector's grows with the longest stand-in it has issued.
+
+While a reply is held whole, petsitter sends heartbeats so the client's timeout
+doesn't fire during a long generation. These are SSE comment lines on
+`/v1/chat/completions` and Anthropic `ping` events on `/v1/messages`. On
+`/v1/messages`, thinking blocks always pass through unchanged, and with no
+window the whole event stream does.
+
 ## Request metadata (`petsitter.observability`)
 
 ### `request_meta() -> dict`

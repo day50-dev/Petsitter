@@ -217,6 +217,36 @@ class TestProviderForUrl:
 
 
 class TestDiscoverModels:
+    async def test_base_without_v1_finds_the_v1_list(self):
+        """"https://host/11434" lists models at /v1/models, as its chats go to /v1."""
+        import petsitter.trick as trick_mod
+        trick_mod._API_ROOTS.clear()
+        with patch("httpx.AsyncClient") as client_cls:
+            get = client_cls.return_value.__aenter__.return_value.get
+            get.return_value = mock_response(200, {"data": [{"id": "llama"}]})
+            await discover_models("https://9ol.es/11434", "")
+        assert get.call_args.args[0] == "https://9ol.es/11434/v1/models"
+
+    async def test_base_whose_api_has_no_v1_is_remembered(self):
+        """GitHub Models style: /v1 404s, the bare base answers, and chats then
+        go to the bare base too."""
+        import petsitter.trick as trick_mod
+        trick_mod._API_ROOTS.clear()
+        with patch("httpx.AsyncClient") as client_cls:
+            get = client_cls.return_value.__aenter__.return_value.get
+            get.side_effect = lambda url, **kw: mock_response(404, {}) if "/v1/" in url else mock_response(200, {"data": [{"id": "m"}]})
+            await discover_models("https://models.example/inference", "")
+        assert trick_mod.chat_completions_url("https://models.example/inference") == "https://models.example/inference/chat/completions"
+        trick_mod._API_ROOTS.clear()
+
+    async def test_no_list_names_every_url_tried(self):
+        import petsitter.trick as trick_mod
+        trick_mod._API_ROOTS.clear()
+        with patch("httpx.AsyncClient") as client_cls:
+            client_cls.return_value.__aenter__.return_value.get.return_value = mock_response(404, {})
+            with pytest.raises(ValueError, match="/x/v1/models or https://h/x/models"):
+                await discover_models("https://h/x", "")
+
     async def test_openai_compatible(self):
         with patch("httpx.AsyncClient") as client_cls:
             client_cls.return_value.__aenter__.return_value.get.return_value = mock_response(

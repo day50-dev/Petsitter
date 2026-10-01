@@ -26,7 +26,7 @@
 <button class="base-chip" id="base-chip" onclick="copyBaseUrl(this)" title="Base URL: click to copy">
 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v6"/><path d="M15 2v6"/><path d="M6 8h12v4a6 6 0 0 1-12 0V8z"/><path d="M12 18v4"/></svg>
 <span id="base-chip-url"></span></button>
-<div class="try-btn btn" id="try-btn" onclick="togglePlayground()" title="Try it &mdash; send a message through this trickset">
+<div class="try-btn btn" id="try-btn" onclick="togglePlayground()" title="Try it &mdash; send a message through this channel">
 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.9 8.9 0 0 1-3.8-.9L3 21l1.9-5.1A8.4 8.4 0 0 1 12 3a8.4 8.4 0 0 1 9 8.5z"/></svg>
 </div>
 <div class="pause-btn btn" id="pause-btn" onclick="togglePause()" title="Pause: forward every request untouched, no tricks, without shutting petsitter down">
@@ -352,7 +352,7 @@ User-Agent, when it sends no X-Title), and which channel its requests went to. K
 <div class="settings-group">
 <div class="setting-row">
 <label class="setting-label" for="ts-loglevel">Log level</label>
-<select id="ts-loglevel" onchange="saveLoglevel(this.value)" title="Log level for this trickset's log file">
+<select id="ts-loglevel" onchange="saveLoglevel(this.value)" title="Log level for this channel's log file">
 <option value="DEBUG">DEBUG</option>
 <option value="INFO">INFO</option>
 <option value="WARNING">WARNING</option>
@@ -362,8 +362,8 @@ User-Agent, when it sends no X-Title), and which channel its requests went to. K
 <div class="setting-row">
 <label class="setting-label" for="ts-logfile">Log file</label>
 <div class="setting-input-row">
-<input type="text" id="ts-logfile" spellcheck="false" autocomplete="off" placeholder="e.g. ~/.cache/petsitter/tricksets/name.log" title="Absolute path to this trickset's log file">
-<button class="btn btn-secondary btn-sm" onclick="saveLogfile()" title="Save this trickset's log file path">Save</button>
+<input type="text" id="ts-logfile" spellcheck="false" autocomplete="off" placeholder="e.g. ~/.cache/petsitter/tricksets/name.log" title="Absolute path to this channel's log file">
+<button class="btn btn-secondary btn-sm" onclick="saveLogfile()" title="Save this channel's log file path">Save</button>
 </div>
 </div>
 </div>
@@ -379,7 +379,7 @@ User-Agent, when it sends no X-Title), and which channel its requests went to. K
 <div class="tab-pane" id="tab-help">
 <div class="card">
 <div style="margin-bottom:16px">
-<button class="btn btn-accent" id="btn-install-examples" onclick="installExamples()" title="Install example tricksets and tricks">Install Examples</button>
+<button class="btn btn-accent" id="btn-install-examples" onclick="installExamples()" title="Install the example channels and their extensions">Install Examples</button>
 <div id="install-examples-result" style="margin-top:8px"></div>
 </div>
 <div id="help-content"><div class="loader">Loading help...</div></div>
@@ -434,7 +434,8 @@ function switchTab(name) {
   if (name === 'help') loadHelpContent();
   if (name === 'connecting') paintBaseUrl();
   if (name === 'newchannel' && (arriving || _newChanPrefill)) openRuleEditor(true);
-  if (name === 'models') renderModels('_default', _cachedConfiguredModels);
+  // Always from the server: either picker (or the pet CLI) may have changed it.
+  if (name === 'models') { fetchModels(); if (arriving) restoreProviderSelection(); }
   if (name === 'settings') renderChannelModels();
   if (name === 'logs') {
     populateTsLogSelect();
@@ -727,24 +728,20 @@ function renderDiscovered() {
     return;
   }
   list.innerHTML = `<div class="disc-table">`
-    + `<div class="disc-row disc-head"><span>X-Title header</span><span>User-Agent</span><span>Models</span><span>Went to</span><span>Requests</span><span></span></div>`
+    + `<div class="disc-row disc-head"><span>X-Title / User-Agent</span><span>Models</span><span>Went to</span><span>Requests</span><span></span></div>`
     + programs.map(p => {
       const models = Object.entries(p.models || {}).sort((a, b) => b[1] - a[1]);
       const chans = Object.entries(p.channels || {}).sort((a, b) => b[1] - a[1]);
       const topModel = models.length ? models[0][0] : '';
+      // X-Title when it sends one, else its (most used) User-Agent
       const uas = Object.entries(p.user_agents || {}).sort((a, b) => b[1] - a[1]);
-      const xt = p.x_title
-        ? `<code>${escapeHtml(p.x_title)}</code>`
-        : `<span class="disc-none" title="Sends no X-Title header: catch it by User-Agent or model">none sent</span>`;
-      const ua = uas.length
-        ? uas.slice(0, 2).map(([u, n]) => `<code title="${n} requests">${escapeHtml(u)}</code>`).join(' ') + (uas.length > 2 ? ` <i>+${uas.length - 2}</i>` : '')
-        : '<span class="disc-dim">&mdash;</span>';
+      const who = p.x_title || (uas.length ? uas[0][0] : '');
+      const xt = who ? `<code title="${escapeHtml(who)}">${escapeHtml(who)}</code>` : '<span class="disc-dim">&mdash;</span>';
       const key = escapeHtml(JSON.stringify(p.key || p.x_title));
       const k = p.key || p.x_title;
       const open = _discOpen.has(k);
       return `<div class="disc-row${open ? ' open' : ''}" data-key="${escapeHtml(k)}" onclick="if(!event.target.closest('button,a'))toggleDiscovered(this.dataset.key)" title="Click to see the headers it sends">`
-        + `<span><span class="disc-caret" aria-hidden="true">${open ? '&#9662;' : '&#9656;'}</span>${xt}</span>`
-        + `<span class="disc-uas">${ua}</span>`
+        + `<span class="disc-who"><span class="disc-caret" aria-hidden="true">${open ? '&#9662;' : '&#9656;'}</span>${xt}</span>`
         + `<span class="disc-models">${models.map(([m, n]) => `<code title="${n} requests">${escapeHtml(m)}</code>`).join(' ') || '&mdash;'}</span>`
         + `<span class="disc-chans">${chans.map(([c, n]) => `<a href="#" class="disc-chan" onclick="openChannel(${escapeHtml(JSON.stringify(c))});return false" title="${n} requests">${c === '_default' ? '&lowast; Default' : '#' + escapeHtml(c)}</a>`).join(' ')}</span>`
         + `<span class="disc-n">${p.count}<i>${_ago(p.ago)}</i></span>`
@@ -843,10 +840,18 @@ function paintUpstream() {
   const u = _upstream;
   if (!u || u.ok) { el.innerHTML = ''; return; }
   el.innerHTML = `<section class="upstream-error">`
+    + `<button class="upstream-dismiss" onclick="dismissUpstream()" title="Dismiss" aria-label="Dismiss">&times;</button>`
     + `<div class="upstream-error-head"><span class="chan-alert">!</span>`
     + `<div><b>Unable to reach <code>${escapeHtml(u.target)}</code></b>`
     + `<div class="upstream-error-sub">${u.status ? 'HTTP ' + u.status + ' &middot; ' : ''}${_ago(u.ago)}. Clears on the next request that gets through.</div></div></div>`
     + `<pre>${escapeHtml(u.error || '(no detail)')}</pre></section>`;
+}
+
+async function dismissUpstream() {
+  _upstream = null;
+  paintUpstream();
+  if (typeof renderChannelRail === 'function') renderChannelRail();
+  try { await fetchJSON('/api/upstream/clear', {method: 'POST'}); } catch(e) { showToast(e.message, true); }
 }
 
 async function fetchInfo() {
@@ -917,6 +922,7 @@ let _dragName = null;
 // the community index). An entry is identified by extKey(), so an installed
 // trick and its catalog entry land on the same page.
 let _installed = [];
+let _allTricks = [];   // every channel's, for the sidebar's "!"
 let _catalog = [];
 let _extSel = null;          // extKey of the extension shown in the detail pane
 let _extView = 'details';    // live | details | source
@@ -953,11 +959,30 @@ function _matchesSearch(e) {
   return hay.includes(trickSearch);
 }
 
+// Channels with a turned-on extension reporting a problem (Trick.problems),
+// as a string so a change is easy to spot.
+function _channelProblems() {
+  return [...new Set(_allTricks.filter(t => t.enabled !== false && (t.problems || []).length)
+    .map(t => t.trickset))].sort().join('\n');
+}
+
+function _problemCard(e) {
+  const ps = e.problems || [];
+  if (!ps.length) return '';
+  const md = s => escapeHtml(s).replace(/`([^`]+)`/g, '<code>$1</code>');
+  return `<section class="upstream-error ext-problem"><div class="upstream-error-head"><span class="chan-alert">!</span>`
+    + `<div><b>${ps.length === 1 ? 'Not fully working' : `${ps.length} problems`}</b>`
+    + ps.map(p => `<div class="ext-problem-line">${md(p)}</div>`).join('') + `</div></div></section>`;
+}
+
 async function fetchTricks() {
   const el = document.getElementById('loaded-tricks');
   try {
     const all = await fetchJSON('/api/tricks');
+    const hadProblems = _channelProblems();
+    _allTricks = all;
     _installed = all.filter(t => t.trickset === selectedTrickset);
+    if (_channelProblems() !== hadProblems) renderChannelRail();
   } catch(e) { el.innerHTML = '<div class="loader">Error loading extensions</div>'; return; }
   document.getElementById('ext-installed-count').textContent = _installed.length || '';
   if (_extViewPending && _extSel) { _extView = _defaultExtView(_extSel); _extViewPending = false; }
@@ -974,6 +999,7 @@ async function fetchTricks() {
       return `<div class="trick-item ext-item${key === _extSel ? ' selected' : ''}${on ? '' : ' is-off'}" draggable="true" data-name="${escapeHtml(t.name)}" data-id="${escapeHtml(t.id || '')}" data-key="${escapeHtml(key)}" onclick="selectExt(this.dataset.key)" title="${escapeHtml(extTagline(t) || nm)}">`
         + extAvatar(nm, t.category)
         + `<div class="info"><div class="name">${escapeHtml(nm)}</div><div class="brief">${escapeHtml(extTagline(t))}</div></div>`
+        + (on && (t.problems || []).length ? `<span class="chan-alert" title="${escapeHtml(t.problems.join(' '))}">!</span>` : '')
         + `<button class="toggle ${on ? 'on' : 'off'}" onclick="event.stopPropagation();toggleTrick(this,'${escapeHtml(t.name)}',${!on})" title="${on ? 'Turn off' : 'Turn on'}" aria-label="${on ? 'Turn off' : 'Turn on'} ${escapeHtml(nm)}"></button>`
         + `</div>`;
     }).join('');
@@ -1210,7 +1236,7 @@ function _howToUse(e, installed) {
   if (e.keywords && e.keywords.length) {
     rows.push(['Turns on', `only for messages that mention ${e.keywords.map(k => `<code>${escapeHtml(k)}</code>`).join(' or ')}.`]);
   } else {
-    rows.push(['Turns on', 'by itself. Once installed, it works on every request from the tools using this trickset. Nothing to type.']);
+    rows.push(['Turns on', 'by itself. Once installed, it works on every request in this channel. Nothing to type.']);
   }
   if (kw) {
     rows.push(['In a message', `type <code>(${escapeHtml(kw)}: &hellip;)</code> anywhere, and petsitter handles it before the model sees it.`]);
@@ -1225,10 +1251,16 @@ function _howToUse(e, installed) {
       : 'Install it, and a Live tab shows it working as your AI tool runs.']);
   }
   if ((e.config_fields || []).length) {
-    const labels = e.config_fields.map(f => escapeHtml(f.label || f.key)).join(', ');
-    rows.push(['Settings', installed
-      ? `${labels}. <a href="#" onclick="openTrickConfig('${escapeHtml(e.id || '')}');return false">Change them</a>.`
-      : `${labels}. You can change these after installing.`]);
+    // The values in use, so you can see where things are without opening Settings.
+    const fmt = v => v === '' || v === null || v === undefined ? '<span class="glance-dim">not set</span>'
+      : typeof v === 'boolean' ? (v ? 'on' : 'off') : `<code>${escapeHtml(String(v))}</code>`;
+    const live = installed && Array.isArray(e.settings) ? e.settings : null;
+    const pairs = live
+      ? live.map(x => `<span class="glance-k">${escapeHtml(x.label)}</span>${fmt(x.value)}`)
+      : e.config_fields.map(f => `<span class="glance-k">${escapeHtml(f.label || f.key)}</span>${fmt(f.default)}`);
+    rows.push(['Settings', `<div class="glance-settings">${pairs.join('')}</div>`
+      + (installed ? `<a href="#" onclick="openTrickConfig('${escapeHtml(e.id || '')}');return false">Change</a>`
+                   : '<span class="glance-dim">Defaults shown; you can change them after installing.</span>')]);
   }
   return `<div class="ext-how"><h3>At a glance</h3><dl>`
     + rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('') + `</dl></div>`;
@@ -1255,7 +1287,7 @@ function renderExtDetail() {
   if (inst) {
     actions = `<label class="ext-onoff"><button class="toggle ${on ? 'on' : 'off'}" onclick="setTrickEnabled('${escapeHtml(inst.id || '')}','${escapeHtml(inst.name)}',${!on})" aria-label="${on ? 'Turn off' : 'Turn on'}"></button><span>${on ? 'On' : 'Off'}</span></label>`
       + ((e.config_fields || []).length || e.prompt_keyword ? `<button class="btn btn-secondary" onclick="openTrickConfig('${escapeHtml(inst.id || '')}')">Settings</button>` : '')
-      + `<button class="btn btn-secondary" onclick="togglePlayground()" title="Send a test message through this trickset">Try it</button>`
+      + `<button class="btn btn-secondary" onclick="togglePlayground()" title="Send a test message through this channel">Try it</button>`
       + `<button class="btn btn-danger" onclick="unloadTrick('${escapeHtml(inst.id || '')}','${escapeHtml(inst.name)}')">Uninstall</button>`;
   } else if (e.source === 'community') {
     const a = escapeHtml(JSON.stringify(e.name)), v = escapeHtml(JSON.stringify(e.version));
@@ -1300,7 +1332,7 @@ function renderExtDetail() {
     + `<h2>${escapeHtml(nm)}${inst ? `<span class="ext-badge">Installed</span>${where}` : ''}</h2>`
     + `<div class="ext-sub">${escapeHtml(extTagline(e))}</div>`
     + `<div class="ext-from">${e.category ? escapeHtml(e.category) + ' &middot; ' : ''}${from}</div>`
-    + `<div class="ext-actions">${actions}</div></div></div>` + tabs + `<div class="ext-body">${body}</div>`;
+    + `<div class="ext-actions">${actions}</div></div></div>` + (inst && on ? _problemCard(e) : '') + tabs + `<div class="ext-body">${body}</div>`;
 
   queueFitExtPanes();
   if (_extView === 'source') _loadExtSource(e);
@@ -1915,6 +1947,7 @@ function renderChannelRail() {
     const t = (_traffic.tricksets || []).find(x => x.name === n);
     const live = t && t.ago < 60;
     const sentence = ruleSentence(n).replace(/<[^>]+>/g, '');
+    const hurt = _allTricks.filter(x => x.trickset === n && x.enabled !== false && (x.problems || []).length);
     let tip = sentence + (t ? ` · ${t.count} request${t.count === 1 ? '' : 's'}, last ${_ago(t.ago)}` : off ? '' : ' · no requests yet');
     if (n === '_default' && catchAll) tip += ` · never used while ${catchAll.name} matches every request`;
     const words = ruleLabel(n).replace(/[^A-Za-z0-9]+/g, ' ').trim().split(' ');
@@ -1923,7 +1956,8 @@ function renderChannelRail() {
       + `<span class="chan-abbr" aria-hidden="true">${escapeHtml(abbr)}</span>`
       + `<span class="chan-glyph">${n === '_default' ? '∗' : '#'}</span>`
       + `<span class="chan-name">${escapeHtml(ruleLabel(n))}</span>`
-      + (n === '_default' && catchAll ? `<span class="chan-alert" title="Default never runs: #${escapeHtml(catchAll.name)} matches every request">!</span>` : '')
+      + (n === '_default' && catchAll ? `<span class="chan-alert" title="Default never runs: #${escapeHtml(catchAll.name)} matches every request">!</span>`
+         : hurt.length ? `<span class="chan-alert" title="${escapeHtml(hurt.map(t => (t.display_name || t.name) + ': ' + t.problems.join(' ')).join(' · '))}">!</span>` : '')
       + (off ? '<span class="chan-off">off</span>'
              : t ? `<span class="chan-count${live ? ' live' : ''}">${t.count > 999 ? '999+' : t.count}</span>` : '')
       + `</button>`;
@@ -2766,6 +2800,10 @@ async function setModelForScope(scope, key, model_url, model_name, api_key) {
     if (scope === '_default') {
       await fetchJSON('/api/models', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({set_model: {key, model_url, model: model_name, api_key}})});
       fetchInfo();
+      // Both views of the global model (Simple's provider picker and
+      // Advanced's role list) re-read what was just saved.
+      fetchModels();
+      if (key === 'default') restoreProviderSelection();
     } else {
       const ts = _tsModels[scope] || {};
       const entry = {url: model_url};
@@ -2916,7 +2954,7 @@ async function refreshTricksetLog() {
     fileEl.title = d.logfile;
     viewer.innerHTML = '';
     if (d.missing) {
-      viewer.innerHTML = '<div class="empty">No log entries yet for this trickset.</div>';
+      viewer.innerHTML = '<div class="empty">No log entries yet for this channel.</div>';
       countEl.textContent = '0 entries';
       return;
     }

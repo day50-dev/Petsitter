@@ -165,8 +165,9 @@ class TestPPathEndpoint:
 
     @pytest.mark.asyncio
     async def test_stream_chat_completions_returns_valid_chunked_stream(self):
-        """stream:true returns a spec-shaped chunked SSE stream even though the
-        upstream call is buffered, preserving reasoning_content."""
+        """stream:true returns a spec-shaped chunked SSE stream when a trick
+        holds the reply (so the upstream call is buffered), preserving
+        reasoning_content."""
         from httpx import AsyncClient, ASGITransport
 
         app = create_app(model_url="", model_name=None, api_key="", trick_paths=[])
@@ -189,7 +190,8 @@ class TestPPathEndpoint:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("httpx.AsyncClient", return_value=mock_client):
+        with patch("httpx.AsyncClient", return_value=mock_client), \
+                patch("petsitter.proxy.channel_window", return_value=(-1, [], [])):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 async with ac.stream(
                     "POST",

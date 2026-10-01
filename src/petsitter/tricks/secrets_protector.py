@@ -2,14 +2,21 @@
 
 It's easy to paste a config file, a stack trace or a `.env` into a chat without
 noticing the API key or database password in it. This trick finds those before
-the request leaves petsitter and replaces them with harmless look-alikes (for
-example `alice@example.com` becomes `user.0001@sanitized.local`). When the model
-mentions or uses a stand-in, in its reply or in a tool call, the real value is
-put back, so your tool still gets working output.
+the request leaves petsitter and replaces each with an opaque stand-in like
+`__96178c403fd9__d4360d48-...`. When the model mentions or uses a stand-in, in
+its reply or in a tool call, the real value is put back, so your tool still gets
+working output. The model is never told a swap happened.
 
-Detected automatically: OpenAI, Anthropic, AWS, Google and Stripe keys; JWT,
-GitHub, Slack and Bearer tokens; database URLs and private keys; emails, phone
-numbers, SSNs, credit card numbers and IP addresses.
+Detected automatically:
+
+- passwords and secrets by the name they sit under, in most syntaxes:
+  `"password": "..."`, `api_key = '...'`, `DB_PASSWORD=...`, `secret: ...`
+- about 200 kinds of vendor keys and tokens (OpenAI, Anthropic, AWS, GitHub,
+  Slack, Stripe, Google...), database URLs and private keys
+- emails, phone numbers, SSNs, card numbers and IP addresses
+
+Code that only *refers* to a secret (`password = os.environ["DB_PASSWORD"]`,
+`token: ${GITHUB_TOKEN}`) is left alone.
 
 ## How to use
 
@@ -34,20 +41,25 @@ directly before a `)`.
 ## How it works
 
 - `pre_hook` runs on every request, over the whole history, since your tool
-  resends it each time. Marked values become opaque stand-ins like
-  `__96178c403fd9__d4360d48-...`; the model is never told a swap happened. The
-  proxy leaves the keyword in place for this (`strip_prompt_keyword = False`).
-- Stand-ins are an HMAC of the value under a per-process key: the same value
-  always gets the same stand-in, and it reveals nothing. Marked values that
-  reappear in clear (restored replies, tool calls, tool results that echo them)
-  are swapped out again, including their JSON-escaped form.
-- Auto-detected values get a random, format-preserving pseudonym from a vault
-  (same value, same pseudonym, for the life of the process). Only `user` and
-  `tool` messages are scanned; overlapping matches keep the earliest, longest.
-- `post_hook` restores both kinds in the reply text and in tool call arguments
-  (JSON-escaped there).
-- The patterns are broad: a 10-digit number reads as a phone number and a
-  dotted version string like `1.2.3.4` as an IP address.
+  resends it each time. The proxy leaves the keyword in place for this
+  (`strip_prompt_keyword = False`).
+- Detection (`petsitter/secret_scan.py`) combines three sources, since no one
+  covers what people paste into a chat: gitleaks' rules for vendor keys
+  (bundled in `petsitter/data/`), detect-secrets' keyword detector for values
+  named as secrets, and petsitter's own patterns for unquoted `.env`/YAML lines
+  and personal details. Only `user` and `tool` messages are scanned;
+  overlapping matches keep the earliest, longest. Results are cached per
+  message, so a long history isn't rescanned on every request.
+- Every stand-in, marked or detected, is an HMAC of the value under a
+  per-process key: the same value always gets the same stand-in, and it
+  reveals nothing. Hidden values that reappear in clear (restored replies,
+  tool calls, tool results that echo them) are swapped out again, including
+  their JSON-escaped form.
+- `post_hook` puts the real values back in the reply text and in tool call
+  arguments (JSON-escaped there). Only the stand-in format is swapped back,
+  so nothing else in the reply can be mistaken for one.
+- The personal-detail patterns are broad: a 10-digit number reads as a phone
+  number and a dotted version string like `1.2.3.4` as an IP address.
 """
 
 import hashlib
@@ -57,57 +69,10 @@ import re
 import secrets
 import time
 import uuid
-from typing import Callable
 
+from petsitter import secret_scan
+from petsitter.secret_scan import find_secrets
 from petsitter.trick import Trick, find_prompt_keyword_patterns
-
-# (compiled_pattern, type_label, pseudonym_generator(counter) -> str)
-# Order is by specificity — more specific patterns first reduces false positives.
-_PATTERNS: list[tuple[re.Pattern, str, Callable[[int], str]]] = [
-    # --- API Keys ---
-    (re.compile(r'sk-proj-[A-Za-z0-9]{20,}'), "openai_proj_key",
-     lambda c: f"sk-proj-{secrets.token_urlsafe(32)}"),
-    (re.compile(r'(?<!proj-)sk-[A-Za-z0-9]{20,}'), "openai_key",
-     lambda c: f"sk-{secrets.token_urlsafe(32)}"),
-    (re.compile(r'sk-ant-[A-Za-z0-9]{20,}'), "anthropic_key",
-     lambda c: f"sk-ant-{secrets.token_urlsafe(32)}"),
-    (re.compile(r'AKIA[0-9A-Z]{16}'), "aws_key",
-     lambda c: f"AKIA{secrets.token_hex(8).upper()}"),
-    (re.compile(r'eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}'), "jwt",
-     lambda c: f"{secrets.token_urlsafe(12)}.{secrets.token_urlsafe(32)}.{secrets.token_urlsafe(27)}"),
-    (re.compile(r'(?:ghp_|gho_|ghu_|ghs_|ghr_)[A-Za-z0-9]{36}'), "github_token",
-     lambda c: f"ghp_{secrets.token_urlsafe(27)}"),
-    (re.compile(r'AIza[0-9A-Za-z_-]{35}'), "google_api_key",
-     lambda c: f"AIza{secrets.token_urlsafe(26)}"),
-    (re.compile(r'(?:sk_live_|pk_live_|sk_test_|pk_test_)[A-Za-z0-9]{24}'), "stripe_key",
-     lambda c: f"sk_live_{secrets.token_urlsafe(18)}"),
-    # --- Tokens ---
-    (re.compile(r'Bearer\s+[A-Za-z0-9-_.=]{30,}'), "bearer_token",
-     lambda c: f"Bearer {secrets.token_urlsafe(32)}"),
-    (re.compile(r'(?:xox[abprs])-[0-9]{10,13}-[0-9]{10,13}-[A-Za-z0-9]{24}'), "slack_token",
-     lambda c: f"xoxb-{c:010d}-{c*17%10_000_000_000:010d}-{secrets.token_urlsafe(18)}"),
-    # --- Credentials ---
-    (re.compile(r'(?:postgres(?:ql)?|mysql|mongodb(?:\\+srv)?|redis|rediss)://[^\s\'\"<>]+'),
-     "database_url",
-     lambda c: f"postgresql://user_{c}:redacted@db.internal:5432/db_{c}"),
-    (re.compile(r'-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KEY-----'
-                r'[\s\S]*?'
-                r'-----END\s+(?:RSA\s+)?PRIVATE\s+KEY-----'),
-     "private_key",
-     lambda c: f"-----BEGIN PRIVATE KEY-----\n{secrets.token_urlsafe(64)}\n-----END PRIVATE KEY-----"),
-    # --- PII ---
-    (re.compile(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'), "email",
-     lambda c: f"user.{c:04d}@sanitized.local"),
-    (re.compile(r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b'), "phone",
-     lambda c: f"555-0{c%100:02d}-{(c*17+1234)%10000:04d}"),
-    (re.compile(r'\b\d{3}-\d{2}-\d{4}\b'), "ssn",
-     lambda c: f"{c%100:02d}-{(c*7)%100:02d}-{(c*13+4567)%10000:04d}"),
-    (re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b'), "ip_address",
-     lambda c: f"10.{c//256%256}.{c%256}.{c%254+1}"),
-    (re.compile(r'\b(?:\d{4}[-\s]?){3}\d{4}\b'), "credit_card",
-     lambda c: f"4111-1111-1111-{c%10000:04d}"),
-]
-
 
 # Every hand-marked stand-in starts with this, so the way back can find them
 # without guessing. It's fixed rather than per-process so a stand-in the model
@@ -122,22 +87,22 @@ _MARKER_RE = re.compile(
 class SecretsProtectorTrick(Trick):
     """Protect secrets by pseudonymizing them before reaching the model."""
 
-    __brief__ = "Pseudonymizes API keys, tokens, and PII before sending to the model"
+    __brief__ = "Hides passwords, API keys and personal details from the model, and puts them back in its replies"
     __display_name__ = "Secrets Protector"
     __category__ = "Safety & Privacy"
     prompt_keyword = "secret"
     strip_prompt_keyword = False
 
-    def __init__(self, patterns: list | None = None):
-        self._patterns = patterns if patterns is not None else _PATTERNS
-        self._vault: dict[tuple[str, str], str] = {}
-        self._reverse: dict[str, str] = {}
-        self._counters: dict[str, int] = {}
-        # Hand-marked secrets: stand-in -> original. The stand-in is an HMAC of
+    def __init__(self):
+        # Every hidden value, marked by hand or detected: stand-in -> original. The stand-in is an HMAC of
         # the value, so the same secret gets the same stand-in on every resend
         # of the history without the stand-in revealing anything about it.
         self._key = secrets.token_bytes(32)
         self._marked: dict[str, str] = {}
+
+    # Every stand-in is the same length, so the reply can stream with only
+    # that much held back (see reply_window).
+    needs_window = len(f"__{MARKER_PREFIX}__") + 36
 
     def _marker(self, value: str) -> str:
         digest = hmac.new(self._key, value.encode(), hashlib.sha256).digest()
@@ -209,38 +174,19 @@ class SecretsProtectorTrick(Trick):
                 func["arguments"] = self._hide_marked(args)
 
     def _pseudonym(self, original: str, secret_type: str) -> str:
-        key = (secret_type, original)
-        existing = self._vault.get(key)
-        if existing is not None:
-            return existing
-        counter = self._counters.get(secret_type, 0) + 1
-        self._counters[secret_type] = counter
-        for _, t, gen in self._patterns:
-            if t == secret_type:
-                pseudonym = gen(counter)
-                break
-        else:
-            pseudonym = f"__{secret_type}_{counter}__"
-        self._vault[key] = pseudonym
-        self._reverse[pseudonym] = original
-        self._announce_hidden(secret_type, pseudonym)
-        return pseudonym
+        """A detected value's stand-in: the same opaque marker a hand-marked
+        one gets, so the way back only ever swaps something unmistakably ours."""
+        marker = self._marker(original)
+        if marker not in self._marked:
+            self._announce_hidden(secret_type, marker)
+        self._marked[marker] = original
+        return marker
 
     def _find_spans(self, text: str) -> list[tuple[int, int, str, str]]:
-        spans: list[tuple[int, int, str, str]] = []
-        for pattern, secret_type, _ in self._patterns:
-            for m in pattern.finditer(text):
-                spans.append((m.start(), m.end(), m.group(0), secret_type))
-        if not spans:
-            return []
-        spans.sort(key=lambda x: (x[0], -(x[1] - x[0])))
-        merged: list[tuple[int, int, str, str]] = []
-        last_end = 0
-        for start, end, match, stype in spans:
-            if start >= last_end:
-                merged.append((start, end, match, stype))
-                last_end = end
-        return merged
+        return find_secrets(text)
+
+    def problems(self) -> list[str]:
+        return secret_scan.problems()
 
     def _sanitize(self, text: str) -> str:
         if _MARKER_RE.search(text):
@@ -267,13 +213,7 @@ class SecretsProtectorTrick(Trick):
         return "".join(parts)
 
     def _restore(self, text: str) -> str:
-        if not self._reverse:
-            return text
-        for pseudonym in sorted(self._reverse, key=len, reverse=True):
-            original = self._reverse[pseudonym]
-            if pseudonym in text:
-                text = text.replace(pseudonym, original)
-        return text
+        return self._reveal_marked(text)
 
     def _content_messages(self, context: list) -> list:
         roles = {"user", "tool"}
@@ -301,7 +241,7 @@ class SecretsProtectorTrick(Trick):
         content = last.get("content")
         if content and isinstance(content, str):
             self._announce_restored(content, "the reply")
-            last["content"] = self._reveal_marked(self._restore(content))
+            last["content"] = self._reveal_marked(content)
         tool_calls = last.get("tool_calls")
         if tool_calls:
             for tc in tool_calls:
@@ -309,7 +249,7 @@ class SecretsProtectorTrick(Trick):
                 args = func.get("arguments", "")
                 if args and isinstance(args, str):
                     self._announce_restored(args, f"a call to {func.get('name') or 'a tool'}")
-                    func["arguments"] = self._reveal_marked(self._restore(args), in_json=True)
+                    func["arguments"] = self._reveal_marked(args, in_json=True)
         return context
 
     # -- live page -------------------------------------------------------------
@@ -334,16 +274,17 @@ class SecretsProtectorTrick(Trick):
         "email": "an email address", "phone": "a phone number",
         "ssn": "a Social Security number", "ip_address": "an IP address",
         "credit_card": "a card number", "marked": "a value you marked",
+        "credential": "a password or secret",
     }
 
     def _announce_hidden(self, kind: str, stand_in: str) -> None:
-        label = self.KIND_LABELS.get(kind, "a " + kind.replace("_", " "))
+        # gitleaks rule ids read well enough as words: "a github pat"
+        label = self.KIND_LABELS.get(kind) or "a " + kind.removeprefix("gitleaks:").replace("_", " ").replace("-", " ")
         self.publish({"event": "hidden", "kind": kind, "label": label,
                       "stand_in": stand_in, "ts": time.time()})
 
     def _announce_restored(self, text: str, where: str) -> None:
-        found = [p for p in self._reverse if p in text]
-        found += [m for m in _MARKER_RE.findall(text) if m in self._marked]
+        found = [m for m in _MARKER_RE.findall(text) if m in self._marked]
         if found:
             self.publish({"event": "restored", "where": where,
                           "stand_ins": sorted(set(found)), "ts": time.time()})

@@ -84,21 +84,44 @@ def get_model_config(key: str = "default") -> dict[str, Any]:
     )
 
 
-def chat_completions_url(base: str) -> str:
-    """The chat endpoint for a configured model URL, whichever way it was written.
+# A configured model URL can be written with /v1 ("http://localhost:11434/v1"),
+# without it ("http://localhost:11434"), or as the whole endpoint. Usually the
+# API lives under /v1 either way, but not always: GitHub Models is at
+# ".../inference/chat/completions". So a base without /v1 has two candidate
+# API roots, tried in order; whichever answers first (a model list, or a chat)
+# is remembered here and used from then on.
+_API_ROOTS: dict[str, str] = {}
 
-    Provider catalogs, and most docs, give the OpenAI base *with* /v1
-    ("http://localhost:11434/v1"); hand-written configs often leave it off
-    ("http://localhost:11434"); some paste the whole endpoint. All three mean
-    the same thing, and appending "/v1/chat/completions" blindly turned the
-    first into ".../v1/v1/chat/completions".
-    """
+
+def _base_key(base: str) -> str:
+    u = (base or "").strip().rstrip("/")
+    for suffix in ("/chat/completions", "/models"):
+        if u.endswith(suffix):
+            u = u[: -len(suffix)]
+    return u
+
+
+def api_root_candidates(base: str) -> list[str]:
+    """Where the OpenAI-style API may live for this base, most likely first."""
+    u = _base_key(base)
+    if u.endswith("/v1"):
+        return [u]
+    found = _API_ROOTS.get(u)
+    rest = [r for r in (u + "/v1", u) if r != found]
+    return ([found] if found else []) + rest
+
+
+def learn_api_root(base: str, root: str) -> None:
+    """Remember that this base's API answered at root."""
+    _API_ROOTS[_base_key(base)] = root
+
+
+def chat_completions_url(base: str) -> str:
+    """The chat endpoint for a configured model URL, whichever way it was written."""
     u = (base or "").strip().rstrip("/")
     if u.endswith("/chat/completions"):
         return u
-    if u.endswith("/v1"):
-        return u + "/chat/completions"
-    return u + "/v1/chat/completions"
+    return api_root_candidates(u)[0] + "/chat/completions"
 
 
 def build_upstream_payload(model_cfg: dict[str, Any], messages: list, extra: dict | None = None) -> dict:
@@ -384,6 +407,29 @@ class Trick:
 
     ui_page: str = ""
 
+    # Streaming: how much of the reply this trick's post_hook needs to see at
+    # once. -1: all of it (the reply is held until it's complete). 0: none;
+    # the post_hook only looks, and runs once the reply has been sent, on the
+    # reassembled reply (whatever it changes is ignored). N: the reply streams
+    # with its last N characters held back, and the post_hook runs on each
+    # stretch as it passes, so anything it looks for that's at most N long is
+    # always seen whole. It must then be right on any stretch of the reply and
+    # change nothing when run again on its own output. Tool calls always reach
+    # it whole. The channel uses the largest window of its tricks; see
+    # reply_window.py. Only matters for tricks with a post_hook.
+    needs_window: int = -1
+
+    def problems(self) -> list[str]:
+        """What's wrong with how this trick is set up, as sentences a person
+        can act on: what's missing and how to fix it. Empty when all's well.
+
+        The dashboard shows these on the extension and its channel, so a trick
+        that's quietly doing less than it says (a missing dependency, a
+        setting that can't work) doesn't go unnoticed. Called whenever the
+        dashboard lists extensions: keep it cheap.
+        """
+        return []
+
     @property
     def live_feed(self) -> LiveFeed:
         # Created on first use: subclasses don't call super().__init__().
@@ -424,14 +470,33 @@ class Trick:
         name = getattr(self, "__display_name__", "") or type(self).__name__
         return page.replace("__TRICK_NAME__", html.escape(name))
 
+    def current_settings(self) -> list[dict]:
+        """The trick's settings as it's actually running: one entry per
+        ``config_fields`` key, with the value in use (defaults included, so a
+        blank path shows the real default path)."""
+        out = []
+        for f in type(self).config_fields or []:
+            key = f.get("key") if isinstance(f, dict) else None
+            if not key:
+                continue
+            value = getattr(self, key, f.get("default"))
+            if not isinstance(value, (str, int, float, bool, type(None), list, dict)):
+                value = str(value)
+            out.append({"key": key, "label": f.get("label") or key,
+                        "type": f.get("type", "text"), "value": value})
+        return out
+
     def ui_action(self, data: Any) -> Any:
         """Answer a POST from the Live page. Return anything JSON-able.
 
-        The standard page sends ``{"action": "clear"}``; overriding pages can
-        send whatever they like.
+        The standard page sends ``{"action": "clear"}`` and
+        ``{"action": "settings"}``; overriding pages can send whatever they like.
         """
-        if isinstance(data, dict) and data.get("action") == "clear":
+        action = data.get("action") if isinstance(data, dict) else None
+        if action == "clear":
             self.live_feed.clear()
+        elif action == "settings":
+            return {"settings": self.current_settings()}
         return {"ok": True}
 
     @classmethod

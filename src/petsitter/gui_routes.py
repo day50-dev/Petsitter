@@ -250,6 +250,12 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
         return JSONResponse(reply if reply is not None else {"ok": True})
     app.add_route("/api/tricks/ui/{tid}/action", gui_trick_ui_action, methods=["POST"])
 
+    async def gui_upstream_clear(request: Request) -> Response:
+        """Dismiss the "unable to reach" notice; the next failure brings it back."""
+        handler.upstream_status = None
+        return JSONResponse({"success": True})
+    app.add_route("/api/upstream/clear", gui_upstream_clear, methods=["POST"])
+
     async def gui_tricks(request: Request) -> Response:
         return JSONResponse(handler.get_tricks_info())
     app.add_route("/api/tricks", gui_tricks, methods=["GET"])

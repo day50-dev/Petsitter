@@ -23,6 +23,8 @@ from typing import Any
 
 import httpx
 
+from petsitter.trick import api_root_candidates, learn_api_root
+
 # petsitter appends "/v1/chat/completions" to whatever URL it is given, so a
 # provider is only directly routable when its OpenAI-compatible surface sits at
 # exactly "<base_url>/v1/chat/completions". Anthropic has no such surface, and
@@ -348,20 +350,31 @@ async def discover_models(
 
     if not auth:
         auth = str((provider or {}).get("auth") or "bearer")
-    target = discover_url_for(base_url, provider)
     headers, params = _build_auth(auth, api_key or "")
+    if provider and provider.get("discover_url"):
+        roots = [""]
+        tries = [str(provider["discover_url"])]
+    else:
+        # With or without /v1, whichever answers (see api_root_candidates).
+        roots = api_root_candidates(base_url)
+        tries = [f"{r}/models" for r in roots]
 
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(target, headers=headers, params=params, timeout=timeout)
-    except httpx.TransportError as e:
-        raise ValueError(f"Can't reach {target} - is it running, and is the URL right?") from e
+    for root, target in zip(roots, tries):
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(target, headers=headers, params=params, timeout=timeout)
+        except httpx.TransportError as e:
+            raise ValueError(f"Can't reach {target} - is it running, and is the URL right?") from e
+        if response.status_code != 404:
+            if root:
+                learn_api_root(base_url, root)
+            break
 
     status = response.status_code
     if status in (401, 403):
         raise ValueError("That API key was rejected. Check it, and that it has access to models.")
     if status == 404:
-        raise ValueError(f"No model list at {target}. Check the base URL.")
+        raise ValueError(f"No model list at {' or '.join(tries)}. Check the base URL.")
     if status >= 400:
         raise ValueError(f"The provider answered {status}. Check the base URL and key.")
 

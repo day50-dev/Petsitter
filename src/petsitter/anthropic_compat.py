@@ -262,9 +262,9 @@ def _sse(event: str, data: dict) -> str:
 def stream_events(response: dict):
     """Replay a complete Anthropic response as its streaming event sequence.
 
-    Petsitter has to see a whole reply before post_hooks can run on it, so the
-    upstream call is not streamed; the events are synthesised afterwards. A
-    client cannot tell the difference apart from the timing.
+    Used when a trick holds the reply (it has to see it whole to change it):
+    the upstream call isn't streamed, and these events are synthesised
+    afterwards. A client cannot tell the difference apart from the timing.
     """
     message_id = response.get("id") or f"msg_{uuid.uuid4().hex[:24]}"
     blocks = response.get("content") or []

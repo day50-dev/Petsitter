@@ -2500,13 +2500,16 @@ body.rail-collapsed .chan-alert { position: absolute; bottom: 2px; right: 2px; w
 
 /* Discovered programs (Agents page). */
 #discovered-card .card-title { justify-content: flex-start; gap: 10px; }
-.disc-table { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(130px, 1.2fr) minmax(110px, 1.1fr) minmax(100px, .9fr) 80px max-content; font-size: 13px; }
-.disc-uas code { color: #8a9ab0; }
-.disc-uas i, .disc-dim { font-style: normal; color: #4a6572; }
+.disc-table { display: grid; grid-template-columns: minmax(160px, 1.2fr) minmax(110px, 1.1fr) minmax(100px, .9fr) 80px max-content; font-size: 13px; }
+.disc-dim { font-style: normal; color: #4a6572; }
 .disc-row { display: contents; cursor: pointer; }
 .disc-row:hover > span { background: #1a1a33; }
 .disc-row.open > span { background: #1a1a33; border-bottom-color: transparent; }
 .disc-caret { color: #5a7a8a; font-size: 10px; width: 12px; flex: none; }
+/* the caret stays beside the name; a long User-Agent is cut to one line
+   (all of it is in the tooltip and in the expanded headers) */
+.disc-row > span.disc-who { flex-wrap: nowrap; }
+.disc-who code { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
 .disc-detail { grid-column: 1 / -1; background: #12122a; border-bottom: 1px solid #1e2a3a; padding: 10px 14px 14px 30px; cursor: default; }
 .disc-detail-head { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #6b8299; margin-bottom: 8px; }
 .disc-headers { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 16px; font: 12px ui-monospace, "SF Mono", Consolas, monospace; }
@@ -2515,7 +2518,6 @@ body.rail-collapsed .chan-alert { position: absolute; bottom: 2px; right: 2px; w
 .disc-row > span { padding: 9px 8px; border-bottom: 1px solid #1e2a3a; display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-width: 0; }
 .disc-head > span { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #6b8299; padding-top: 2px; }
 .disc-table code { background: #1a1a33; padding: 1px 6px; border-radius: 3px; color: #c8d6e5; font-size: 12px; overflow-wrap: anywhere; }
-.disc-none { color: #ffb84d; font-size: 12px; cursor: help; border-bottom: 1px dotted #6a5a2f; }
 .disc-models code { color: #8a9ab0; }
 .disc-chan { color: #8ab4ff; text-decoration: none; font-size: 12px; background: #1a2a4d; padding: 1px 7px; border-radius: 9px; }
 .disc-chan:hover { background: #253a6a; }
@@ -2532,6 +2534,7 @@ body.rail-collapsed .chan-alert { position: absolute; bottom: 2px; right: 2px; w
 
 /* Connecting: the last call to the provider failed. */
 .upstream-error {
+  position: relative;
   background: #2a1a1f;
   border: 1px solid #5a2a35;
   border-left: 3px solid #ff6b8a;
@@ -2563,3 +2566,31 @@ body.rail-collapsed .chan-alert { position: absolute; bottom: 2px; right: 2px; w
 .bypass h3 { font-size: 14px; color: #a4b8d4; margin: 0 0 4px; }
 .bypass p { font-size: 13px; color: #6b8299; margin: 0; }
 .bypass .copy-row code { font-size: 14px; color: #8a9ab0; background: transparent; }
+
+.upstream-dismiss {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: #c08a96;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.upstream-dismiss:hover { background: #3a2229; color: #ffd0d8; }
+
+/* At a glance: settings as label / value pairs. */
+.glance-settings { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 14px; margin-bottom: 4px; }
+.glance-k { color: #8a9ab0; }
+.glance-settings code { overflow-wrap: anywhere; }
+.glance-dim { color: #5a7a8a; }
+
+/* An installed extension reporting a problem (Trick.problems) */
+.ext-item .chan-alert { flex: none; margin-right: 8px; cursor: help; }
+.ext-problem { margin: 16px 0 14px; }
+.ext-problem-line { font-size: 13px; color: #e8c0c8; margin-top: 4px; line-height: 1.5; }
+.ext-problem-line code { font-size: 12px; }

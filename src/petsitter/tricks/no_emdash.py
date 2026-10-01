@@ -31,6 +31,7 @@ class NoEmDashTrick(Trick):
     """Replace em-dashes with hyphens in model output."""
 
     __brief__ = "Replaces em-dashes with hyphens in model responses"
+    needs_window = 1   # one character at a time; the reply streams
     __display_name__ = "No Em-Dash"
     __category__ = "Output & Style"
 

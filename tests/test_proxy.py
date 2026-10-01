@@ -1047,3 +1047,13 @@ class TestToolCallFragments:
         calls = [{"id": "a", "function": {"name": "f", "arguments": "{}"}},
                  {"id": "b", "function": {"name": "g", "arguments": "{}"}}]
         assert merge(calls) == calls
+
+
+class TestTransportErrorText:
+    def test_timeout_says_what_happened(self):
+        import httpx
+        from petsitter.proxy import ProxyHandler
+        d = ProxyHandler._describe_transport_error
+        assert d(httpx.ReadTimeout(""), 120.0) == "No response within 120s (ReadTimeout)"
+        assert d(httpx.ConnectTimeout(""), 30.0) == "Couldn't connect within 30s (ConnectTimeout)"
+        assert d(httpx.ConnectError("All connection attempts failed")) == "ConnectError: All connection attempts failed"

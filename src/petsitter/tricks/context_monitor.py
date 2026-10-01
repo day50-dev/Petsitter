@@ -35,6 +35,10 @@ extensions change it.
   hold hundreds of megabytes of context in memory.
 - A conversation is identified by the program plus its first user message, the
   same heuristic Tool Monitor uses.
+- Messages carry no timestamps, so each one is shown with the time petsitter
+  first saw it: a new message arrives in the request right after it was
+  written. Messages from before the monitor was running get the time of the
+  first request that contained them.
 """
 
 import hashlib
@@ -52,6 +56,8 @@ from petsitter.observability import (
 from petsitter.trick import Trick
 
 KEEP_FULL = 30            # requests whose full text is kept for the detail view
+KEEP_CONVERSATIONS = 50   # conversations whose message first-seen times are kept
+KEEP_MESSAGES = 5000      # first-seen times kept per conversation
 MAX_TEXT = 200_000        # characters kept per message / system prompt
 
 
@@ -94,6 +100,10 @@ class ContextMonitorTrick(Trick):
         self._full: OrderedDict[str, dict] = OrderedDict()
         self._last_system: dict[str, str] = {}   # conversation -> system prompt hash
         self._seq: dict[str, int] = {}           # conversation -> requests seen
+        # conversation -> {message fingerprint: first time seen}. Messages carry
+        # no timestamps, but a new one shows up in the request right after it
+        # was written, so first-seen is a good stand-in for "when".
+        self._seen: OrderedDict[str, OrderedDict[str, float]] = OrderedDict()
         self._lock = threading.Lock()
 
     def pre_hook(self, context: list, params: dict) -> list:
@@ -149,7 +159,21 @@ class ContextMonitorTrick(Trick):
             "results": _tokens(results),
         }
         rid = meta.get("request_id", "") or hashlib.sha1(f"{time.time()}".encode()).hexdigest()[:8]
+        now = time.time()
         with self._lock:
+            seen = self._seen.pop(conv, None) or OrderedDict()
+            self._seen[conv] = seen
+            while len(self._seen) > KEEP_CONVERSATIONS:
+                self._seen.popitem(last=False)
+            counts: dict[str, int] = {}
+            for mm in messages:
+                base = hashlib.sha1(f"{mm['role']}\x00{mm['text'][:4000]}".encode("utf-8", "replace")).hexdigest()[:16]
+                # identical messages ("ok", "go ahead") are told apart by occurrence
+                n = counts[base] = counts.get(base, 0) + 1
+                fp = f"{base}:{n}"
+                mm["seen"] = seen.setdefault(fp, now)
+            while len(seen) > KEEP_MESSAGES:
+                seen.popitem(last=False)
             seq = self._seq.get(conv, 0) + 1
             self._seq[conv] = seq
             prev_sys = self._last_system.get(conv)
@@ -161,7 +185,7 @@ class ContextMonitorTrick(Trick):
         self.publish({
             "event": "context",
             "id": rid,
-            "ts": time.time(),
+            "ts": now,
             "conv": conv,
             "seq": seq,
             "from": current_client_addr(),

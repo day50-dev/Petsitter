@@ -32,8 +32,11 @@ from petsitter.observability import (
     set_request_id,
     start_request_meta,
 )
+from petsitter.reply_window import ReplyWindow, channel_window
 from petsitter.trick import (
+    api_root_candidates,
     chat_completions_url,
+    learn_api_root,
     find_prompt_keyword_patterns,
     Trick,
     build_upstream_headers,
@@ -75,6 +78,66 @@ def _anthropic_headers(incoming: dict) -> dict[str, str]:
             headers[name] = lowered[name]
     headers.setdefault("anthropic-version", "2023-06-01")
     return headers
+
+
+# How long to wait for the model. Generating can take minutes (a big
+# compaction, a slow local model), so reading gets 15 minutes; connecting gets
+# 15 seconds so a host that's down still fails fast.
+UPSTREAM_TIMEOUT = httpx.Timeout(900.0, connect=15.0)
+# While holding a reply, a comment line is sent this often so the client's own
+# read timeout doesn't fire. SSE clients ignore comment lines.
+HEARTBEAT_SECONDS = 5.0
+
+
+def sse_from_result(result: dict):
+    """A finished chat completion as server-sent events, for streaming clients."""
+    message = result["choices"][0]["message"]
+    base = {
+        "id": result.get("id", "chatcmpl-petsitter"),
+        "object": "chat.completion.chunk",
+        "created": result.get("created", int(time.time())),
+        "model": result.get("model", "unknown"),
+    }
+
+    def emit(delta: dict, finish_reason: str | None = None) -> str:
+        chunk = dict(base)
+        chunk["choices"] = [{"index": 0, "delta": delta, "finish_reason": finish_reason}]
+        return f"data: {json.dumps(chunk)}\n\n"
+
+    yield emit({"role": "assistant", "content": ""})
+    reasoning = message.get("reasoning_content")
+    if reasoning:
+        for i in range(0, len(reasoning), 64):
+            yield emit({"reasoning_content": reasoning[i:i + 64]})
+    content = message.get("content")
+    if content:
+        for i in range(0, len(content), 64):
+            yield emit({"content": content[i:i + 64]})
+    if message.get("tool_calls"):
+        # Streamed tool calls must each carry "index": clients use it to tell
+        # one call's pieces from another's, and strict ones (Goose, the OpenAI
+        # SDK) mangle or reject calls without it.
+        yield emit({"tool_calls": [
+            {**tc, "index": i} if isinstance(tc, dict) else tc
+            for i, tc in enumerate(message["tool_calls"])
+        ]})
+    yield emit({}, finish_reason=result["choices"][0].get("finish_reason", "stop"))
+    yield "data: [DONE]\n\n"
+
+
+def _problems_of(trick) -> list[str]:
+    try:
+        return [str(p) for p in (trick.problems() or [])]
+    except Exception as e:
+        return [f"Couldn't check its setup: {e}"]
+
+
+def _wants_all(trick) -> bool:
+    """Is this the trick (or one of them) making the channel hold the whole reply?"""
+    try:
+        return int(trick.needs_window) < 0
+    except (TypeError, ValueError):
+        return True
 
 
 def merge_tool_call_fragments(tool_calls):
@@ -170,6 +233,17 @@ class ProxyHandler:
         configure(self.model_url, self.model_name or "", self.api_key)
 
     TRAFFIC_KEEP = 50
+
+    @staticmethod
+    def _describe_transport_error(e: Exception, timeout: float | None = None) -> str:
+        name = type(e).__name__
+        detail = str(e).strip()
+        if isinstance(e, httpx.TimeoutException):
+            what = {"ConnectTimeout": "Couldn't connect", "ReadTimeout": "No response",
+                    "WriteTimeout": "Couldn't send the request", "PoolTimeout": "No free connection"}.get(name, "Timed out")
+            within = f" within {timeout:g}s" if timeout else ""
+            return f"{what}{within} ({name})" + (f": {detail}" if detail else "")
+        return f"{name}: {detail}" if detail else name
 
     def _note_upstream(self, target: str, ok: bool, status: int | None = None, error: str = "") -> None:
         self.upstream_status = {"ok": ok, "target": target, "status": status,
@@ -740,6 +814,8 @@ class ProxyHandler:
                     "config_fields": list(getattr(type(t), "config_fields", []) or []),
                     "config": ts.trick_configs.get(tid, {}),
                     "has_ui": type(t).has_ui(),
+                    "settings": t.current_settings(),
+                    "problems": _problems_of(t),
                     "readme": inspect.cleandoc(getattr(sys.modules.get(type(t).__module__), "__doc__", None) or ""),
                 })
         return result
@@ -801,232 +877,514 @@ class ProxyHandler:
                         break
                 self._run_counts[name] = 0
 
-    async def chat_completions(self, payload: dict, x_title: str = "", upstream_request_url: str = "", forward_headers: dict | None = None) -> dict:
+    # A chat request runs in three parts. _begin_chat/_end_chat bracket it
+    # (request id, metadata, channel); _prepare_chat does everything before the
+    # model (prompt keywords, channel matching, system prompt, pre_hooks); then
+    # either _finish_buffered (whole reply; post_hooks may rewrite it) or
+    # _stream_upstream (pieces forwarded as they arrive; post_hooks only look).
+
+    def _begin_chat(self, payload: dict, x_title: str):
+        from types import SimpleNamespace
         rid = new_request_id()
-        rid_token = set_request_id(rid)
-        # Everything about the request that the hooks are not handed directly.
-        # post_hook in particular only sees messages, so anything it needs to
-        # know about the request that produced them travels here.
-        meta_token = start_request_meta(
-            request_id=rid,
-            payload=payload,
-            x_title=x_title,
-            tools=payload.get("tools") or [],
-            model=payload.get("model", ""),
-            stream=bool(payload.get("stream", False)),
+        return SimpleNamespace(
+            rid=rid, rid_token=set_request_id(rid), ts_token=None, tricks=[],
+            meta_token=start_request_meta(
+                request_id=rid,
+                payload=payload,
+                x_title=x_title,
+                tools=payload.get("tools") or [],
+                model=payload.get("model", ""),
+                stream=bool(payload.get("stream", False)),
+            ),
         )
-        ts_token = None
+
+    def _end_chat(self, req) -> None:
+        self._stop_tricks(req.tricks)
+        if req.ts_token is not None:
+            reset_current_trickset(req.ts_token)
+        reset_request_meta(req.meta_token)
+        reset_request_id(req.rid_token)
+
+    def _prepare_chat(self, req, payload: dict, x_title: str, upstream_request_url: str,
+                      forward_headers: dict | None) -> dict | None:
+        """Everything before the model. Returns a finished result when the
+        request is answered without one (prompt keyword, config diagnostic)."""
         tricks: list[Trick] = []
         matched_ts_name: str | None = None
         log = get_logger()
-        try:
-            default_cfg = get_model_config("default")
-            upstream_url = default_cfg["url"]
-            if not upstream_request_url and not upstream_url:
-                raise ValueError("No upstream model configured. Set a model URL via the dashboard.")
-            messages = payload.get("messages", [])
-            original_messages = list(messages)
-            is_config_request = self._is_config_request(messages)
+        default_cfg = get_model_config("default")
+        upstream_url = default_cfg["url"]
+        if not upstream_request_url and not upstream_url:
+            raise ValueError("No upstream model configured. Set a model URL via the dashboard.")
+        messages = payload.get("messages", [])
+        original_messages = list(messages)
+        is_config_request = self._is_config_request(messages)
 
-            log.info("%srequest: model=%r x_title=%r", request_tag(), payload.get("model", ""), x_title)
+        log.info("%srequest: model=%r x_title=%r", request_tag(), payload.get("model", ""), x_title)
 
-            if self.paused:
-                log.info("%spetsitter paused; forwarding untouched, no tricks applied", request_tag())
-            else:
-                messages, pk_response = self._filter_prompt_keywords(messages, payload)
-                if pk_response:
-                    return {
-                        "id": "chatcmpl-pk-" + str(int(time.time())),
-                        "object": "chat.completion",
-                        "created": int(time.time()),
-                        "model": "petsitter",
-                        "choices": [{
-                            "index": 0,
-                            "message": pk_response,
-                            "finish_reason": "stop",
-                        }],
-                        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-                    }
+        if self.paused:
+            log.info("%spetsitter paused; forwarding untouched, no tricks applied", request_tag())
+        else:
+            messages, pk_response = self._filter_prompt_keywords(messages, payload)
+            if pk_response:
+                return {
+                    "id": "chatcmpl-pk-" + str(int(time.time())),
+                    "object": "chat.completion",
+                    "created": int(time.time()),
+                    "model": "petsitter",
+                    "choices": [{
+                        "index": 0,
+                        "message": pk_response,
+                        "finish_reason": "stop",
+                    }],
+                    "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                }
 
-                model = payload.get("model", "")
-                if model.startswith("trickset/"):
-                    ts_name = model.split("/", 1)[1]
-                    ts = self.tricksets.get(ts_name)
-                    if ts:
-                        tricks = list(ts.tricks)
-                        matched_ts_name = ts.name
-                        ts_token = set_current_trickset(ts)
-                        log = get_logger()
-                        log.info(
-                            "%strickset '%s' selected via model %r -> %d tricks",
-                            request_tag(), ts.name, model, len(tricks),
-                        )
-                        trace_event("trickset", trickset=ts.name, via="model")
-                    else:
-                        log.warning(
-                            "%smodel %r requested but trickset '%s' not loaded",
-                            request_tag(), model, ts_name,
-                        )
+            model = payload.get("model", "")
+            if model.startswith("trickset/"):
+                ts_name = model.split("/", 1)[1]
+                ts = self.tricksets.get(ts_name)
+                if ts:
+                    tricks = list(ts.tricks)
+                    matched_ts_name = ts.name
+                    req.ts_token = set_current_trickset(ts)
+                    log = get_logger()
+                    log.info(
+                        "%strickset '%s' selected via model %r -> %d tricks",
+                        request_tag(), ts.name, model, len(tricks),
+                    )
+                    trace_event("trickset", trickset=ts.name, via="model")
                 else:
-                    tricks, matched_ts = self._matching_tricks(x_title, model)
-                    if matched_ts is not None:
-                        matched_ts_name = matched_ts.name
-                        ts_token = set_current_trickset(matched_ts)
-                        log = get_logger()
-                        trace_event("trickset", trickset=matched_ts.name, via="filters")
-                    elif not tricks:
-                        log.info("%sno trickset matched; no tricks active", request_tag())
-
-                tricks, messages = self._filter_tricks_by_keywords(tricks, messages)
-                self._start_tricks(tricks)
-
-                system_prompt = ""
-                if messages and messages[0].get("role") == "system":
-                    system_prompt = messages[0].get("content", "")
-                    messages = messages[1:]
-
-                new_system_prompt = self._apply_system_prompt_tricks(system_prompt, tricks)
-                if new_system_prompt:
-                    messages = [{"role": "system", "content": new_system_prompt}] + messages
-
-                messages = self._apply_pre_hooks(messages, payload, tricks)
-
-            if upstream_request_url:
-                upstream_payload = build_upstream_payload(
-                    {"url": upstream_request_url, "model": payload.get("model", "default"), "key": False},
-                    messages, payload,
-                )
-                upstream_headers = build_upstream_headers({"key": False}, extra_headers=forward_headers or {})
-                target = upstream_request_url
+                    log.warning(
+                        "%smodel %r requested but trickset '%s' not loaded",
+                        request_tag(), model, ts_name,
+                    )
             else:
-                upstream_payload = build_upstream_payload(default_cfg, messages, payload)
-                upstream_headers = self._build_headers(default_cfg)
-                target = chat_completions_url(upstream_url)
+                tricks, matched_ts = self._matching_tricks(x_title, model)
+                if matched_ts is not None:
+                    matched_ts_name = matched_ts.name
+                    req.ts_token = set_current_trickset(matched_ts)
+                    log = get_logger()
+                    trace_event("trickset", trickset=matched_ts.name, via="filters")
+                elif not tricks:
+                    log.info("%sno trickset matched; no tricks active", request_tag())
 
-            if is_config_request:
-                log.info("%sconfig diagnostic requested via magic string", request_tag())
-                return self._config_diag_result(
-                    payload, x_title, original_messages, messages, tricks,
-                    matched_ts_name, target, upstream_payload, upstream_headers,
-                )
+            tricks, messages = self._filter_tricks_by_keywords(tricks, messages)
+            self._start_tricks(tricks)
+            req.tricks = tricks
 
-            log.info("%scalling upstream: %s", request_tag(), target)
-            trace_event("upstream", url=target, model=upstream_payload.get("model", ""))
-            log.debug("%supstream payload: %s", request_tag(), json.dumps(upstream_payload, indent=2))
+            system_prompt = ""
+            if messages and messages[0].get("role") == "system":
+                system_prompt = messages[0].get("content", "")
+                messages = messages[1:]
 
-            attempts = 0
-            for attempt in range(1, UPSTREAM_RETRY_ATTEMPTS + 1):
-                attempts = attempt
-                try:
-                    async with httpx.AsyncClient() as client:
-                        response = await client.post(
-                            target,
-                            json=upstream_payload,
-                            headers=upstream_headers,
-                            timeout=120.0,
-                        )
-                except httpx.TransportError as e:
-                    self._note_upstream(target, False, error=f"{type(e).__name__}: {e}")
-                    raise ValueError(f"Error: {target} can't be reached: {e}") from e
+            new_system_prompt = self._apply_system_prompt_tricks(system_prompt, tricks)
+            if new_system_prompt:
+                messages = [{"role": "system", "content": new_system_prompt}] + messages
 
-                if (response.status_code not in UPSTREAM_RETRY_STATUSES
-                        or attempt == UPSTREAM_RETRY_ATTEMPTS):
-                    break
+            messages = self._apply_pre_hooks(messages, payload, tricks)
 
-                delay = UPSTREAM_RETRY_BACKOFF * (2 ** (attempt - 1))
-                log.warning(
-                    "%supstream %s from %s (attempt %d/%d), retrying in %.1fs: %s",
-                    request_tag(), response.status_code, target, attempt,
-                    UPSTREAM_RETRY_ATTEMPTS, delay,
-                    (response.text or "").strip()[:200] or "(empty body)",
-                )
-                trace_event("upstream_retry", url=target,
-                            status=response.status_code, attempt=attempt)
-                await asyncio.sleep(delay)
+        if upstream_request_url:
+            upstream_payload = build_upstream_payload(
+                {"url": upstream_request_url, "model": payload.get("model", "default"), "key": False},
+                messages, payload,
+            )
+            upstream_headers = build_upstream_headers({"key": False}, extra_headers=forward_headers or {})
+            target = upstream_request_url
+        else:
+            upstream_payload = build_upstream_payload(default_cfg, messages, payload)
+            upstream_headers = self._build_headers(default_cfg)
+            target = chat_completions_url(upstream_url)
+            req.base = upstream_url
 
-            log.info("%supstream response status: %s", request_tag(), response.status_code)
-            log.debug("%supstream response headers: %s", request_tag(), dict(response.headers))
-            log.debug("%supstream response body: %s", request_tag(), response.text[:500] if response.text else "(empty)")
+        if is_config_request:
+            log.info("%sconfig diagnostic requested via magic string", request_tag())
+            return self._config_diag_result(
+                payload, x_title, original_messages, messages, tricks,
+                matched_ts_name, target, upstream_payload, upstream_headers,
+            )
 
-            # An upstream that is itself a gateway (dyva, litellm, openrouter)
-            # puts the only useful part of the failure in the body -- which host
-            # it tried, which model was missing, what the box said back. The
-            # status line alone just says "502 Bad Gateway", which is true of
-            # every one of those causes and tells you nothing about which.
-            if response.status_code >= 400:
-                detail = (response.text or "").strip()
-                log.error("%supstream %s from %s: %s", request_tag(),
-                          response.status_code, target, detail[:2000] or "(empty body)")
-                tried = f" after {attempts} attempts" if attempts > 1 else ""
-                self._note_upstream(target, False, response.status_code, detail or "(empty body)")
-                raise ValueError(
-                    f"Upstream {target} returned {response.status_code}{tried}: "
-                    f"{detail[:2000] or '(empty body)'}"
-                )
+        req.messages = messages
+        req.target = target
+        req.upstream_payload = upstream_payload
+        req.upstream_headers = upstream_headers
+        req.log = log
+        return None
 
-            if not response.content:
-                log.error("%supstream returned empty response (status %s)", request_tag(), response.status_code)
-                log.error("%supstream response headers: %s", request_tag(), dict(response.headers))
-                raise ValueError(f"Upstream returned empty response (status {response.status_code})")
+    def _other_chat_target(self, req):
+        """After a 404: the base's other candidate endpoint (with or without
+        /v1), as (url, root), or None. See api_root_candidates."""
+        base = getattr(req, "base", None)
+        if not base or base.rstrip("/").endswith("/chat/completions"):
+            return None
+        for root in api_root_candidates(base):
+            if root + "/chat/completions" != req.target:
+                return root + "/chat/completions", root
+        return None
 
-            result = response.json()
-            self._note_upstream(target, True, response.status_code)
+    async def _finish_buffered(self, req) -> dict:
+        """Call the model for the whole reply, then run every post_hook."""
+        messages, tricks, target = req.messages, req.tricks, req.target
+        upstream_payload, upstream_headers, log = req.upstream_payload, req.upstream_headers, req.log
+        log.info("%scalling upstream: %s", request_tag(), target)
+        trace_event("upstream", url=target, model=upstream_payload.get("model", ""))
+        log.debug("%supstream payload: %s", request_tag(), json.dumps(upstream_payload, indent=2))
 
-            log.debug("%supstream response: %s", request_tag(), json.dumps(result, indent=2))
+        attempts = 0
+        for attempt in range(1, UPSTREAM_RETRY_ATTEMPTS + 1):
+            attempts = attempt
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        target,
+                        json=upstream_payload,
+                        headers=upstream_headers,
+                        timeout=UPSTREAM_TIMEOUT,
+                    )
+            except httpx.TransportError as e:
+                self._note_upstream(target, False, error=self._describe_transport_error(e, UPSTREAM_TIMEOUT.read))
+                raise ValueError(f"Error: {target} can't be reached: {e}") from e
 
-            assistant_message = result["choices"][0]["message"]
-            if assistant_message.get("tool_calls"):
-                assistant_message["tool_calls"] = merge_tool_call_fragments(assistant_message["tool_calls"])
-            context = messages + [assistant_message]
+            if (response.status_code not in UPSTREAM_RETRY_STATUSES
+                    or attempt == UPSTREAM_RETRY_ATTEMPTS):
+                break
 
-            log.debug("%scontext before post-hooks: %s", request_tag(), json.dumps(context, indent=2))
+            delay = UPSTREAM_RETRY_BACKOFF * (2 ** (attempt - 1))
+            log.warning(
+                "%supstream %s from %s (attempt %d/%d), retrying in %.1fs: %s",
+                request_tag(), response.status_code, target, attempt,
+                UPSTREAM_RETRY_ATTEMPTS, delay,
+                (response.text or "").strip()[:200] or "(empty body)",
+            )
+            trace_event("upstream_retry", url=target,
+                        status=response.status_code, attempt=attempt)
+            await asyncio.sleep(delay)
 
-            context = self._apply_post_hooks(context, tricks)
-            log.debug("%scontext after post-hooks: %s", request_tag(), json.dumps(context, indent=2))
+        other = self._other_chat_target(req) if response.status_code == 404 else None
+        if other:
+            try:
+                async with httpx.AsyncClient() as client:
+                    retry = await client.post(other[0], json=upstream_payload, headers=upstream_headers,
+                                              timeout=UPSTREAM_TIMEOUT)
+            except httpx.TransportError:
+                retry = None
+            if retry is not None and retry.status_code != 404:
+                log.info("%s%s was a 404; %s answers, using it from now on", request_tag(), target, other[0])
+                learn_api_root(req.base, other[1])
+                response, target = retry, other[0]
+                req.target = target
 
-            result["choices"][0]["message"] = context[-1]
-            # A trick may have turned the answer into a tool call (see
-            # ToolCallTrick, ReferenceCheckTrick). Harnesses that key off
-            # finish_reason rather than the message body need it to agree.
-            if context[-1].get("tool_calls"):
-                result["choices"][0]["finish_reason"] = "tool_calls"
+        log.info("%supstream response status: %s", request_tag(), response.status_code)
+        log.debug("%supstream response headers: %s", request_tag(), dict(response.headers))
+        log.debug("%supstream response body: %s", request_tag(), response.text[:500] if response.text else "(empty)")
 
-            capabilities = self._merge_capabilities(tricks)
-            if capabilities:
-                result["capabilities"] = capabilities
+        # An upstream that is itself a gateway (dyva, litellm, openrouter)
+        # puts the only useful part of the failure in the body -- which host
+        # it tried, which model was missing, what the box said back. The
+        # status line alone just says "502 Bad Gateway", which is true of
+        # every one of those causes and tells you nothing about which.
+        if response.status_code >= 400:
+            detail = (response.text or "").strip()
+            log.error("%supstream %s from %s: %s", request_tag(),
+                      response.status_code, target, detail[:2000] or "(empty body)")
+            tried = f" after {attempts} attempts" if attempts > 1 else ""
+            self._note_upstream(target, False, response.status_code, detail or "(empty body)")
+            raise ValueError(
+                f"Upstream {target} returned {response.status_code}{tried}: "
+                f"{detail[:2000] or '(empty body)'}"
+            )
 
-            return result
+        if not response.content:
+            log.error("%supstream returned empty response (status %s)", request_tag(), response.status_code)
+            log.error("%supstream response headers: %s", request_tag(), dict(response.headers))
+            raise ValueError(f"Upstream returned empty response (status {response.status_code})")
+
+        result = response.json()
+        self._note_upstream(target, True, response.status_code)
+
+        log.debug("%supstream response: %s", request_tag(), json.dumps(result, indent=2))
+
+        assistant_message = result["choices"][0]["message"]
+        if assistant_message.get("tool_calls"):
+            assistant_message["tool_calls"] = merge_tool_call_fragments(assistant_message["tool_calls"])
+        context = messages + [assistant_message]
+
+        log.debug("%scontext before post-hooks: %s", request_tag(), json.dumps(context, indent=2))
+
+        context = self._apply_post_hooks(context, tricks)
+        log.debug("%scontext after post-hooks: %s", request_tag(), json.dumps(context, indent=2))
+
+        result["choices"][0]["message"] = context[-1]
+        # A trick may have turned the answer into a tool call (see
+        # ToolCallTrick, ReferenceCheckTrick). Harnesses that key off
+        # finish_reason rather than the message body need it to agree.
+        if context[-1].get("tool_calls"):
+            result["choices"][0]["finish_reason"] = "tool_calls"
+
+        capabilities = self._merge_capabilities(tricks)
+        if capabilities:
+            result["capabilities"] = capabilities
+
+        return result
+
+    async def chat_completions(self, payload: dict, x_title: str = "", upstream_request_url: str = "", forward_headers: dict | None = None) -> dict:
+        req = self._begin_chat(payload, x_title)
+        try:
+            early = self._prepare_chat(req, payload, x_title, upstream_request_url, forward_headers)
+            if early is not None:
+                return early
+            return await self._finish_buffered(req)
         finally:
-            self._stop_tricks(tricks)
-            if ts_token is not None:
-                reset_current_trickset(ts_token)
-            reset_request_meta(meta_token)
-            reset_request_id(rid_token)
+            self._end_chat(req)
 
-    async def messages(self, payload: dict, x_title: str = "",
-                       forward_headers: dict | None = None) -> dict:
-        """Serve Anthropic's /v1/messages through the ordinary trick pipeline.
+    async def chat_completions_stream(self, payload: dict, x_title: str = "", upstream_request_url: str = "",
+                                      forward_headers: dict | None = None):
+        """The same request, as server-sent events for a streaming client.
 
-        The request is translated into the OpenAI shape the tricks are written
-        against, run through the same trickset matching and hooks as any other
-        request, then translated back and sent to Anthropic. The caller's own
-        credentials are forwarded, so petsitter never needs a key of its own.
-
-        Never called while paused: the server routes a paused request straight
-        to Anthropic before it reaches here, so this method can assume the
-        trick pipeline actually runs.
+        How much of the reply is held back is the channel's window (see
+        reply_window): the whole reply if any trick needs all of it, with SSE
+        comment heartbeats so the client's own timeout doesn't give up on a
+        long generation; otherwise the model's stream is forwarded as it
+        arrives, minus the last few characters the rewriting tricks still
+        need to see.
         """
+        req = self._begin_chat(payload, x_title)
+        try:
+            early = self._prepare_chat(req, payload, x_title, upstream_request_url, forward_headers)
+            if early is not None:
+                for line in sse_from_result(early):
+                    yield line
+                return
+            window, rewriters, observers = channel_window(req.tricks)
+            if window < 0:
+                req.log.info("%sholding the reply for %s", request_tag(),
+                             ", ".join(type(t).__name__ for t in rewriters if _wants_all(t)))
+                task = asyncio.create_task(self._finish_buffered(req))
+                # One right away, so the response has started before the
+                # client's time-to-first-byte limit.
+                yield ": petsitter is waiting for the full reply\n\n"
+                try:
+                    while True:
+                        done, _ = await asyncio.wait({task}, timeout=HEARTBEAT_SECONDS)
+                        if done:
+                            break
+                        yield ": petsitter is waiting for the full reply\n\n"
+                finally:
+                    if not task.done():
+                        task.cancel()   # the client went away
+                for line in sse_from_result(task.result()):
+                    yield line
+            else:
+                async for line in self._stream_upstream(req, window, rewriters, observers):
+                    yield line
+        finally:
+            self._end_chat(req)
+
+    def _window_rewrite(self, req, rewriters):
+        """The rewriting post_hooks as one function on an assistant message."""
+        def rewrite(msg: dict) -> dict:
+            context = list(req.messages) + [msg]
+            for trick in rewriters:
+                context = trick.post_hook(context)
+            return context[-1] if context else msg
+        return rewrite
+
+    def _run_observers(self, req, observers, reply: dict) -> None:
+        # The reply has already gone out: these post_hooks can look, not change.
+        if observers:
+            try:
+                self._apply_post_hooks(req.messages + [reply], observers)
+            except Exception:
+                req.log.exception("%sa post_hook failed after streaming", request_tag())
+
+    async def _stream_upstream(self, req, window: int = 0, rewriters=(), observers=()):
+        """Forward the model's own stream. With a window, text passes through
+        the rewriting post_hooks on the way and tool calls are held to the
+        end; either way the reply as sent is reassembled so the observing
+        post_hooks see it whole at the end."""
+        log, target = req.log, req.target
+        body = dict(req.upstream_payload, stream=True)
+        if window:
+            log.info("%sstreaming from upstream with a %d-character window: %s", request_tag(), window, target)
+        else:
+            log.info("%sstreaming from upstream: %s", request_tag(), target)
+        trace_event("upstream", url=target, model=body.get("model", ""), stream=True, window=window)
+        win = ReplyWindow(self._window_rewrite(req, rewriters), window) if window else None
+
+        # what was sent, for the observers
+        reply: dict[str, Any] = {"role": "assistant", "content": ""}
+        reasoning = ""
+        calls: dict[int, dict] = {}
+        finish = None
+
+        def add_calls(into: dict, deltas) -> None:
+            for tc in deltas or []:
+                slot = into.setdefault(tc.get("index", len(into)),
+                                       {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+                slot["id"] = tc.get("id") or slot["id"]
+                fn = tc.get("function") or {}
+                slot["function"]["name"] += fn.get("name") or ""
+                slot["function"]["arguments"] += fn.get("arguments") or ""
+
+        def sent(obj) -> str:
+            nonlocal reasoning, finish
+            try:
+                choice = (obj.get("choices") or [{}])[0]
+            except (AttributeError, IndexError):
+                choice = {}
+            delta = choice.get("delta") or {}
+            finish = choice.get("finish_reason") or finish
+            if isinstance(delta.get("content"), str):
+                reply["content"] += delta["content"]
+            if isinstance(delta.get("reasoning_content"), str):
+                reasoning += delta["reasoning_content"]
+            add_calls(calls, delta.get("tool_calls"))
+            return f"data: {json.dumps(obj)}\n\n"
+
+        # windowed only: the chunk shape to copy, tool calls and the finish
+        # chunk (plus anything after it, like usage) held for the end
+        template: dict = {}
+        held_calls: dict[int, dict] = {}
+        held_end: list[dict] = []
+
+        def chunk(delta: dict, finish_reason=None) -> dict:
+            return {"id": template.get("id", "chatcmpl-petsitter"), "object": "chat.completion.chunk",
+                    "created": template.get("created", int(time.time())), "model": template.get("model", ""),
+                    "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}]}
+
+        async with httpx.AsyncClient(timeout=UPSTREAM_TIMEOUT) as client:
+            for attempt in range(1, UPSTREAM_RETRY_ATTEMPTS + 1):
+                resp_cm = client.stream("POST", target, json=body, headers=req.upstream_headers)
+                try:
+                    resp = await resp_cm.__aenter__()
+                except httpx.TransportError as e:
+                    self._note_upstream(target, False, error=self._describe_transport_error(e, UPSTREAM_TIMEOUT.read))
+                    raise ValueError(f"Error: {target} can't be reached: {e}") from e
+                if resp.status_code in UPSTREAM_RETRY_STATUSES and attempt < UPSTREAM_RETRY_ATTEMPTS:
+                    await resp_cm.__aexit__(None, None, None)
+                    await asyncio.sleep(UPSTREAM_RETRY_BACKOFF * (2 ** (attempt - 1)))
+                    continue
+                break
+            other = self._other_chat_target(req) if resp.status_code == 404 else None
+            if other:
+                other_cm = client.stream("POST", other[0], json=body, headers=req.upstream_headers)
+                try:
+                    other_resp = await other_cm.__aenter__()
+                except httpx.TransportError:
+                    other_resp = None
+                if other_resp is not None and other_resp.status_code != 404:
+                    await resp_cm.__aexit__(None, None, None)
+                    log.info("%s%s was a 404; %s answers, using it from now on", request_tag(), target, other[0])
+                    learn_api_root(req.base, other[1])
+                    resp_cm, resp, target = other_cm, other_resp, other[0]
+                    req.target = target
+                elif other_resp is not None:
+                    await other_cm.__aexit__(None, None, None)
+            try:
+                if resp.status_code >= 400:
+                    detail = (await resp.aread()).decode("utf-8", "replace").strip()
+                    self._note_upstream(target, False, resp.status_code, detail or "(empty body)")
+                    raise ValueError(f"Upstream {target} returned {resp.status_code}: {detail[:2000] or '(empty body)'}")
+                try:
+                    async for line in resp.aiter_lines():
+                        if not line.startswith("data:"):
+                            continue
+                        data = line[5:].strip()
+                        if data == "[DONE]":
+                            break
+                        try:
+                            obj = json.loads(data)
+                        except ValueError:
+                            yield f"data: {data}\n\n"
+                            continue
+                        if win is None:
+                            yield f"data: {data}\n\n"
+                            sent(obj)
+                            continue
+                        if held_end:
+                            held_end.append(obj)
+                            continue
+                        choices = obj.get("choices") if isinstance(obj, dict) else None
+                        if not choices:
+                            yield sent(obj)
+                            continue
+                        template = template or obj
+                        choice = choices[0]
+                        delta = choice.get("delta") or {}
+                        text = delta.pop("content", None)
+                        add_calls(held_calls, delta.pop("tool_calls", None))
+                        out = win.feed(text) if isinstance(text, str) else ""
+                        if choice.get("finish_reason"):
+                            if out or delta:
+                                yield sent(chunk(dict(delta, **({"content": out} if out else {}))))
+                            choice["delta"] = {}
+                            held_end.append(obj)
+                            continue
+                        if out:
+                            delta["content"] = out
+                        if delta:
+                            choice["delta"] = delta
+                            yield sent(obj)
+                except httpx.TransportError as e:
+                    self._note_upstream(target, False, error=self._describe_transport_error(e, UPSTREAM_TIMEOUT.read))
+                    raise
+                self._note_upstream(target, True, resp.status_code)
+            finally:
+                await resp_cm.__aexit__(None, None, None)
+        if win is not None:
+            tail, final_calls = win.finish([held_calls[i] for i in sorted(held_calls)] or None)
+            for t in rewriters:
+                trace_event("post_hook", t, windowed=True)
+            if tail:
+                yield sent(chunk({"content": tail}))
+            if final_calls:
+                # each with its "index": clients use it to tell calls apart
+                yield sent(chunk({"tool_calls": [dict(tc, index=i) for i, tc in enumerate(final_calls)]}))
+            if not held_end:
+                held_end.append(chunk({}, "tool_calls" if final_calls else "stop"))
+            for obj in held_end:
+                yield sent(obj)
+        if calls:
+            reply["tool_calls"] = [calls[i] for i in sorted(calls)]
+        if reasoning:
+            reply["reasoning_content"] = reasoning
+        self._run_observers(req, observers, reply)
+        log.info("%sstreamed reply done (finish=%s)", request_tag(), finish)
+        yield "data: [DONE]\n\n"
+
+    # Anthropic's /v1/messages (what Claude Code talks to), split the same way
+    # as chat completions: _prepare_messages does everything before the model,
+    # then the reply is either held whole (_finish_messages_buffered, with ping
+    # events as heartbeats when streaming) or, when no trick needs it whole,
+    # Anthropic's own event stream is forwarded untouched (_stream_messages).
+    #
+    # Never called while paused: the server routes a paused request straight
+    # to Anthropic before it reaches here.
+
+    def _begin_messages(self):
+        from types import SimpleNamespace
+        rid = new_request_id()
+        return SimpleNamespace(rid=rid, rid_token=set_request_id(rid), meta_token=None,
+                               ts_token=None, tricks=[])
+
+    def _end_messages(self, req) -> None:
+        self._stop_tricks(req.tricks)
+        if req.ts_token is not None:
+            reset_current_trickset(req.ts_token)
+        if req.meta_token is not None:
+            reset_request_meta(req.meta_token)
+        reset_request_id(req.rid_token)
+
+    def _prepare_messages(self, req, payload: dict, x_title: str, forward_headers: dict | None) -> dict | None:
+        """Translate to the OpenAI shape tricks are written against, run the
+        pipeline up to the model, and translate back. Returns a finished
+        response when a prompt keyword answered it."""
         from petsitter import anthropic_compat as ac
 
-        rid = new_request_id()
-        rid_token = set_request_id(rid)
         messages, tools = ac.to_openai_messages(payload)
 
         # Same (keyword:request) short-circuit chat_completions() gives the
-        # OpenAI path. This was missing here, so a prompt keyword like
-        # (exportit:) typed in Claude Code -- which talks to /v1/messages,
-        # not /v1/chat/completions -- arrived as literal text and never
-        # dispatched to any trick.
+        # OpenAI path, so a prompt keyword typed in Claude Code dispatches too.
         messages, pk_response = self._filter_prompt_keywords(messages, payload)
         if pk_response:
             text = pk_response.get("content") or ""
@@ -1050,8 +1408,8 @@ class ProxyHandler:
             "stream": bool(payload.get("stream", False)),
             "temperature": payload.get("temperature"),
         }
-        meta_token = start_request_meta(
-            request_id=rid,
+        req.meta_token = start_request_meta(
+            request_id=req.rid,
             payload=shadow,
             x_title=x_title,
             tools=list(tools),
@@ -1059,68 +1417,268 @@ class ProxyHandler:
             stream=bool(payload.get("stream", False)),
             api="anthropic",
         )
-        ts_token = None
-        tricks: list[Trick] = []
         log = get_logger()
+        model = payload.get("model", "")
+        tricks, matched_ts = self._matching_tricks(x_title, model)
+        if matched_ts is not None:
+            req.ts_token = set_current_trickset(matched_ts)
+            log = get_logger()
+            log.info("%s/v1/messages -> trickset '%s' (%d tricks)",
+                     request_tag(), matched_ts.name, len(tricks))
+            trace_event("trickset", trickset=matched_ts.name, via="filters")
+        elif not tricks:
+            log.info("%s/v1/messages: no trickset matched", request_tag())
+
+        tricks, messages = self._filter_tricks_by_keywords(tricks, messages)
+        self._start_tricks(tricks)
+        req.tricks = tricks
+
+        system_prompt = ""
+        if messages and messages[0].get("role") == "system":
+            system_prompt = messages[0].get("content", "")
+            messages = messages[1:]
+        new_system_prompt = self._apply_system_prompt_tricks(system_prompt, tricks)
+        if new_system_prompt:
+            messages = [{"role": "system", "content": new_system_prompt}] + messages
+
+        shadow["messages"] = messages
+        messages = self._apply_pre_hooks(messages, shadow, tricks)
+
+        req.messages = messages
+        req.shadow = shadow
+        req.body = ac.to_anthropic_payload(messages, shadow.get("tools") or [], payload)
+        req.headers = _anthropic_headers(forward_headers or {})
+        req.target = f"{ANTHROPIC_UPSTREAM.rstrip('/')}/v1/messages"
+        req.log = log
+        return None
+
+    async def _finish_messages_buffered(self, req) -> dict:
+        from petsitter import anthropic_compat as ac
+        log, target = req.log, req.target
+        log.info("%scalling upstream: %s", request_tag(), target)
+        trace_event("upstream", url=target, model=req.body.get("model", ""))
+        body = {k: v for k, v in req.body.items() if k != "stream"}
         try:
-            model = payload.get("model", "")
-            tricks, matched_ts = self._matching_tricks(x_title, model)
-            if matched_ts is not None:
-                ts_token = set_current_trickset(matched_ts)
-                log = get_logger()
-                log.info("%s/v1/messages -> trickset '%s' (%d tricks)",
-                         request_tag(), matched_ts.name, len(tricks))
-                trace_event("trickset", trickset=matched_ts.name, via="filters")
-            elif not tricks:
-                log.info("%s/v1/messages: no trickset matched", request_tag())
+            async with httpx.AsyncClient() as client:
+                response = await client.post(target, json=body, headers=req.headers, timeout=UPSTREAM_TIMEOUT)
+        except httpx.TransportError as e:
+            self._note_upstream(target, False, error=self._describe_transport_error(e, UPSTREAM_TIMEOUT.read))
+            raise
 
-            tricks, messages = self._filter_tricks_by_keywords(tricks, messages)
-            self._start_tricks(tricks)
+        if response.status_code >= 400:
+            detail = (response.text or "").strip()[:500]
+            log.error("%supstream %s: %s", request_tag(), response.status_code, detail)
+            self._note_upstream(target, False, response.status_code, detail or "(empty body)")
+            raise ValueError(f"Anthropic returned {response.status_code}: {detail}")
+        self._note_upstream(target, True, response.status_code)
 
-            system_prompt = ""
-            if messages and messages[0].get("role") == "system":
-                system_prompt = messages[0].get("content", "")
-                messages = messages[1:]
-            new_system_prompt = self._apply_system_prompt_tricks(system_prompt, tricks)
-            if new_system_prompt:
-                messages = [{"role": "system", "content": new_system_prompt}] + messages
+        result = response.json()
+        assistant = ac.response_to_assistant_message(result)
+        context = self._apply_post_hooks(req.messages + [assistant], req.tricks)
+        if context:
+            result = ac.apply_assistant_message(result, context[-1])
+        return result
 
-            shadow["messages"] = messages
-            messages = self._apply_pre_hooks(messages, shadow, tricks)
-
-            upstream = ANTHROPIC_UPSTREAM.rstrip("/")
-            body = ac.to_anthropic_payload(messages, shadow.get("tools") or [], payload)
-            headers = _anthropic_headers(forward_headers or {})
-            target = f"{upstream}/v1/messages"
-
-            log.info("%scalling upstream: %s", request_tag(), target)
-            trace_event("upstream", url=target, model=body.get("model", ""))
-            try:
-                async with httpx.AsyncClient() as client:
-                    response = await client.post(target, json=body, headers=headers, timeout=600.0)
-            except httpx.TransportError as e:
-                self._note_upstream(target, False, error=f"{type(e).__name__}: {e}")
-                raise
-
-            if response.status_code >= 400:
-                detail = (response.text or "").strip()[:500]
-                log.error("%supstream %s: %s", request_tag(), response.status_code, detail)
-                self._note_upstream(target, False, response.status_code, detail or "(empty body)")
-                raise ValueError(f"Anthropic returned {response.status_code}: {detail}")
-            self._note_upstream(target, True, response.status_code)
-
-            result = response.json()
-            assistant = ac.response_to_assistant_message(result)
-            context = self._apply_post_hooks(messages + [assistant], tricks)
-            if context:
-                result = ac.apply_assistant_message(result, context[-1])
-            return result
+    async def messages(self, payload: dict, x_title: str = "",
+                       forward_headers: dict | None = None) -> dict:
+        """Serve Anthropic's /v1/messages through the ordinary trick pipeline,
+        as one whole response."""
+        req = self._begin_messages()
+        try:
+            early = self._prepare_messages(req, payload, x_title, forward_headers)
+            if early is not None:
+                return early
+            return await self._finish_messages_buffered(req)
         finally:
-            self._stop_tricks(tricks)
-            if ts_token is not None:
-                reset_current_trickset(ts_token)
-            reset_request_meta(meta_token)
-            reset_request_id(rid_token)
+            self._end_messages(req)
+
+    async def messages_stream(self, payload: dict, x_title: str = "",
+                              forward_headers: dict | None = None):
+        """The same request as Anthropic server-sent events.
+
+        Held whole (with ping events every few seconds, which Anthropic
+        clients expect and ignore) when a trick needs the whole reply;
+        otherwise Anthropic's own stream, with text passing through the
+        channel's window (see reply_window) when a trick rewrites it.
+        """
+        from petsitter import anthropic_compat as ac
+        req = self._begin_messages()
+        try:
+            early = self._prepare_messages(req, payload, x_title, forward_headers)
+            if early is not None:
+                for chunk in ac.stream_events(early):
+                    yield chunk
+                return
+            window, rewriters, observers = channel_window(req.tricks)
+            if window < 0:
+                req.log.info("%sholding the reply for %s", request_tag(),
+                             ", ".join(type(t).__name__ for t in rewriters if _wants_all(t)))
+                ping = ac._sse("ping", {"type": "ping"})
+                task = asyncio.create_task(self._finish_messages_buffered(req))
+                yield ping   # right away, so the response has started
+                try:
+                    while True:
+                        done, _ = await asyncio.wait({task}, timeout=HEARTBEAT_SECONDS)
+                        if done:
+                            break
+                        yield ping
+                finally:
+                    if not task.done():
+                        task.cancel()   # the client went away
+                for chunk in ac.stream_events(task.result()):
+                    yield chunk
+            else:
+                async for chunk in self._stream_messages(req, window, rewriters, observers):
+                    yield chunk
+        finally:
+            self._end_messages(req)
+
+    async def _stream_messages(self, req, window: int = 0, rewriters=(), observers=()):
+        """Forward Anthropic's event stream. Without a window, byte for byte.
+        With one, each text block passes through the rewriting post_hooks
+        (its own window per block) and each tool_use block is held until it
+        ends, then rewritten whole; thinking and everything else is untouched.
+        Either way the reply as sent is rebuilt for the observing post_hooks."""
+        from petsitter import anthropic_compat as ac
+        log, target = req.log, req.target
+        body = dict(req.body, stream=True)
+        if window:
+            log.info("%sstreaming from upstream with a %d-character window: %s", request_tag(), window, target)
+        else:
+            log.info("%sstreaming from upstream: %s", request_tag(), target)
+        trace_event("upstream", url=target, model=body.get("model", ""), stream=True, window=window)
+        rewrite = self._window_rewrite(req, rewriters) if window else None
+        texts: dict[int, ReplyWindow] = {}     # open text blocks
+        tools: dict[int, dict] = {}            # open tool_use blocks, held
+
+        result: dict[str, Any] = {"type": "message", "role": "assistant", "content": []}
+        partial: dict[int, str] = {}
+
+        def sent(raw: str, ev) -> str:
+            """Note an event going to the client, for the observers."""
+            if not isinstance(ev, dict):
+                return raw
+            kind = ev.get("type")
+            if kind == "message_start":
+                result.update({k: v for k, v in (ev.get("message") or {}).items() if k != "content"})
+            elif kind == "content_block_start":
+                idx = ev.get("index", len(result["content"]))
+                while len(result["content"]) <= idx:
+                    result["content"].append({})
+                result["content"][idx] = dict(ev.get("content_block") or {})
+            elif kind == "content_block_delta":
+                idx, d = ev.get("index", 0), ev.get("delta") or {}
+                if idx < len(result["content"]):
+                    block = result["content"][idx]
+                    if d.get("type") == "text_delta":
+                        block["text"] = block.get("text", "") + d.get("text", "")
+                    elif d.get("type") == "thinking_delta":
+                        block["thinking"] = block.get("thinking", "") + d.get("thinking", "")
+                    elif d.get("type") == "input_json_delta":
+                        partial[idx] = partial.get(idx, "") + d.get("partial_json", "")
+            elif kind == "message_delta":
+                result.update(ev.get("delta") or {})
+            return raw
+
+        def text_delta(idx: int, text: str):
+            ev = {"type": "content_block_delta", "index": idx, "delta": {"type": "text_delta", "text": text}}
+            return ac._sse("content_block_delta", ev), ev
+
+        def through_window(raw: str, ev) -> list:
+            """The events to send for one event from Anthropic."""
+            if not isinstance(ev, dict):
+                return [(raw, ev)]
+            kind, idx = ev.get("type"), ev.get("index", 0)
+            if kind == "content_block_start":
+                block = ev.get("content_block") or {}
+                if block.get("type") == "text":
+                    texts[idx] = ReplyWindow(rewrite, window)
+                    if block.get("text"):
+                        out = texts[idx].feed(block["text"])
+                        ev = dict(ev, content_block=dict(block, text=out))
+                        raw = ac._sse("content_block_start", ev)
+                elif block.get("type") == "tool_use":
+                    tools[idx] = {"start": (raw, ev), "json": ""}
+                    return []
+            elif kind == "content_block_delta":
+                d = ev.get("delta") or {}
+                if idx in texts and d.get("type") == "text_delta":
+                    out = texts[idx].feed(d.get("text", ""))
+                    return [text_delta(idx, out)] if out else []
+                if idx in tools and d.get("type") == "input_json_delta":
+                    tools[idx]["json"] += d.get("partial_json", "")
+                    return []
+            elif kind == "content_block_stop":
+                if idx in texts:
+                    tail, _ = texts.pop(idx).finish()
+                    return ([text_delta(idx, tail)] if tail else []) + [(raw, ev)]
+                if idx in tools:
+                    held = tools.pop(idx)
+                    block = held["start"][1].get("content_block") or {}
+                    call = {"id": block.get("id", ""), "type": "function",
+                            "function": {"name": block.get("name", ""), "arguments": held["json"]}}
+                    _, calls = ReplyWindow(rewrite, window).finish([call])
+                    args = ((calls or [call])[0].get("function") or {}).get("arguments", "")
+                    ev_d = {"type": "content_block_delta", "index": idx,
+                            "delta": {"type": "input_json_delta", "partial_json": args}}
+                    return [held["start"]] + ([(ac._sse("content_block_delta", ev_d), ev_d)] if args else []) + [(raw, ev)]
+            return [(raw, ev)]
+
+        def event(lines: list):
+            raw = "\n".join(lines) + "\n\n"
+            ev = None
+            for line in lines:
+                if line.startswith("data:"):
+                    try:
+                        ev = json.loads(line[5:].strip())
+                    except ValueError:
+                        pass
+            return raw, ev
+
+        async with httpx.AsyncClient(timeout=UPSTREAM_TIMEOUT) as client:
+            try:
+                resp_cm = client.stream("POST", target, json=body, headers=req.headers)
+                resp = await resp_cm.__aenter__()
+            except httpx.TransportError as e:
+                self._note_upstream(target, False, error=self._describe_transport_error(e, UPSTREAM_TIMEOUT.read))
+                raise
+            try:
+                if resp.status_code >= 400:
+                    detail = (await resp.aread()).decode("utf-8", "replace").strip()[:500]
+                    self._note_upstream(target, False, resp.status_code, detail or "(empty body)")
+                    raise ValueError(f"Anthropic returned {resp.status_code}: {detail}")
+                try:
+                    lines: list[str] = []
+                    async for line in resp.aiter_lines():
+                        if line:
+                            lines.append(line)
+                            continue
+                        if not lines:
+                            continue
+                        raw, ev = event(lines)
+                        lines = []
+                        for raw_out, ev_out in (through_window(raw, ev) if rewrite else [(raw, ev)]):
+                            yield sent(raw_out, ev_out)
+                    if lines:
+                        raw, ev = event(lines)
+                        for raw_out, ev_out in (through_window(raw, ev) if rewrite else [(raw, ev)]):
+                            yield sent(raw_out, ev_out)
+                except httpx.TransportError as e:
+                    self._note_upstream(target, False, error=self._describe_transport_error(e, UPSTREAM_TIMEOUT.read))
+                    raise
+                self._note_upstream(target, True, resp.status_code)
+            finally:
+                await resp_cm.__aexit__(None, None, None)
+        if rewrite:
+            for t in rewriters:
+                trace_event("post_hook", t, windowed=True)
+        for idx, raw in partial.items():
+            try:
+                result["content"][idx]["input"] = json.loads(raw) if raw.strip() else {}
+            except (ValueError, IndexError):
+                pass
+        self._run_observers(req, observers, ac.response_to_assistant_message(result))
+        log.info("%sstreamed reply done (stop=%s)", request_tag(), result.get("stop_reason"))
 
     async def models(self, upstream_url: str = "", forward_headers: dict | None = None) -> dict:
         if upstream_url:
@@ -1132,18 +1690,26 @@ class ProxyHandler:
             if not base:
                 raise ValueError("No upstream model configured. Set a model URL via the dashboard.")
             # Same base-URL forms as chat (with or without /v1).
-            target = chat_completions_url(base)[: -len("/chat/completions")] + "/models"
+            target = None
             headers = self._build_headers(default_cfg)
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.get(target, headers=headers, timeout=30.0)
+                if target is None:
+                    for root in api_root_candidates(base):
+                        target = root + "/models"
+                        response = await client.get(target, headers=headers, timeout=30.0)
+                        if response.status_code != 404:
+                            learn_api_root(base, root)
+                            break
+                else:
+                    response = await client.get(target, headers=headers, timeout=30.0)
                 if response.status_code >= 400:
                     self._note_upstream(target, False, response.status_code,
                                         (response.text or "").strip() or "(empty body)")
                 response.raise_for_status()
                 result = response.json()
         except httpx.TransportError as e:
-            self._note_upstream(target, False, error=f"{type(e).__name__}: {e}")
+            self._note_upstream(target, False, error=self._describe_transport_error(e, 30.0))
             raise ValueError(f"Error: {target} can't be reached: {e}") from e
         self._note_upstream(target, True, response.status_code)
         for name in self.tricksets:

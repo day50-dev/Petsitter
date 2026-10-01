@@ -173,4 +173,30 @@ def test_traffic_logger_reports_once_per_exchange(tmp_path):
     t.pre_hook(ctx, {})
     t.post_hook(ctx + [{"role": "assistant", "content": "yo"}])
     msgs = [e["message"] for _, e in t.live_feed.since(0)]
-    assert msgs == [f"Logged a request and its reply to {tmp_path / 't.jsonl'}"]
+    assert msgs == [f"Logged a request to {tmp_path / 't.jsonl'}"]     # one line per exchange
+
+
+def test_problems_reach_the_dashboard():
+    from petsitter.proxy import ProxyHandler
+
+    class Broken(Trick):
+        def problems(self):
+            return ["needs a thing"]
+
+    class Crashes(Trick):
+        def problems(self):
+            raise RuntimeError("boom")
+
+    h = ProxyHandler(model_url="http://x", model_name="m", tricks=[Broken(), Crashes(), Trick()])
+    info = {t["name"]: t["problems"] for t in h.get_tricks_info()}
+    assert info["Broken"] == ["needs a thing"]
+    assert info["Crashes"] == ["Couldn't check its setup: boom"]
+    assert info["Trick"] == []
+
+
+def test_secrets_protector_says_when_detect_secrets_is_missing(monkeypatch):
+    import petsitter.secret_scan as ss
+    monkeypatch.setattr(ss, "_ds_ready", False)
+    assert any("detect-secrets" in p for p in SecretsProtectorTrick().problems())
+    monkeypatch.setattr(ss, "_ds_ready", True)
+    assert SecretsProtectorTrick().problems() == []

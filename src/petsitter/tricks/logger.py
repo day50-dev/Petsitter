@@ -56,6 +56,7 @@ class LoggerTrick(Trick):
     __brief__ = "Writes every request/response as timestamped JSONL to a file"
     __display_name__ = "Traffic Logger"
     __category__ = "Diagnostics"
+    needs_window = 0   # only looks at replies, so they can stream
     config_fields = [
         {
             "key": "path",
@@ -84,7 +85,7 @@ class LoggerTrick(Trick):
         """Record the outbound request: full payload and message list."""
         meta = request_meta()
         tools = meta.get("tools") or (params or {}).get("tools") or []
-        self._append({
+        if self._append({
             "timestamp": _now(),
             "trick": type(self).__name__,
             "event": "request",
@@ -96,7 +97,11 @@ class LoggerTrick(Trick):
             "tools": tools,
             "payload": params or {},
             "messages": context,
-        })
+        }):
+            # Reported on the way out: a request whose reply never comes back
+            # (the provider timed out) was still logged. Repeats fold (x N);
+            # the reply joins its request in the log without a second line.
+            self.report(f"Logged a request to {self._log_path()}")
         return context
 
     def post_hook(self, context: list) -> list:
@@ -104,7 +109,7 @@ class LoggerTrick(Trick):
         if not context:
             return context
         meta = request_meta()
-        if self._append({
+        self._append({
             "timestamp": _now(),
             "trick": type(self).__name__,
             "event": "response",
@@ -114,9 +119,7 @@ class LoggerTrick(Trick):
             "model": meta.get("model", ""),
             "messages": context,
             "answer": context[-1],
-        }):
-            # Once per exchange, so repeats fold into one row (x N).
-            self.report(f"Logged a request and its reply to {self._log_path()}")
+        })
         return context
 
     # -- helpers -------------------------------------------------------------

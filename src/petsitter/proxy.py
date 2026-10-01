@@ -30,6 +30,7 @@ from petsitter.observability import (
     start_request_meta,
 )
 from petsitter.trick import (
+    chat_completions_url,
     find_prompt_keyword_patterns,
     Trick,
     build_upstream_headers,
@@ -829,7 +830,7 @@ class ProxyHandler:
             else:
                 upstream_payload = build_upstream_payload(default_cfg, messages, payload)
                 upstream_headers = self._build_headers(default_cfg)
-                target = f"{upstream_url}/v1/chat/completions"
+                target = chat_completions_url(upstream_url)
 
             if is_config_request:
                 log.info("%sconfig diagnostic requested via magic string", request_tag())

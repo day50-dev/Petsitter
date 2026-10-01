@@ -1,6 +1,7 @@
 {
   "schema": "0.7.0",
   "name": "gemma4",
+  "enabled": false,
   "filters": {
     "X-Title": "*",
     "Model": "gemma4*"

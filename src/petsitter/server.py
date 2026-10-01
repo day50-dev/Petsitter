@@ -28,6 +28,7 @@ from petsitter.agent_manager import AgentManager
 from petsitter.gui_routes import register_gui_routes
 from petsitter.proxy import ANTHROPIC_UPSTREAM, ProxyHandler
 from petsitter.trick import (
+    chat_completions_url,
     configure,
     configure_modelset,
     get_model_config,
@@ -79,7 +80,10 @@ _SOURCE_TRICKSETS = Path(__file__).resolve().parent / "tricksets"
 
 # Tricks seeded into a brand-new "_default" trickset when no tricks are
 # configured anywhere (no -t flags, no saved trickset file).
-DEFAULT_TRICKS = ["tricks/conversational_tool.py", "tricks/secrets_protector.py"]
+# The heavy hitters: see what your tool is doing, keep secrets out of the
+# model, and keep a copy of the conversation. Tool Monitor goes first so it
+# sees the tool list before anything else changes it.
+DEFAULT_TRICKS = ["tricks/tool_monitor.py", "tricks/secrets_protector.py", "tricks/exportit.py"]
 
 _PROXY_HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*(?::\d+)?$")
 
@@ -419,6 +423,8 @@ def reload_config(handler: "ProxyHandler") -> dict:
         except Exception:
             logging.getLogger("petsitter").exception("Failed to load trickset %s on reread", f)
             continue
+        if not ts.enabled:
+            continue
         handler.tricksets[ts.name] = ts
         summary["added"].append(ts.name)
 
@@ -493,6 +499,24 @@ def install_examples(force: bool = False) -> list[dict]:
     return results
 
 
+def _load_saved_tricksets(skip: set[str]) -> dict[str, Trickset]:
+    """Load every trickset file in TRICKSETS_DIR that's on and not in *skip*."""
+    loaded: dict[str, Trickset] = {}
+    if not TRICKSETS_DIR.exists():
+        return loaded
+    for f in sorted(TRICKSETS_DIR.glob("*.json")):
+        if f.stem in skip or f.stem == "_default":
+            continue
+        try:
+            ts = Trickset.load_from_file(str(f))
+        except Exception:
+            logging.getLogger("petsitter").exception("Failed to load trickset %s", f)
+            continue
+        if ts.enabled and ts.name not in skip:
+            loaded[ts.name] = ts
+    return loaded
+
+
 def create_app(
     model_url: str,
     model_name: str | None,
@@ -522,6 +546,11 @@ def create_app(
             except Exception:
                 logging.getLogger("petsitter").exception("Failed to restore saved _default trickset; falling back to defaults")
 
+    # Every saved trickset is a live channel unless it was turned off (the
+    # same set a config reload picks up).
+    if restore_saved:
+        tricksets.update(_load_saved_tricksets(skip=set(tricksets)))
+
     if trick_paths:
         if "_default" in tricksets:
             existing = tricksets["_default"]
@@ -548,15 +577,11 @@ def create_app(
     _log_capture.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
     logging.getLogger().addHandler(_log_capture)
 
-    # First-run: install example tricksets to user config dir
+    # First run used to copy the example channels (gemma4, opencode) into
+    # the user's folder. Channels are live by default now, so examples are
+    # opt-in instead: Help -> Install Examples, and they arrive turned off.
     cfg = load_config()
     if not cfg.get("first_run"):
-        results = install_examples()
-        for r in results:
-            if r["result"]:
-                logging.getLogger("petsitter").info("Installed example trickset: %s", r["name"])
-            else:
-                logging.getLogger("petsitter").info("Skipped existing trickset: %s (%s)", r["name"], r.get("errmsg", ""))
         cfg["first_run"] = True
         save_config(cfg)
 
@@ -629,7 +654,7 @@ def create_app(
                     return JSONResponse(
                         {"error": "No upstream model configured. Set a model URL via the dashboard.",
                          "type": "setup_required"}, status_code=503)
-                target = f"{upstream_url.rstrip('/')}/v1/chat/completions"
+                target = chat_completions_url(upstream_url)
                 extra_headers = {}
                 api_key = (default_cfg or {}).get("key")
                 if api_key is not False and api_key:
@@ -921,6 +946,13 @@ def create_app(
                 ts.trick_configs = new_configs
                 ts.load_tricks()
                 ts.save()
+        if "enabled" in data and name != "_default":
+            ts.enabled = bool(data["enabled"])
+            if not ts.enabled:
+                # Off: saved as off, and unloaded so no request matches it.
+                ts.save()
+                handler.tricksets.pop(name, None)
+                return JSONResponse({"success": True, "enabled": False})
         if "parameters" in data:
             ts.parameters = dict(data["parameters"])
         if "models" in data:
@@ -1094,6 +1126,41 @@ def _get_version() -> str:
     return "0.0.0"
 
 
+# Python's webbrowser falls back to terminal browsers (links, lynx, w3m,
+# www-browser, elinks) when it finds no graphical one, and those take over the
+# very terminal petsitter is running in. The stdlib registers those as plain
+# GenericBrowser (elinks as its own Elinks class); every graphical choice is
+# something else: BackgroundBrowser (xdg-open, firefox), MacOSXOSAScript on
+# macOS, WindowsDefault on Windows.
+#
+# Per platform:
+#   any OS, over SSH     -> don't open (it would open on the server, not on
+#                           your machine, even with X forwarding)
+#   Linux / BSD          -> need DISPLAY or WAYLAND_DISPLAY (a desktop session)
+#   macOS, Windows       -> no display variable exists or is needed
+#   BROWSER set          -> your explicit choice, always honored
+def _can_open_gui_browser() -> tuple[bool, str]:
+    """Whether auto-opening the dashboard would land somewhere useful."""
+    if os.environ.get("BROWSER"):
+        return True, ""            # an explicit choice wins
+    if any(os.environ.get(v) for v in ("SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY")):
+        # Even with X forwarding, it would open on the server, not your machine.
+        return False, "running over SSH"
+    if (sys.platform.startswith("linux") or "bsd" in sys.platform) \
+            and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        return False, "no display"
+    try:
+        import webbrowser
+        controller = webbrowser.get()
+    except Exception:
+        return False, "no browser found"
+    terminal = tuple(c for c in (getattr(webbrowser, "Elinks", None),) if c)
+    if type(controller) is webbrowser.GenericBrowser or (terminal and isinstance(controller, terminal)):
+        name = getattr(controller, "name", "") or "a terminal browser"
+        return False, f"only {name} is available, which would take over this terminal"
+    return True, ""
+
+
 @click.command()
 @click.version_option(
     _get_version(),
@@ -1232,6 +1299,16 @@ def cli(config_arg: str | None, listen_on: str, no_browser: bool) -> None:
 
     if not no_browser:
         dashboard_url = f"http://{host if host != '0.0.0.0' else 'localhost'}:{port}/"
+        can_open, why_not = _can_open_gui_browser()
+        if not can_open:
+            no_browser = True
+            print(f"  Not opening a browser ({why_not}). Open {dashboard_url} yourself.", flush=True)
+            if why_not == "running over SSH":
+                print(f"  From your own machine:  ssh -L {port}:localhost:{port} <this host>"
+                      f"  then open http://localhost:{port}/", flush=True)
+            print(flush=True)
+
+    if not no_browser:
 
         def _open_when_ready():
             import time

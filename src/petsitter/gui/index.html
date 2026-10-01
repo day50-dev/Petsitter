@@ -52,11 +52,12 @@
 <!-- The selected channel, like a chat app's channel topic bar. -->
 <div class="rule-bar" id="ts-bar">
 <div class="rule-row">
-<span class="chan-title"><span class="chan-glyph" id="chan-glyph">#</span><span id="rule-name">Everything else</span></span>
+<span class="chan-title"><span class="chan-glyph" id="chan-glyph">#</span><span id="rule-name">Default</span></span>
 <span class="rule-sentence" id="rule-sentence"></span>
 <button class="btn btn-sm btn-secondary" id="rule-edit-btn" onclick="openRuleEditor(false)">Edit channel</button>
 </div>
 <div class="rule-editor" id="rule-editor" hidden></div>
+<div class="chan-off-note" id="chan-off-note" hidden></div>
 </div>
 
 <div class="tabs">
@@ -1171,7 +1172,7 @@ async function _loadExtSource(e) {
 
 // What the pane says before anything is picked: what an extension is, in
 // one breath, and a few worth starting with.
-const EXT_STARTERS = ['tricks/secrets_protector.py', 'tricks/tool_call.py', 'tricks/json_mode.py', 'tricks/logger.py'];
+const EXT_STARTERS = ['tricks/tool_monitor.py', 'tricks/secrets_protector.py', 'tricks/exportit.py', 'tricks/logger.py'];
 function _extWelcome() {
   const starters = EXT_STARTERS.map(p => _catalog.find(e => e.path === p)).filter(Boolean);
   const cards = starters.map(e => {
@@ -1341,7 +1342,7 @@ function pgPersist() {
 
 function updatePgTarget() {
   const el = document.getElementById('pg-target');
-  if (el) el.textContent = selectedTrickset ? '\u2192 ' + selectedTrickset : '';
+  if (el) el.textContent = selectedTrickset ? '\u2192 ' + ruleLabel(selectedTrickset) : '';
 }
 
 function clearPlayground() {
@@ -1365,11 +1366,38 @@ function renderPlaygroundLog() {
   log.scrollTop = log.scrollHeight;
 }
 
+// Replies are Markdown. They come from a model (which can be talked into
+// writing anything), so they go through the same locked-down renderer as
+// extension pages: raw HTML shows as text, only safe links survive.
+function pgSetBody(node, entry) {
+  const body = node.querySelector('.pg-body');
+  if (entry.role === 'assistant' && entry.text !== '\u2026') {
+    const src = entry.isToolCall ? '```json\n' + entry.text + '\n```' : entry.text;
+    body.innerHTML = _safeMd.parse(src);
+    body.classList.add('md');
+    body.querySelectorAll('pre code').forEach(b => { if (window.hljs) hljs.highlightElement(b); });
+  } else {
+    body.textContent = entry.text;
+    body.classList.remove('md');
+  }
+}
+
 function pgNode(entry) {
   const div = document.createElement('div');
   div.className = 'pg-msg ' + (entry.role === 'you' ? 'user' : entry.role);
-  div.innerHTML = `<div class="pg-role">${escapeHtml(entry.role)}</div><div class="pg-body"></div>`;
-  div.querySelector('.pg-body').textContent = entry.text;
+  const role = entry.role + (entry.replay ? ' \u00b7 replay' : '');
+  div.innerHTML = `<div class="pg-role"><span>${escapeHtml(role)}</span></div><div class="pg-body"></div>`;
+  if (entry.role === 'you') {
+    // Replay: send this message again, with the conversation as it was at
+    // this point, and add the new answer at the bottom to compare.
+    const btn = document.createElement('button');
+    btn.className = 'pg-replay';
+    btn.title = 'Send this message again, with the conversation as it was here';
+    btn.innerHTML = '&#8635; Replay';
+    btn.onclick = () => replayPlayground(entry);
+    div.querySelector('.pg-role').appendChild(btn);
+  }
+  pgSetBody(div, entry);
   if (entry.result) div.appendChild(renderTrace(entry.result));
   return div;
 }
@@ -1393,8 +1421,23 @@ async function sendPlayground() {
 
   input.value = '';
   pgPush({role: 'you', text});
-  const messages = pgApiMessages();
+  await pgRun(pgApiMessages());
+}
 
+function replayPlayground(entry) {
+  if (pgBusy) return;
+  const i = pgLog.indexOf(entry);
+  if (i < 0) return;
+  // The conversation up to and including that message, as it was then.
+  const history = pgLog.slice(0, i + 1)
+    .filter(e => e.role === 'you' || e.role === 'assistant')
+    .map(e => ({role: e.role === 'you' ? 'user' : 'assistant', content: e.text}));
+  pgPush({role: 'you', text: entry.text, replay: true});
+  return pgRun(history);
+}
+
+async function pgRun(messages) {
+  const input = document.getElementById('pg-text');
   pgBusy = true;
   const btn = document.getElementById('pg-send');
   btn.disabled = true;
@@ -1406,9 +1449,10 @@ async function sendPlayground() {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({messages, trickset: selectedTrickset})
     });
+    entry.isToolCall = !d.reply && !!d.tool_calls;
     entry.text = d.reply || (d.tool_calls ? JSON.stringify(d.tool_calls, null, 2) : '(empty response)');
     entry.result = {trace: d.trace, elapsed_ms: d.elapsed_ms, usage: d.usage};
-    node.querySelector('.pg-body').textContent = entry.text;
+    pgSetBody(node, entry);
     node.appendChild(renderTrace(entry.result));
     flashFiredTricks(d.trace);
   } catch(e) {
@@ -1553,20 +1597,20 @@ function _markNewTricksets(names) {
 // ---- rules (tricksets) ----
 // In the dashboard a trickset is a rule: "for requests from OpenCode, use
 // these extensions". Every loaded rule whose filters match a request applies;
-// "_default" is shown as "Everything else" because it only runs when nothing
+// "_default" is shown as "Default" because it only runs when nothing
 // else matched. Tricksets saved on disk but not loaded don't run at all.
 let _availTricksets = [];
 let _traffic = {apps: [], models: [], tricksets: []};
 let _ruleEditingNew = false;
 
-function ruleLabel(name) { return name === '_default' ? 'Everything else' : name; }
+function ruleLabel(name) { return name === '_default' ? 'Default' : name; }
 
 function _isGlob(v) { return /[*?[]/.test(v); }
 
 function ruleSentence(name) {
   if (name === '_default') return 'Requests that no other rule matches';
   const ts = loadedTricksets[name];
-  if (!ts) return 'Saved, but off. Open it to turn it on.';
+  if (!ts) return 'Not running';
   const app = (ts.filters || {})['X-Title'] || '*';
   const model = (ts.filters || {})['Model'] || '*';
   if (app === '*' && model === '*') return 'Every request';
@@ -1590,13 +1634,15 @@ function ruleStats(name) {
   return `${t.count} request${t.count === 1 ? '' : 's'} &middot; last ${_ago(t.ago)}`;
 }
 
-// Loaded rules in the order they're checked, "Everything else" last, then
-// the ones saved on disk but off.
+// Every channel, loaded or not, in one stable order: alphabetical, Default
+// last. Nothing moves when a channel is turned on.
 function _ruleNames() {
-  const loaded = Object.keys(loadedTricksets).filter(n => n !== '_default');
-  const off = _availTricksets.map(a => a.name).filter(n => n !== '_default' && !loadedTricksets[n]);
-  return [...loaded, '_default', ...[...new Set(off)]];
+  const names = new Set([...Object.keys(loadedTricksets), ..._availTricksets.map(a => a.name)]);
+  names.delete('_default');
+  return [...[...names].sort((a, b) => a.localeCompare(b)), '_default'];
 }
+
+function isChannelOn(name) { return name === '_default' || !!loadedTricksets[name]; }
 
 function _setTricksetList(loaded, avail) {
   loadedTricksets = {};
@@ -1621,7 +1667,15 @@ function renderRuleBar() {
   document.getElementById('rule-name').textContent = ruleLabel(name);
   const stats = ruleStats(name);
   document.getElementById('rule-sentence').innerHTML = ruleSentence(name) + (stats ? ` <span class="rule-stats">&middot; ${stats}</span>` : '');
-  document.getElementById('rule-edit-btn').style.display = name === '_default' ? 'none' : '';
+  const on = isChannelOn(name);
+  document.getElementById('rule-edit-btn').style.display = (name === '_default' || !on) ? 'none' : '';
+  document.getElementById('chan-off-note').hidden = on;
+  if (!on) {
+    document.getElementById('chan-off-note').innerHTML =
+      `<div><b>#${escapeHtml(name)} is off.</b> It&rsquo;s saved, but its extensions don&rsquo;t apply to any requests until you turn it back on.</div>`
+      + `<button class="btn btn-primary" onclick="turnOnChannel(${escapeHtml(JSON.stringify(name))})">Turn on</button>`;
+  }
+  document.body.classList.toggle('chan-off', !on);
   renderChannelRail();
 }
 
@@ -1633,7 +1687,7 @@ const _agentsIcon = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none"
 function renderChannelRail() {
   const rail = document.getElementById('chan-rail');
   if (!rail) return;
-  // A channel matching every request means "Everything else" never runs.
+  // A channel matching every request means Default never runs.
   const catchAll = Object.values(loadedTricksets).find(ts => ts.name !== '_default'
     && ((ts.filters || {})['X-Title'] || '*') === '*' && ((ts.filters || {})['Model'] || '*') === '*');
   const item = n => {
@@ -1653,9 +1707,7 @@ function renderChannelRail() {
              : t ? `<span class="chan-count${live ? ' live' : ''}">${t.count > 999 ? '999+' : t.count}</span>` : '')
       + `</button>`;
   };
-  const names = _ruleNames();
-  const live = names.filter(n => loadedTricksets[n] && n !== '_default');
-  const off = names.filter(n => !loadedTricksets[n]);
+  const names = _ruleNames().filter(n => n !== '_default');
   const collapsed = document.body.classList.contains('rail-collapsed');
   const home = currentTab === 'intro';
   const noChan = NO_CHANNEL_TABS.includes(currentTab);
@@ -1670,12 +1722,11 @@ function renderChannelRail() {
     + `<button class="chan chan-page${currentTab === 'models' ? ' active' : ''}" onclick="switchTab('models')" title="Models: your provider, and the models petsitter sends to">`
     + `<span class="chan-abbr" aria-hidden="true">${_modelsIcon}</span><span class="chan-glyph" aria-hidden="true">${_modelsIcon}</span><span class="chan-name">Models</span></button>`
     + `<div class="chan-h">Channels</div>`
-    + live.map(item).join('')
+    + names.map(item).join('')
     + item('_default')
-    + (catchAll ? `<div class="chan-warn">Everything else never runs while <b>#${escapeHtml(catchAll.name)}</b> matches every request.</div>` : '')
+    + (catchAll ? `<div class="chan-warn">Default never runs while <b>#${escapeHtml(catchAll.name)}</b> matches every request.</div>` : '')
     + `<button class="chan chan-add${currentTab === 'newchannel' ? ' active' : ''}" onclick="openRuleEditor(true)" title="Add channel"><span class="chan-abbr" aria-hidden="true">+</span><span class="chan-glyph">+</span><span class="chan-name">Add channel</span></button>`
-    + (off.length ? `<div class="chan-h chan-h-off">Saved, off</div>` + off.map(item).join('') : '')
-    + `<div class="chan-foot">Each app's requests go through every channel that matches it. <b>Everything else</b> gets what no channel matches.</div>`;
+    + `<div class="chan-foot">Each app's requests go through every channel that matches it. <b>Default</b> gets what no channel matches.</div>`;
 }
 
 // From a page that isn't about any channel (Start here, Help), opening a
@@ -1735,7 +1786,7 @@ async function refreshChannelList() {
     if (before === sig(loaded) + '|' + sig(avail)) return;
     _markNewTricksets(loaded.map(ts => ts.name));
     _setTricksetList(loaded, avail);
-    if (!loadedTricksets[selectedTrickset]) switchTrickset('_default');
+    if (!isChannelOn(selectedTrickset) && !_availTricksets.some(a => a.name === selectedTrickset)) switchTrickset('_default');
   } catch(e) {}
 }
 
@@ -1772,7 +1823,9 @@ function openRuleEditor(isNew) {
     + `<div class="rule-ed-preview" id="rule-ed-preview"></div>`
     + `<div class="rule-ed-actions"><button class="btn btn-sm btn-neutral" onclick="saveRule()">${isNew ? 'Create channel' : 'Save'}</button>`
     + `<button class="btn btn-sm btn-secondary" onclick="${isNew ? 'cancelNewChannel()' : 'closeRuleEditor()'}">Cancel</button>`
-    + (isNew ? '' : `<button class="btn btn-sm btn-danger rule-ed-del" onclick="deleteTrickset()">Delete channel</button>`)
+    + (isNew ? '' : `<span class="rule-ed-spacer"></span>`
+        + `<button class="btn btn-sm btn-secondary" onclick="setChannelOn(${escapeHtml(JSON.stringify(ts.name))}, false)" title="Keep it saved, but stop it applying to requests">Turn off</button>`
+        + `<button class="btn btn-sm btn-danger" onclick="deleteTrickset()">Delete channel</button>`)
     + `</div>`;
   ed.hidden = false;
   ruleEdPreview(isNew);
@@ -1791,7 +1844,7 @@ function ruleEdPreview(quiet) {
   const model = document.getElementById('rule-model').value.trim() || '*';
   const el = document.getElementById('rule-ed-preview');
   if (quiet !== true && app === '*' && model === '*') {
-    el.innerHTML = 'This matches <b>every</b> request, so <b>Everything else</b> would never run.';
+    el.innerHTML = 'This matches <b>every</b> request, so <b>Default</b> would never run.';
     el.className = 'rule-ed-preview warn';
   } else {
     el.innerHTML = '';
@@ -1841,6 +1894,20 @@ async function saveRule() {
   } catch(e) { showToast(e.message, true); }
 }
 
+// On/off is saved in the channel's file, so it holds across restarts.
+async function setChannelOn(name, on) {
+  try {
+    await fetchJSON('/api/tricksets/' + encodeURIComponent(name), {
+      method: 'PUT', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({enabled: on}),
+    });
+    showToast(on ? `#${name} is running` : `#${name} is off`);
+    closeRuleEditor();
+    await fetchTricksets();
+  } catch(e) { showToast(e.message, true); }
+}
+function turnOnChannel(name) { return setChannelOn(name, true); }
+
 async function fetchTricksets() {
   try {
     const [loaded, avail] = await Promise.all([
@@ -1851,7 +1918,8 @@ async function fetchTricksets() {
     _setTricksetList(loaded, avail);
     fetchTraffic();
     const loadedNames = new Set(loaded.map(ts => ts.name));
-    if (!loadedNames.has(selectedTrickset) && loaded.length) selectedTrickset = loaded[0].name;
+    const known = loadedNames.has(selectedTrickset) || (avail || []).some(a => a.name === selectedTrickset);
+    if (!known) selectedTrickset = '_default';
     if (loaded.length) switchTrickset(selectedTrickset);
   } catch(e) { console.error(e); }
 }
@@ -1864,23 +1932,11 @@ async function switchTrickset(name) {
   updateHash();
   updatePgTarget();
   renderRuleBar();
-  const isLoaded = !!loadedTricksets[name];
-  if (!isLoaded) {
-    try {
-      const avail = await fetchJSON('/api/tricksets/available');
-      const info = avail.find(a => a.name === name);
-      if (info) {
-        await fetchJSON('/api/tricksets/load', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path: info.path}) });
-        loadedTricksets[name] = (await fetchJSON('/api/tricksets/' + encodeURIComponent(name)));
-        fetchTricksets();
-      }
-    } catch(e) {
-      showToast(e.message, true);
-      selectedTrickset = Object.keys(loadedTricksets)[0] || '_default';
-      fetchTricksets();
-    }
-    return;
-  }
+  // Clicking a channel only ever shows it. One that isn't running gets a
+  // note saying so and a separate "Turn on"; nothing is loaded by looking.
+  const isLoaded = isChannelOn(name);
+  document.body.classList.toggle('chan-off', !isLoaded);
+  if (!isLoaded) return;
   try {
     const ts = loadedTricksets[name];
     document.getElementById('ts-bar').style.display = '';
@@ -2376,7 +2432,7 @@ function renderChannelModels() {
   const list = document.getElementById('ts-model-list');
   if (!note || !list) return;
   if (selectedTrickset === '_default') {
-    note.innerHTML = 'Everything else uses the global models. <a href="#" onclick="switchTab(\'models\');return false">Change them on the Models page</a>.';
+    note.innerHTML = 'Default uses the global models. <a href="#" onclick="switchTab(\'models\');return false">Change them on the Models page</a>.';
     list.innerHTML = '';
     return;
   }

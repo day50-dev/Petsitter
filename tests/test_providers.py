@@ -435,3 +435,25 @@ class TestProviderRoutes:
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 await ac.post("/api/models/discover", json={"provider": "openai", "api_key": False})
         assert disc.call_args.args[1] == ""
+
+
+class TestChatCompletionsUrl:
+    """Every way a model URL gets written reaches the same chat endpoint."""
+
+    def test_forms(self):
+        from petsitter.trick import chat_completions_url as u
+        want = "http://localhost:11434/v1/chat/completions"
+        assert u("http://localhost:11434/v1") == want        # what the provider picker saves
+        assert u("http://localhost:11434/v1/") == want
+        assert u("http://localhost:11434") == want           # hand-written, no /v1
+        assert u("http://localhost:11434/") == want
+        assert u(want) == want                               # the whole endpoint pasted
+        assert u("https://openrouter.ai/api/v1") == "https://openrouter.ai/api/v1/chat/completions"
+
+    def test_every_catalog_provider_gets_a_single_v1(self):
+        from petsitter.providers import PROVIDERS
+        from petsitter.trick import chat_completions_url as u
+        for p in PROVIDERS:
+            if p.get("routable") is False:
+                continue
+            assert "/v1/v1/" not in u(p["base_url"]), p["id"]

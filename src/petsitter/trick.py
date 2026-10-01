@@ -82,6 +82,23 @@ def get_model_config(key: str = "default") -> dict[str, Any]:
     )
 
 
+def chat_completions_url(base: str) -> str:
+    """The chat endpoint for a configured model URL, whichever way it was written.
+
+    Provider catalogs, and most docs, give the OpenAI base *with* /v1
+    ("http://localhost:11434/v1"); hand-written configs often leave it off
+    ("http://localhost:11434"); some paste the whole endpoint. All three mean
+    the same thing, and appending "/v1/chat/completions" blindly turned the
+    first into ".../v1/v1/chat/completions".
+    """
+    u = (base or "").strip().rstrip("/")
+    if u.endswith("/chat/completions"):
+        return u
+    if u.endswith("/v1"):
+        return u + "/chat/completions"
+    return u + "/v1/chat/completions"
+
+
 def build_upstream_payload(model_cfg: dict[str, Any], messages: list, extra: dict | None = None) -> dict:
     """Build the upstream request payload from a model config.
 
@@ -151,12 +168,12 @@ def callmodel_sync(
         headers["Authorization"] = f"Bearer {api_key}"
 
     get_logger().info(
-        "%scallmodel_sync: %s/v1/chat/completions model=%r messages=%d",
-        request_tag(), model_url, model_name or "default", len(messages),
+        "%scallmodel_sync: %s model=%r messages=%d",
+        request_tag(), chat_completions_url(model_url), model_name or "default", len(messages),
     )
     with httpx.Client() as client:
         response = client.post(
-            f"{model_url}/v1/chat/completions",
+            chat_completions_url(model_url),
             json=payload,
             headers=headers,
             timeout=60.0,
@@ -557,12 +574,12 @@ async def callmodel(
         headers["Authorization"] = f"Bearer {api_key}"
 
     get_logger().info(
-        "%scallmodel: %s/v1/chat/completions model=%r messages=%d",
-        request_tag(), model_url, model_name or "default", len(messages),
+        "%scallmodel: %s model=%r messages=%d",
+        request_tag(), chat_completions_url(model_url), model_name or "default", len(messages),
     )
     async with httpx.AsyncClient() as client:
         response = await client.post(
-            f"{model_url}/v1/chat/completions",
+            chat_completions_url(model_url),
             json=payload,
             headers=headers,
             timeout=60.0,

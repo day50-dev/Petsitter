@@ -1179,6 +1179,39 @@ header .nav a:hover { background: #1a2a4d; }
   color: #c8d6e5;
 }
 .pg-msg.user .pg-body { background: #1a2a4d; color: #d8e4f0; }
+.pg-msg .pg-role { display: flex; align-items: center; gap: 8px; }
+.pg-replay {
+  margin-left: auto;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: #5a7a8a;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: .04em;
+  text-transform: none;
+  padding: 0 6px;
+  cursor: pointer;
+  opacity: .5;
+  transition: opacity .12s;
+}
+.pg-msg:hover .pg-replay, .pg-replay:focus-visible { opacity: 1; }
+@media (hover: none) { .pg-replay { opacity: 1; } }
+.pg-replay:hover { color: #8ab4ff; border-color: #2a4a6a; }
+
+/* Rendered Markdown replies: normal flow instead of pre-wrap. */
+.pg-msg .pg-body.md { white-space: normal; }
+.pg-body.md > :first-child { margin-top: 0; }
+.pg-body.md > :last-child { margin-bottom: 0; }
+.pg-body.md p { margin: .45em 0; }
+.pg-body.md ul, .pg-body.md ol { margin: .4em 0; padding-left: 1.4em; }
+.pg-body.md h1, .pg-body.md h2, .pg-body.md h3 { font-size: 13px; color: #e0e0e0; margin: .7em 0 .3em; }
+.pg-body.md code { background: #0f0f23; padding: 1px 4px; border-radius: 3px; font-size: 11px; color: #f5c542; }
+.pg-body.md pre { background: #0f0f23; border: 1px solid #1e2a3a; border-radius: 4px; padding: 6px 8px; overflow-x: auto; margin: .5em 0; }
+.pg-body.md pre code { background: none; padding: 0; color: inherit; }
+.pg-body.md a { color: #8ab4ff; }
+.pg-body.md table { border-collapse: collapse; margin: .5em 0; }
+.pg-body.md th, .pg-body.md td { border: 1px solid #2a3a4a; padding: 2px 6px; }
 .pg-msg.error .pg-body { background: #2e1a1f; color: #ff9b9b; }
 
 .pg-trace { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 5px; }
@@ -2228,7 +2261,7 @@ body.rail-collapsed .chan-count { position: absolute; top: 0; right: 0; font-siz
 .rule-ed-preview { font-size: 12px; margin-top: 8px; }
 .rule-ed-preview.warn { color: #ffb84d; }
 .rule-ed-actions { display: flex; gap: 8px; margin-top: 12px; }
-.rule-ed-del { margin-left: auto; }
+.rule-ed-spacer { flex: 1; }
 .rule-suggest { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: #6b8299; margin-bottom: 12px; }
 .rule-chip {
   font: inherit;
@@ -2338,3 +2371,27 @@ body.rail-collapsed .chan-count { position: absolute; top: 0; right: 0; font-siz
   text-decoration: none;
 }
 .ext-popout:hover { color: #fff; background: #1a2a4d; }
+
+/* A channel that isn't running: its page says so, with Turn on, and the
+   per-channel tabs (which would show another channel's data) are hidden. */
+.chan-off-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding: 14px 16px;
+  background: #2a220f;
+  border: 1px solid #5a4a1f;
+  border-radius: 8px;
+  color: #e8d9b0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.chan-off-note b { color: #ffd08a; }
+.chan-off-note[hidden] { display: none; }
+body.chan-off:not(.no-channel) .tabs,
+body.chan-off:not(.no-channel) #tab-tricks,
+body.chan-off:not(.no-channel) #tab-logs,
+body.chan-off:not(.no-channel) #tab-settings { display: none !important; }

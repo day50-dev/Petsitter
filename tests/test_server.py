@@ -66,13 +66,13 @@ class TestCreateAppDefaults:
             return (await ac.get(f"/api/tricksets/{name}")).json()["tricks"]
 
     @pytest.mark.asyncio
-    async def test_fresh_default_seeds_conversational_and_secrets(self, monkeypatch, tmp_path):
-        """A brand-new _default starts with conversational_tool + secrets_protector."""
+    async def test_fresh_default_seeds_the_heavy_hitters(self, monkeypatch, tmp_path):
+        """A brand-new _default starts with tool_monitor, secrets_protector, exportit."""
         monkeypatch.setattr("petsitter.server.TRICKSETS_DIR", tmp_path)
         app = create_app(model_url="", model_name=None, api_key="", trick_paths=[])
         tricks = await self._trick_files(app)
         files = [t["file"] for t in tricks]
-        assert files == ["tricks/conversational_tool.py", "tricks/secrets_protector.py"]
+        assert files == ["tricks/tool_monitor.py", "tricks/secrets_protector.py", "tricks/exportit.py"]
         assert all(t["enabled"] for t in tricks)
 
     @pytest.mark.asyncio
@@ -96,7 +96,7 @@ class TestCreateAppDefaults:
         ])
         app = create_app(model_url="", model_name=None, api_key="", trick_paths=[])
         tricks = await self._trick_files(app)
-        assert tricks[0]["file"] == "tricks/conversational_tool.py"
+        assert tricks[0]["file"] == "tricks/tool_monitor.py"
 
     @pytest.mark.asyncio
     async def test_restore_plus_trick_paths_adds_missing_only(self, monkeypatch, tmp_path):
@@ -121,7 +121,7 @@ class TestCreateAppDefaults:
         monkeypatch.setattr("petsitter.server.TRICKSETS_DIR", tmp_path)
         app = create_app(model_url="", model_name=None, api_key="", trick_paths=[], restore_saved=True)
         tricks = await self._trick_files(app)
-        assert tricks[0]["file"] == "tricks/conversational_tool.py"
+        assert tricks[0]["file"] == "tricks/tool_monitor.py"
 
 
 class TestServerEndpoints:

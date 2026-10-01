@@ -58,6 +58,9 @@ class Trickset:
         self.parameters: dict[str, Any] = parameters or {}
         self.models: dict[str, str] = models or {}
         self.tricks: list[Trick] = []
+        # A channel is on unless someone turned it off. Off is saved in the
+        # file, so it survives restarts; an off trickset isn't loaded at all.
+        self.enabled: bool = True
         self.logfile = logfile if logfile else _default_logfile(name)
         self.loglevel = (loglevel or "INFO").upper()
 
@@ -137,7 +140,8 @@ class Trickset:
 
         - ``"reloaded"`` — config re-applied (from *data* or the JSON file)
         - ``"kept"``     — no file path and no inline data, left untouched
-        - ``"removed"``  — file is gone, caller should unload it
+        - ``"removed"``  — file is gone or the trickset was turned off; caller
+          should unload it
         """
         if data is None:
             if not self.file_path:
@@ -151,6 +155,9 @@ class Trickset:
             data = json.loads(p.read_text())
         else:
             source = "inline"
+        self.enabled = data.get("enabled", True) is not False
+        if not self.enabled and self.name != "_default":
+            return {"name": self.name, "action": "removed", "reason": "turned off"}
         self.filters = data.get("filters", {"X-Title": "*", "Model": "*"})
         self.parameters = data.get("parameters", {})
         self.models = data.get("models", {})
@@ -234,6 +241,7 @@ class Trickset:
     def to_dict(self) -> dict:
         return {
             "name": self.name,
+            "enabled": self.enabled,
             "schema": self.schema,
             "filters": dict(self.filters),
             "tricks": self._trick_entries(),
@@ -248,6 +256,7 @@ class Trickset:
         return {
             "schema": self.schema,
             "name": self.name,
+            "enabled": self.enabled,
             "filters": dict(self.filters),
             "tricks": self._trick_entries(),
             "parameters": dict(self.parameters),
@@ -310,6 +319,7 @@ class Trickset:
         logfile = data.get("logfile")
         loglevel = data.get("loglevel", "INFO")
         ts = cls(name, schema, filters, trick_paths, file_path=file_path, parameters=parameters, models=models, trick_enabled=trick_enabled, trick_ids=trick_ids, trick_keywords=trick_keywords, logfile=logfile, loglevel=loglevel, trick_configs=trick_configs)
+        ts.enabled = data.get("enabled", True) is not False
         ts.load_tricks()
         ts.get_logger().info("trickset '%s': loaded %d tricks", name, len(ts.tricks))
         return ts

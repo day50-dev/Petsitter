@@ -1,6 +1,7 @@
 {
   "schema": "0.7.0",
   "name": "opencode",
+  "enabled": false,
   "filters": {
     "X-Title": "opencode*",
     "Model": "*"

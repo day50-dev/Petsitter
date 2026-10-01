@@ -426,6 +426,10 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
             payload["model"] = handler.model_name
         if data.get("temperature") is not None:
             payload["temperature"] = data["temperature"]
+        # Tools the panel offers (its key/value table). The panel runs the
+        # calls itself and sends the results back as `tool` messages.
+        if isinstance(data.get("tools"), list) and data["tools"]:
+            payload["tools"] = data["tools"]
 
         token = start_trace()
         started = _time.monotonic()

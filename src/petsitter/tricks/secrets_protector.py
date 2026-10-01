@@ -217,7 +217,7 @@ class SecretsProtectorTrick(Trick):
 
     def _content_messages(self, context: list) -> list:
         roles = {"user", "tool"}
-        return [m for m in context if m.get("role") in roles and isinstance(m.get("content"), str)]
+        return [m for m in context if m.get("role") in roles and isinstance(m.get("content"), (str, list))]
 
     def pre_hook(self, context: list, params: dict) -> list:
         # Every user turn, not just the newest: the client resends the raw
@@ -229,9 +229,14 @@ class SecretsProtectorTrick(Trick):
             for msg in context:
                 self._scrub_message(msg)
         for msg in self._content_messages(context):
-            sanitized = self._sanitize(msg["content"])
-            if sanitized != msg["content"]:
-                msg["content"] = sanitized
+            content = msg["content"]
+            if isinstance(content, str):
+                msg["content"] = self._sanitize(content)
+            else:
+                # a list of parts: the text ones (images and the like pass as is)
+                for block in content:
+                    if isinstance(block, dict) and isinstance(block.get("text"), str):
+                        block["text"] = self._sanitize(block["text"])
         return context
 
     def post_hook(self, context: list) -> list:

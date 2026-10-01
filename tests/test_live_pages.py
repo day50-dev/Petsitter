@@ -200,3 +200,29 @@ def test_secrets_protector_says_when_detect_secrets_is_missing(monkeypatch):
     assert any("detect-secrets" in p for p in SecretsProtectorTrick().problems())
     monkeypatch.setattr(ss, "_ds_ready", True)
     assert SecretsProtectorTrick().problems() == []
+
+
+def test_playground_passes_its_tools_and_tool_turns():
+    seen = {}
+
+    async def fake(payload, x_title=""):
+        seen.update(payload)
+        return {"choices": [{"message": {"role": "assistant", "content": None, "tool_calls": [
+            {"id": "c", "type": "function", "function": {"name": "get_table", "arguments": "{}"}}]}}]}
+
+    client = _client(Trick())
+    import petsitter.proxy as proxy_mod
+    orig = proxy_mod.ProxyHandler.chat_completions
+    proxy_mod.ProxyHandler.chat_completions = lambda self, payload, x_title="": fake(payload, x_title)
+    try:
+        tools = [{"type": "function", "function": {"name": "get_table", "parameters": {"type": "object"}}}]
+        msgs = [{"role": "user", "content": "hi"},
+                {"role": "assistant", "content": None, "tool_calls": [{"id": "a", "type": "function",
+                 "function": {"name": "get_table", "arguments": "{}"}}]},
+                {"role": "tool", "tool_call_id": "a", "content": "{}"}]
+        r = client.post("/api/playground", json={"messages": msgs, "tools": tools})
+    finally:
+        proxy_mod.ProxyHandler.chat_completions = orig
+    assert r.status_code == 200
+    assert seen["tools"] == tools and seen["messages"] == msgs
+    assert r.json()["tool_calls"][0]["function"]["name"] == "get_table"

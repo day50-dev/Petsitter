@@ -2594,3 +2594,26 @@ body.rail-collapsed .chan-alert { position: absolute; bottom: 2px; right: 2px; w
 .ext-problem { margin: 16px 0 14px; }
 .ext-problem-line { font-size: 13px; color: #e8c0c8; margin-top: 4px; line-height: 1.5; }
 .ext-problem-line code { font-size: 12px; }
+
+/* Try it: the key/value table the model can use as tools */
+.pg-msg.tool .pg-body { background: #12122a; border: 1px solid #1e2a3a; color: #a8c0d8;
+  font: 11.5px ui-monospace, "SF Mono", Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pg-table { border-top: 1px solid #1e2a3a; font-size: 12px; }
+.pg-thead { display: flex; align-items: center; gap: 6px; width: 100%; background: none; border: none;
+  color: #8ab4ff; font: inherit; font-weight: 600; padding: 7px 10px; cursor: pointer; text-align: left; }
+.pg-thead:hover { background: #1a1a33; }
+.pg-tcaret { color: #5a7a8a; font-size: 10px; width: 10px; }
+.pg-tcount { background: #1a2a4d; color: #8ab4ff; border-radius: 9px; padding: 0 7px; font-size: 11px; }
+.pg-tstate { margin-left: auto; color: #5a7a8a; font-weight: 400; font-size: 11px; }
+.pg-tbody { padding: 0 10px 8px; max-height: 220px; overflow-y: auto; }
+.pg-ttools { display: block; color: #8a9ab0; margin-bottom: 6px; line-height: 1.6; }
+.pg-ttools code { font-size: 11px; color: #c8d6e5; }
+.pg-trow { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) auto; gap: 6px; align-items: center; padding: 3px 0; border-bottom: 1px solid #161a2a; }
+.pg-trow code { font-size: 11.5px; color: #c8d6e5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pg-tdel { background: none; border: none; color: #5a7a8a; font-size: 15px; cursor: pointer; padding: 0 4px; line-height: 1; }
+.pg-tdel:hover { color: #ff6b8a; }
+.pg-tempty { color: #5a7a8a; padding: 2px 0 6px; }
+.pg-tadd { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) auto; gap: 6px; margin-top: 6px; }
+.pg-tadd input { min-width: 0; background: #0f0f1a; border: 1px solid #1e2a3a; color: #c8d6e5; border-radius: 4px;
+  padding: 4px 6px; font: 11.5px ui-monospace, "SF Mono", Consolas, monospace; }
+.pg-tadd input:focus { outline: none; border-color: #3a5a80; }

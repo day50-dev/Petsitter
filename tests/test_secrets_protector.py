@@ -227,3 +227,57 @@ class TestDelimitedForm:
         text = "why does print(end='') and f(x = 'a') fail"
         out, _ = proxy._filter_prompt_keywords([{"role": "user", "content": text}])
         assert out == [{"role": "user", "content": text}]
+
+
+class TestToolCalls:
+    """Secrets that travel through tools: results coming back from a tool,
+    and arguments the model sends to one."""
+
+    CREDS = '{"emporia_vue": {"username": "bogus@yahoo.com", "password": "magical9bjyX"}}'
+
+    def _turn(self, result_content):
+        return [
+            {"role": "user", "content": "read the credentials from the table"},
+            {"role": "assistant", "content": None, "tool_calls": [
+                {"id": "c1", "type": "function", "function": {"name": "get_table", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "c1", "content": result_content},
+        ]
+
+    def test_tool_result_text_is_hidden(self):
+        trick = SecretsProtectorTrick()
+        out = trick.pre_hook(self._turn(self.CREDS), {})[-1]["content"]
+        assert "magical9bjyX" not in out and "bogus@yahoo.com" not in out
+        assert STAND_IN.search(out)
+
+    def test_tool_result_as_parts_is_hidden(self):
+        trick = SecretsProtectorTrick()
+        out = trick.pre_hook(self._turn([{"type": "text", "text": self.CREDS}]), {})[-1]["content"]
+        assert "magical9bjyX" not in out[0]["text"]
+
+    def test_user_message_as_parts_is_hidden(self):
+        trick = SecretsProtectorTrick()
+        ctx = [{"role": "user", "content": [{"type": "text", "text": "use " + self.CREDS}]}]
+        assert "magical9bjyX" not in trick.pre_hook(ctx, {})[0]["content"][0]["text"]
+
+    def test_round_trip_through_a_tool_call(self):
+        """The model reads the password from a tool result and passes it to
+        another tool: the tool gets the real value, and when the client
+        resends that call in the history, the model sees the stand-in again."""
+        trick = SecretsProtectorTrick()
+        ctx = trick.pre_hook(self._turn(self.CREDS), {})
+        stand_in = next(m for m in STAND_IN.findall(ctx[-1]["content"])
+                        if trick._marked[m] == "magical9bjyX")
+        call = {"id": "c2", "type": "function",
+                "function": {"name": "login", "arguments": f'{{"password": "{stand_in}"}}'}}
+        out = trick.post_hook(ctx + [{"role": "assistant", "content": None, "tool_calls": [call]}])
+        assert out[-1]["tool_calls"][0]["function"]["arguments"] == '{"password": "magical9bjyX"}'
+
+        resent = self._turn(self.CREDS) + [
+            {"role": "assistant", "content": None, "tool_calls": [
+                {"id": "c2", "type": "function", "function": {"name": "login",
+                 "arguments": '{"password": "magical9bjyX"}'}}]},
+            {"role": "tool", "tool_call_id": "c2", "content": "logged in"},
+        ]
+        seen = trick.pre_hook(resent, {})
+        assert "magical9bjyX" not in seen[-2]["tool_calls"][0]["function"]["arguments"]
+        assert stand_in in seen[-2]["tool_calls"][0]["function"]["arguments"]

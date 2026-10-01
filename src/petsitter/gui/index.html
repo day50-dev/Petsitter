@@ -1579,8 +1579,86 @@ let pgLog = [];
 let pgBusy = false;
 
 function pgApiMessages() {
-  return pgLog.filter(e => e.role === 'you' || e.role === 'assistant')
-              .map(e => ({role: e.role === 'you' ? 'user' : 'assistant', content: e.text}));
+  return pgLog.filter(e => e.role === 'you' || e.role === 'assistant' || e.role === 'tool').map(pgApiMessage);
+}
+
+function pgApiMessage(e) {
+  if (e.role === 'you') return {role: 'user', content: e.text};
+  if (e.role === 'tool') return {role: 'tool', tool_call_id: e.tool_call_id, content: e.text};
+  if (e.tool_calls) return {role: 'assistant', content: e.text || null, tool_calls: e.tool_calls};
+  return {role: 'assistant', content: e.text};
+}
+
+// ---- the table: a few tools the model can call from Try it ----
+// set_value / get_value / get_table on a little key/value table kept in this
+// browser. The panel runs the calls itself, so it's a way to see what an
+// extension does to tool calls and their results (Secrets Protector hiding a
+// password in a result, then putting it back in a call) without a real agent.
+const PG_TOOLS = [
+  {type: 'function', function: {name: 'get_table', description: 'Read every key and value in the table.',
+    parameters: {type: 'object', properties: {}}}},
+  {type: 'function', function: {name: 'get_value', description: 'Read one value from the table.',
+    parameters: {type: 'object', properties: {key: {type: 'string'}}, required: ['key']}}},
+  {type: 'function', function: {name: 'set_value', description: 'Add a key to the table, or change its value.',
+    parameters: {type: 'object', properties: {key: {type: 'string'}, value: {type: 'string'}}, required: ['key', 'value']}}},
+];
+const PG_MAX_TOOL_ROUNDS = 8;
+let pgTable = [];        // [{key, value}]
+let pgToolsOn = true;
+let pgTableOpen = false;
+
+function pgSaveTable() { pgSave({table: pgTable, toolsOn: pgToolsOn, tableOpen: pgTableOpen}); }
+
+function pgRunTool(call) {
+  const fn = (call.function || {});
+  let args = {};
+  try { args = fn.arguments ? JSON.parse(fn.arguments) : {}; }
+  catch (e) { return {error: 'arguments are not valid JSON: ' + fn.arguments}; }
+  const find = k => pgTable.find(r => r.key === k);
+  if (fn.name === 'get_table') return Object.fromEntries(pgTable.map(r => [r.key, r.value]));
+  if (fn.name === 'get_value') {
+    const r = find(String(args.key));
+    return r ? {key: r.key, value: r.value} : {error: `no key named ${args.key}`};
+  }
+  if (fn.name === 'set_value') {
+    const k = String(args.key ?? ''), v = String(args.value ?? '');
+    if (!k) return {error: 'key is required'};
+    const r = find(k);
+    if (r) r.value = v; else pgTable.push({key: k, value: v});
+    pgSaveTable(); renderPgTable();
+    return {ok: true};
+  }
+  return {error: `no tool named ${fn.name}`};
+}
+
+function renderPgTable() {
+  const el = document.getElementById('pg-table');
+  if (!el) return;
+  const rows = pgTable.map((r, i) => `<div class="pg-trow"><code title="${escapeHtml(r.key)}">${escapeHtml(r.key)}</code>`
+    + `<code title="${escapeHtml(r.value)}">${escapeHtml(r.value)}</code>`
+    + `<button class="pg-tdel" onclick="pgDelRow(${i})" title="Remove" aria-label="Remove ${escapeHtml(r.key)}">&times;</button></div>`).join('');
+  el.innerHTML = `<button class="pg-thead" onclick="pgToggleTable()" aria-expanded="${pgTableOpen}">`
+    + `<span class="pg-tcaret" aria-hidden="true">${pgTableOpen ? '&#9662;' : '&#9656;'}</span>Table`
+    + (pgTable.length ? `<span class="pg-tcount">${pgTable.length}</span>` : '')
+    + `<span class="pg-tstate">${pgToolsOn ? 'tools on' : 'tools off'}</span></button>`
+    + (pgTableOpen ? `<div class="pg-tbody">`
+      + `<label class="pg-ttools"><input type="checkbox" ${pgToolsOn ? 'checked' : ''} onchange="pgToolsOn=this.checked;pgSaveTable();renderPgTable()">`
+      + ` Let the model use it: <code>get_table()</code>, <code>get_value(key)</code>, <code>set_value(key, value)</code></label>`
+      + (rows || '<div class="pg-tempty">Empty. Add a row, then ask the model to read it.</div>')
+      + `<form class="pg-tadd" onsubmit="event.preventDefault();pgAddRow(this)">`
+      + `<input name="k" placeholder="key" autocomplete="off" spellcheck="false"><input name="v" placeholder="value" autocomplete="off" spellcheck="false">`
+      + `<button class="btn btn-sm btn-secondary" type="submit">Add</button></form></div>` : '');
+}
+
+function pgToggleTable() { pgTableOpen = !pgTableOpen; pgSaveTable(); renderPgTable(); }
+function pgDelRow(i) { pgTable.splice(i, 1); pgSaveTable(); renderPgTable(); }
+function pgAddRow(form) {
+  const k = form.k.value.trim(), v = form.v.value;
+  if (!k) { form.k.focus(); return; }
+  const r = pgTable.find(x => x.key === k);
+  if (r) r.value = v; else pgTable.push({key: k, value: v});
+  pgSaveTable(); renderPgTable();
+  document.querySelector('#pg-table .pg-tadd input[name=k]').focus();
 }
 
 function pgPersist() {
@@ -1619,7 +1697,13 @@ function renderPlaygroundLog() {
 function pgSetBody(node, entry) {
   const body = node.querySelector('.pg-body');
   if (entry.role === 'assistant' && entry.text !== '\u2026') {
-    const src = entry.isToolCall ? '```json\n' + entry.text + '\n```' : entry.text;
+    let src = entry.isToolCall ? '```json\n' + entry.text + '\n```' : entry.text;
+    if (entry.tool_calls) {
+      src = (entry.text ? entry.text + '\n\n' : '') + '```\n' + entry.tool_calls.map(c => {
+        const f = c.function || {};
+        return `${f.name}(${f.arguments && f.arguments !== '{}' ? f.arguments : ''})`;
+      }).join('\n') + '\n```';
+    }
     body.innerHTML = _safeMd.parse(src);
     body.classList.add('md');
     body.querySelectorAll('pre code').forEach(b => { if (window.hljs) hljs.highlightElement(b); });
@@ -1632,7 +1716,7 @@ function pgSetBody(node, entry) {
 function pgNode(entry) {
   const div = document.createElement('div');
   div.className = 'pg-msg ' + (entry.role === 'you' ? 'user' : entry.role);
-  const role = entry.role + (entry.replay ? ' \u00b7 replay' : '');
+  const role = entry.role + (entry.replay ? ' \u00b7 replay' : '') + (entry.name ? ' \u00b7 ' + entry.name : '');
   div.innerHTML = `<div class="pg-role"><span>${escapeHtml(role)}</span></div><div class="pg-body"></div>`;
   if (entry.role === 'you') {
     // Replay: send this message again, with the conversation as it was at
@@ -1677,37 +1761,31 @@ function replayPlayground(entry) {
   if (i < 0) return;
   // The conversation up to and including that message, as it was then.
   const history = pgLog.slice(0, i + 1)
-    .filter(e => e.role === 'you' || e.role === 'assistant')
-    .map(e => ({role: e.role === 'you' ? 'user' : 'assistant', content: e.text}));
+    .filter(e => e.role === 'you' || e.role === 'assistant' || e.role === 'tool')
+    .map(pgApiMessage);
   pgPush({role: 'you', text: entry.text, replay: true});
   return pgRun(history);
 }
 
+// One request, then (if the model called tools from the table) run them,
+// send the results back, and go again, until it answers in words.
 async function pgRun(messages) {
   const input = document.getElementById('pg-text');
-  pgBusy = true;
   const btn = document.getElementById('pg-send');
+  pgBusy = true;
   btn.disabled = true;
-  const entry = {role: 'assistant', text: '\u2026'};
-  const node = pgPush(entry);
-
   try {
-    const d = await fetchJSON('/api/playground', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({messages, trickset: selectedTrickset})
-    });
-    entry.isToolCall = !d.reply && !!d.tool_calls;
-    entry.text = d.reply || (d.tool_calls ? JSON.stringify(d.tool_calls, null, 2) : '(empty response)');
-    entry.result = {trace: d.trace, elapsed_ms: d.elapsed_ms, usage: d.usage};
-    pgSetBody(node, entry);
-    node.appendChild(renderTrace(entry.result));
-    flashFiredTricks(d.trace);
-  } catch(e) {
-    entry.role = 'error';
-    entry.text = e.message;
-    node.className = 'pg-msg error';
-    node.querySelector('.pg-role').textContent = 'error';
-    node.querySelector('.pg-body').textContent = entry.text;
+    for (let round = 0; round < PG_MAX_TOOL_ROUNDS; round++) {
+      const entry = await pgRound(messages);
+      if (!entry || !entry.tool_calls) break;
+      messages = messages.concat([pgApiMessage(entry)]);
+      for (const call of entry.tool_calls) {
+        const result = JSON.stringify(pgRunTool(call), null, 2);
+        const t = {role: 'tool', name: (call.function || {}).name, tool_call_id: call.id, text: result};
+        pgPush(t);
+        messages = messages.concat([pgApiMessage(t)]);
+      }
+    }
   } finally {
     pgPersist();
     pgBusy = false;
@@ -1715,6 +1793,35 @@ async function pgRun(messages) {
     const log = document.getElementById('pg-log');
     log.scrollTop = log.scrollHeight;
     input.focus();
+  }
+}
+
+async function pgRound(messages) {
+  const entry = {role: 'assistant', text: '\u2026'};
+  const node = pgPush(entry);
+
+  try {
+    const d = await fetchJSON('/api/playground', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({messages, trickset: selectedTrickset, tools: pgToolsOn ? PG_TOOLS : undefined})
+    });
+    const ours = pgToolsOn && (d.tool_calls || []).length
+      && d.tool_calls.every(c => PG_TOOLS.some(t => t.function.name === (c.function || {}).name));
+    if (ours) entry.tool_calls = d.tool_calls;
+    entry.isToolCall = !ours && !d.reply && !!d.tool_calls;
+    entry.text = ours ? (d.reply || '') : d.reply || (d.tool_calls ? JSON.stringify(d.tool_calls, null, 2) : '(empty response)');
+    entry.result = {trace: d.trace, elapsed_ms: d.elapsed_ms, usage: d.usage};
+    pgSetBody(node, entry);
+    node.appendChild(renderTrace(entry.result));
+    flashFiredTricks(d.trace);
+    return entry;
+  } catch(e) {
+    entry.role = 'error';
+    entry.text = e.message;
+    node.className = 'pg-msg error';
+    node.querySelector('.pg-role').textContent = 'error';
+    node.querySelector('.pg-body').textContent = entry.text;
+    return null;
   }
 }
 
@@ -1780,6 +1887,10 @@ document.addEventListener('DOMContentLoaded', () => {
   initPgDrag();
   const st = pgState();
   pgLog = Array.isArray(st.messages) ? st.messages : [];
+  pgTable = Array.isArray(st.table) ? st.table : [];
+  pgToolsOn = st.toolsOn !== false;
+  pgTableOpen = !!st.tableOpen;
+  renderPgTable();
   renderPlaygroundLog();
   if (st.open) setPlaygroundOpen(true);
 });
@@ -3313,6 +3424,7 @@ async function saveTrickConfig() {
 <div class="pg-log" id="pg-log">
 <div class="pg-hint">Send a message through the selected trickset. Installed extensions that change it light up.</div>
 </div>
+<div class="pg-table" id="pg-table"></div>
 <div class="pg-input">
 <textarea id="pg-text" rows="2" placeholder="Type a message&#8230;  (Enter to send, Shift+Enter for a newline)" spellcheck="false" onkeydown="pgKey(event)"></textarea>
 <button class="btn btn-neutral btn-sm" id="pg-send" onclick="sendPlayground()" title="Send through the pipeline">Send</button>

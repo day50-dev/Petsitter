@@ -135,3 +135,42 @@ def test_tool_call_reports_conversion():
     t.post_hook(ctx)
     if ctx[-1].get("tool_calls"):
         assert "read_file" in t.live_feed.since(0)[0][1]["message"]
+
+
+def test_prompt_keyword_use_shows_on_live_page():
+    from petsitter.proxy import ProxyHandler
+
+    class Kw(Trick):
+        prompt_keyword = "kw"
+        def handle_prompt_keyword(self, request, messages=None, payload=None):
+            return {"role": "assistant", "content": "done"}
+
+    t = Kw()
+    h = ProxyHandler("http://unused", "m", tricks=[t])
+    _, resp = h._filter_prompt_keywords([{"role": "user", "content": "(kw: do the thing)"}])
+    assert resp["content"] == "done"
+    assert t.live_feed.since(0)[-1][1]["message"] == "Ran (kw: do the thing) and answered it directly"
+
+
+def test_keyword_report_not_doubled_when_trick_reports():
+    from petsitter.proxy import ProxyHandler
+
+    class Kw(Trick):
+        prompt_keyword = "kw"
+        def handle_prompt_keyword(self, request, messages=None, payload=None):
+            self.report("did my own thing")
+            return {"role": "assistant", "content": "ok"}
+
+    t = Kw()
+    ProxyHandler("http://unused", "m", tricks=[t])._filter_prompt_keywords([{"role": "user", "content": "(kw)"}])
+    assert [e["message"] for _, e in t.live_feed.since(0)] == ["did my own thing"]
+
+
+def test_traffic_logger_reports_once_per_exchange(tmp_path):
+    from petsitter.tricks.logger import LoggerTrick
+    t = LoggerTrick(path=str(tmp_path / "t.jsonl"))
+    ctx = [{"role": "user", "content": "hi"}]
+    t.pre_hook(ctx, {})
+    t.post_hook(ctx + [{"role": "assistant", "content": "yo"}])
+    msgs = [e["message"] for _, e in t.live_feed.since(0)]
+    assert msgs == [f"Logged a request and its reply to {tmp_path / 't.jsonl'}"]

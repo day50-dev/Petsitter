@@ -185,6 +185,7 @@ class SwapHarnessTrick(Trick):
         content = target.read_text(encoding="utf-8", errors="replace")
         self._selected_path = path
         self._selected_content = content
+        self.report(f"Harness set to {path} ({len(content)} chars)")
         preview = content[:600]
         logger.info("Swapped harness to %s (%d chars)", path, len(content))
         return {
@@ -197,6 +198,9 @@ class SwapHarnessTrick(Trick):
 
     def system_prompt(self, to_add: str) -> str:
         content = getattr(self, "_selected_content", None)
+        if content:
+            # Repeats fold into one row (x N) on the Live page.
+            self.report(f"Using {getattr(self, '_selected_path', '?')} as the system prompt ({len(content)} chars)")
         if content:
             return to_add + "\n" + content if to_add else content
         return to_add

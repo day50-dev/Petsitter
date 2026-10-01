@@ -561,14 +561,24 @@ class ProxyHandler:
                 keyword = p["keyword"].lower()
                 trick = p["trick"]
                 log = p["trickset"].get_logger()
+                # The framework knows a keyword fired even when the trick says
+                # nothing, so its Live tab always shows it -- unless the trick
+                # reported something itself during the call.
+                seen = trick.live_feed.since(0)
+                before = seen[-1][0] if seen else 0
+                shown = f"({keyword}: {request_text[:80]}{'...' if len(request_text) > 80 else ''})" if request_text else f"({keyword})"
                 try:
                     response = trick.handle_prompt_keyword(request_text, modified, payload)
                 except Exception as e:
                     log.exception("%sprompt_keyword handler for %r failed: %s", request_tag(), keyword, e)
+                    trick.report(f"{shown} failed: {e}")
                     response = {
                         "role": "assistant",
                         "content": f"Error handling prompt keyword '{keyword}': {e}",
                     }
+                else:
+                    if not trick.live_feed.since(before):
+                        trick.report(f"Ran {shown}" + (" and answered it directly" if isinstance(response, dict) else ""))
                 if isinstance(response, dict):
                     log.info(
                         "%sprompt keyword %r handled by %s -> response injected",

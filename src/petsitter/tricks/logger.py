@@ -104,7 +104,7 @@ class LoggerTrick(Trick):
         if not context:
             return context
         meta = request_meta()
-        self._append({
+        if self._append({
             "timestamp": _now(),
             "trick": type(self).__name__,
             "event": "response",
@@ -114,7 +114,9 @@ class LoggerTrick(Trick):
             "model": meta.get("model", ""),
             "messages": context,
             "answer": context[-1],
-        })
+        }):
+            # Once per exchange, so repeats fold into one row (x N).
+            self.report(f"Logged a request and its reply to {self._log_path()}")
         return context
 
     # -- helpers -------------------------------------------------------------
@@ -125,19 +127,21 @@ class LoggerTrick(Trick):
             path = path / "traffic.jsonl"
         return path
 
-    def _append(self, record: dict) -> None:
+    def _append(self, record: dict) -> bool:
         path = self._log_path()
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             line = json.dumps(record, default=_json_default) + "\n"
         except Exception:
-            return
+            return False
         try:
             with _LOCK:
                 with open(path, "a", encoding="utf-8") as f:
                     f.write(line)
-        except OSError:
-            pass
+        except OSError as e:
+            self.report(f"Couldn't write to {path}: {e}")
+            return False
+        return True
 
 
 _LOCK = threading.Lock()

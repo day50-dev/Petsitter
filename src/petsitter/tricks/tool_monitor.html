@@ -328,7 +328,7 @@ function collapseUnused(history) {
 
 // -- UI state -----------------------------------------------------------
 
-const ui = {selected: null, order: "seen", query: "", filtering: false, follow: true, raw: false, expanded: new Set(), collapsedPaths: new Set()};
+const ui = {selected: null, order: "seen", query: "", filtering: false, follow: true, raw: false, folded: new Set(), collapsedPaths: new Set()};  // fired calls open as a tree; a click folds one
 
 // -- argument tree --------------------------------------------------------
 //
@@ -528,11 +528,12 @@ function renderDetail(t) {
     else detail = s.label;
     const dim = e.state === "unused" || e.state === "withheld" ? " dim" : "";
     const expCls = expandable ? " expandable" : "";
-    const caret = expandable ? (ui.expanded.has(key) ? "▾ " : "▸ ") : "";
+    const isOpen = expandable && !ui.folded.has(key);
+    const caret = expandable ? (isOpen ? "▾ " : "▸ ") : "";
     const trunc = e.argsTruncated ? ' <span class="trunc-flag" title="truncated before it reached this viewer">⚠ truncated</span>' : "";
     let out = `<div class="history-row${dim}${expCls}" data-key="${esc(key)}"><span class="glyph ${s.cls}" style="min-width:14px">${s.glyph}</span>` +
       `<span class="rid">${esc(e.request_id.slice(0, 8))}</span><span class="detail">${caret}${esc(detail)}${trunc}</span></div>`;
-    if (expandable && ui.expanded.has(key)) {
+    if (isOpen) {
       out += renderArgsBlock(key, e.args, e.argsTruncated);
     }
     return out;
@@ -541,8 +542,8 @@ function renderDetail(t) {
   body.querySelectorAll(".history-row.expandable").forEach(row => {
     row.addEventListener("click", () => {
       const key = row.dataset.key;
-      if (ui.expanded.has(key)) ui.expanded.delete(key);
-      else ui.expanded.add(key);
+      if (ui.folded.has(key)) ui.folded.delete(key);
+      else ui.folded.add(key);
       render();
     });
   });

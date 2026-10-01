@@ -305,8 +305,8 @@ file back exactly as it was. Your tool keeps using its own account &mdash; petsi
 </div>
 <div class="card" id="discovered-card">
 <div class="card-title"><h2>Discovered programs</h2><span class="ext-count" id="discovered-count"></span></div>
-<div class="section-desc">Every program that has sent requests through petsitter, by the X-Title header it sends,
-and which channel its requests went to. Kept across restarts.</div>
+<div class="section-desc">Every program that has sent requests through petsitter: its X-Title header (or its
+User-Agent, when it sends no X-Title), and which channel its requests went to. Kept across restarts.</div>
 <div id="discovered-list"></div>
 </div>
 </div>
@@ -686,6 +686,23 @@ async function obConnectTool(id) {
 // What each program actually sends (X-Title, models) and where its requests
 // went. The answer to "my channel isn't catching it": the X-Title is right
 // here, next to the channel that did get it.
+const _discOpen = new Set();   // rows showing their header sample
+
+function toggleDiscovered(key) {
+  if (_discOpen.has(key)) _discOpen.delete(key); else _discOpen.add(key);
+  renderDiscovered();
+}
+
+function _discDetail(p) {
+  const h = p.sample_headers;
+  if (!h || !Object.keys(h).length) {
+    return `<div class="disc-detail"><span class="disc-dim">No header sample yet: it&rsquo;s captured on this program&rsquo;s next request.</span></div>`;
+  }
+  return `<div class="disc-detail"><div class="disc-detail-head">Headers from its most recent request &middot; ${_ago(p.ago)}</div>`
+    + `<div class="disc-headers">` + Object.entries(h).sort((a, b) => a[0].localeCompare(b[0])).map(([k, v]) =>
+      `<span class="hk">${escapeHtml(k)}</span><span class="hv">${escapeHtml(v)}</span>`).join('') + `</div></div>`;
+}
+
 function renderDiscovered() {
   const list = document.getElementById('discovered-list');
   if (!list) return;
@@ -696,35 +713,56 @@ function renderDiscovered() {
     return;
   }
   list.innerHTML = `<div class="disc-table">`
-    + `<div class="disc-row disc-head"><span>X-Title header</span><span>Models</span><span>Went to</span><span>Requests</span><span></span></div>`
+    + `<div class="disc-row disc-head"><span>X-Title header</span><span>User-Agent</span><span>Models</span><span>Went to</span><span>Requests</span><span></span></div>`
     + programs.map(p => {
       const models = Object.entries(p.models || {}).sort((a, b) => b[1] - a[1]);
       const chans = Object.entries(p.channels || {}).sort((a, b) => b[1] - a[1]);
       const topModel = models.length ? models[0][0] : '';
+      const uas = Object.entries(p.user_agents || {}).sort((a, b) => b[1] - a[1]);
       const xt = p.x_title
         ? `<code>${escapeHtml(p.x_title)}</code>`
-        : `<span class="disc-none" title="This program sends no X-Title header, so a channel can only catch it by model">none sent</span>`;
-      const args = escapeHtml(JSON.stringify(p.x_title)) + ',' + escapeHtml(JSON.stringify(p.x_title ? '' : topModel));
-      return `<div class="disc-row">`
-        + `<span>${xt}</span>`
+        : `<span class="disc-none" title="Sends no X-Title header: catch it by User-Agent or model">none sent</span>`;
+      const ua = uas.length
+        ? uas.slice(0, 2).map(([u, n]) => `<code title="${n} requests">${escapeHtml(u)}</code>`).join(' ') + (uas.length > 2 ? ` <i>+${uas.length - 2}</i>` : '')
+        : '<span class="disc-dim">&mdash;</span>';
+      const key = escapeHtml(JSON.stringify(p.key || p.x_title));
+      const k = p.key || p.x_title;
+      const open = _discOpen.has(k);
+      return `<div class="disc-row${open ? ' open' : ''}" data-key="${escapeHtml(k)}" onclick="if(!event.target.closest('button,a'))toggleDiscovered(this.dataset.key)" title="Click to see the headers it sends">`
+        + `<span><span class="disc-caret" aria-hidden="true">${open ? '&#9662;' : '&#9656;'}</span>${xt}</span>`
+        + `<span class="disc-uas">${ua}</span>`
         + `<span class="disc-models">${models.map(([m, n]) => `<code title="${n} requests">${escapeHtml(m)}</code>`).join(' ') || '&mdash;'}</span>`
         + `<span class="disc-chans">${chans.map(([c, n]) => `<a href="#" class="disc-chan" onclick="openChannel(${escapeHtml(JSON.stringify(c))});return false" title="${n} requests">${c === '_default' ? '&lowast; Default' : '#' + escapeHtml(c)}</a>`).join(' ')}</span>`
         + `<span class="disc-n">${p.count}<i>${_ago(p.ago)}</i></span>`
-        + `<span class="disc-actions"><button class="btn btn-sm btn-neutral" onclick="newChannelFor(${args})">New channel for this</button>`
-        + `<button class="btn btn-sm btn-secondary" onclick="forgetProgram(${escapeHtml(JSON.stringify(p.x_title))})" title="Remove from this list">Forget</button></span>`
-        + `</div>`;
+        + `<span class="disc-actions"><button class="btn btn-sm btn-neutral" onclick="newChannelFor(${key})">New channel for this</button>`
+        + `<button class="btn btn-sm btn-secondary" onclick="forgetProgram(${key})" title="Remove from this list">Forget</button></span>`
+        + `</div>`
+        + (open ? _discDetail(p) : '');
     }).join('') + `</div>`;
 }
 
-function newChannelFor(xtitle, model) {
-  _newChanPrefill = {xtitle: xtitle || '', model: model || ''};
+// Prefill from what identifies the program: its X-Title if it sends one, else
+// its User-Agent's product name with a wildcard (so version bumps still match),
+// else the model it uses.
+function newChannelFor(key) {
+  const p = (_traffic.programs || []).find(x => (x.key || x.x_title) === key) || {};
+  const uas = Object.entries(p.user_agents || {}).sort((a, b) => b[1] - a[1]);
+  const models = Object.entries(p.models || {}).sort((a, b) => b[1] - a[1]);
+  let ua = '';
+  if (!p.x_title && uas.length) {
+    const product = uas[0][0].split(/[\/\s]/)[0];
+    ua = product ? product + '*' : uas[0][0];
+  }
+  _newChanPrefill = {xtitle: p.x_title || '', ua,
+                     model: (!p.x_title && !ua && models.length) ? models[0][0] : '',
+                     name: p.x_title || (ua ? ua.replace(/\*$/, '') : '')};
   if (currentTab === 'newchannel') openRuleEditor(true); else switchTab('newchannel');
 }
 
-async function forgetProgram(xtitle) {
+async function forgetProgram(key) {
   try {
     await fetchJSON('/api/discovered/forget', {method: 'POST', headers: {'Content-Type': 'application/json'},
-                                                body: JSON.stringify({x_title: xtitle})});
+                                                body: JSON.stringify({key})});
     await fetchTraffic();
   } catch(e) { showToast(e.message, true); }
 }
@@ -1776,9 +1814,11 @@ function ruleSentence(name) {
   if (!ts) return 'Not running';
   const app = (ts.filters || {})['X-Title'] || '*';
   const model = (ts.filters || {})['Model'] || '*';
-  if (app === '*' && model === '*') return 'Every request';
+  const ua = (ts.filters || {})['User-Agent'] || '*';
+  if (app === '*' && model === '*' && ua === '*') return 'Every request';
   let out = 'Requests';
   if (app !== '*') out += _isGlob(app) ? ` from apps matching <b>${escapeHtml(app)}</b>` : ` from <b>${escapeHtml(app)}</b>`;
+  if (ua !== '*') out += ` with User-Agent <b>${escapeHtml(ua)}</b>`;
   if (model !== '*') out += _isGlob(model) ? ` using a <b>${escapeHtml(model)}</b> model` : ` using <b>${escapeHtml(model)}</b>`;
   return out;
 }
@@ -1854,7 +1894,8 @@ function renderChannelRail() {
   if (!rail) return;
   // A channel matching every request means Default never runs.
   const catchAll = Object.values(loadedTricksets).find(ts => ts.name !== '_default'
-    && ((ts.filters || {})['X-Title'] || '*') === '*' && ((ts.filters || {})['Model'] || '*') === '*');
+    && ((ts.filters || {})['X-Title'] || '*') === '*' && ((ts.filters || {})['Model'] || '*') === '*'
+    && ((ts.filters || {})['User-Agent'] || '*') === '*');
   const item = n => {
     const off = !loadedTricksets[n];
     const t = (_traffic.tricksets || []).find(x => x.name === n);
@@ -1977,10 +2018,12 @@ function openRuleEditor(isNew) {
   _newChanPrefill = null;
   const app = ts ? ((ts.filters || {})['X-Title'] || '*') : (pre.xtitle || '*');
   const model = ts ? ((ts.filters || {})['Model'] || '*') : (pre.model || '*');
-  const name = ts ? ts.name : (pre.xtitle ? _slug(pre.xtitle) : '');
+  const uaPat = ts ? ((ts.filters || {})['User-Agent'] || '*') : (pre.ua || '*');
+  const name = ts ? ts.name : (pre.name ? _slug(pre.name) : '');
   const val = v => v === '*' ? '' : escapeHtml(v);
   const programs = (_traffic.programs || []).filter(p => p.x_title);
   const models = [...new Set((_traffic.programs || []).flatMap(p => Object.keys(p.models || {})))];
+  const userAgents = [...new Set((_traffic.programs || []).flatMap(p => Object.keys(p.user_agents || {})))];
   const opt = v => `<option value="${escapeHtml(v)}"></option>`;
   const ed = document.getElementById(isNew ? 'newchannel-form' : 'rule-editor');
   ed.innerHTML = (isNew ? '' : `<div class="rule-ed-title">Edit channel</div>`)
@@ -1991,6 +2034,9 @@ function openRuleEditor(isNew) {
     + `<input type="text" id="rule-app" list="rule-app-list" value="${val(app)}" placeholder="${programs.length ? '* (start typing to see options)' : '* (no traffic seen yet)'}" spellcheck="false" autocomplete="off" oninput="ruleEdPreview()">`
     + `<span class="rule-help">The X-Title header the program sends.</span>`
     + `</label>`
+    + `<label class="rule-field"><span class="rule-label">User-Agent</span>`
+    + `<input type="text" id="rule-ua" list="rule-ua-list" value="${val(uaPat)}" placeholder="${userAgents.length ? '* (start typing to see options)' : '* (no traffic seen yet)'}" spellcheck="false" autocomplete="off" oninput="ruleEdPreview()">`
+    + `<span class="rule-help">The program&rsquo;s User-Agent header. Useful when it sends no X-Title.</span></label>`
     + `<label class="rule-field"><span class="rule-label">Model</span>`
     + `<input type="text" id="rule-model" list="rule-model-list" value="${val(model)}" placeholder="${models.length ? '* (start typing to see options)' : '* (no traffic seen yet)'}" spellcheck="false" autocomplete="off" oninput="ruleEdPreview()">`
     + `<span class="rule-help">The model named in the request.</span>`
@@ -1998,7 +2044,8 @@ function openRuleEditor(isNew) {
     + `</div>`
     + `<datalist id="rule-app-list">${programs.map(p => opt(p.x_title)).join('')}</datalist>`
     + `<datalist id="rule-model-list">${models.map(opt).join('')}</datalist>`
-    + `<div class="rule-ed-hint">Both must match. Case doesn&rsquo;t matter; <code>*</code> matches anything (<code>claude*</code>). Empty means <code>*</code>. A request no channel matches goes to Default.</div>`
+    + `<datalist id="rule-ua-list">${userAgents.map(opt).join('')}</datalist>`
+    + `<div class="rule-ed-hint">All of them must match. Case doesn&rsquo;t matter; <code>*</code> matches anything (<code>claude*</code>). Empty means <code>*</code>. A request no channel matches goes to Default.</div>`
     + `<div class="rule-ed-preview" id="rule-ed-preview"></div>`
     + `<div class="rule-ed-actions"><button class="btn btn-sm btn-neutral" onclick="saveRule()">${isNew ? 'Create channel' : 'Save'}</button>`
     + `<button class="btn btn-sm btn-secondary" onclick="${isNew ? 'cancelNewChannel()' : 'closeRuleEditor()'}">Cancel</button>`
@@ -2008,7 +2055,7 @@ function openRuleEditor(isNew) {
     + `</div>`;
   ed.hidden = false;
   ruleEdPreview(isNew);
-  (isNew ? document.getElementById(pre.xtitle ? 'rule-name-input' : 'rule-app') : document.getElementById('rule-name-input')).focus();
+  (isNew ? document.getElementById(pre.name ? 'rule-name-input' : 'rule-app') : document.getElementById('rule-name-input')).focus();
 }
 
 function _slug(v) { return String(v).toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-|-$/g, '') || 'channel'; }
@@ -2024,9 +2071,10 @@ function _globMatch(value, pattern) {
 function ruleEdPreview(quiet) {
   const app = document.getElementById('rule-app').value.trim() || '*';
   const model = document.getElementById('rule-model').value.trim() || '*';
+  const ua = (document.getElementById('rule-ua') || {value: ''}).value.trim() || '*';
   const el = document.getElementById('rule-ed-preview');
   const programs = _traffic.programs || [];
-  if (app === '*' && model === '*') {
+  if (app === '*' && model === '*' && ua === '*') {
     // A blank new form isn't a mistake yet; say nothing until it's typed in.
     if (quiet === true) { el.innerHTML = ''; el.className = 'rule-ed-preview'; return; }
     el.innerHTML = 'Matches <b>every</b> request, so Default would never run.';
@@ -2034,8 +2082,10 @@ function ruleEdPreview(quiet) {
     return;
   }
   const hits = programs.filter(p => _globMatch(p.x_title, app)
+    && (ua === '*' || Object.keys(p.user_agents || {}).some(u => _globMatch(u, ua)))
     && (model === '*' || Object.keys(p.models || {}).some(m => _globMatch(m, model))));
-  const label = p => p.x_title ? escapeHtml(p.x_title) : '<i>no X-Title</i>';
+  const label = p => p.x_title ? escapeHtml(p.x_title)
+    : escapeHtml((Object.keys(p.user_agents || {})[0] || 'no X-Title').split(/[\/\s]/)[0]);
   if (!programs.length) {
     el.innerHTML = 'No programs seen yet to check this against.';
     el.className = 'rule-ed-preview';
@@ -2044,7 +2094,7 @@ function ruleEdPreview(quiet) {
       + hits.slice(0, 6).map(p => `<code>${label(p)}</code>`).join(' ') + (hits.length > 6 ? ' &hellip;' : '');
     el.className = 'rule-ed-preview ok';
   } else {
-    el.innerHTML = `Catches none of the ${programs.length} programs seen so far. Check the X-Title against <a href="#" onclick="switchTab('agents');return false">Discovered programs</a>.`;
+    el.innerHTML = `Catches none of the ${programs.length} programs seen so far. Compare against <a href="#" onclick="switchTab('agents');return false">Discovered programs</a>.`;
     el.className = 'rule-ed-preview warn';
   }
 }
@@ -2061,11 +2111,13 @@ function closeRuleEditor() {
 async function saveRule() {
   const app = document.getElementById('rule-app').value.trim() || '*';
   const model = document.getElementById('rule-model').value.trim() || '*';
+  const ua = document.getElementById('rule-ua').value.trim() || '*';
   const name = document.getElementById('rule-name-input').value.trim();
   if (!name) { showToast('Give the channel a name', true); return; }
   if (name === '_default') { showToast('That name is reserved', true); return; }
-  if (_ruleEditingNew && app === '*' && model === '*') { ruleEdPreview(); showToast('Set an X-Title or a model for this channel', true); return; }
+  if (_ruleEditingNew && app === '*' && model === '*' && ua === '*') { ruleEdPreview(); showToast('Set an X-Title, User-Agent or model for this channel', true); return; }
   const filters = {'X-Title': app, 'Model': model};
+  if (ua !== '*') filters['User-Agent'] = ua;
   try {
     if (_ruleEditingNew) {
       const d = await fetchJSON('/api/tricksets/create', {

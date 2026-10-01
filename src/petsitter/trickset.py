@@ -81,9 +81,14 @@ class Trickset:
             entries.append(entry)
         return entries
 
-    def matches(self, x_title: str, model: str) -> bool:
+    def matches(self, x_title: str, model: str, user_agent: str = "") -> bool:
         for key, pattern in self.filters.items():
-            val = x_title if key == "X-Title" else model
+            if key == "X-Title":
+                val = x_title
+            elif key == "User-Agent":
+                val = user_agent
+            else:
+                val = model
             # Case-insensitive on every OS. Plain fnmatch() follows the
             # platform, so "opencode*" caught "OpenCode" on Windows only.
             if not fnmatchcase((val or "").lower(), (pattern or "").lower()):

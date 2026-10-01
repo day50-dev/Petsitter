@@ -15,6 +15,8 @@ import httpx
 from petsitter.context import append_to_system_prompt
 from petsitter.discovered import DiscoveredPrograms
 from petsitter.observability import (
+    current_request_headers,
+    current_user_agent,
     get_logger,
     new_request_id,
     request_tag,
@@ -75,6 +77,46 @@ def _anthropic_headers(incoming: dict) -> dict[str, str]:
     return headers
 
 
+def merge_tool_call_fragments(tool_calls):
+    """Stitch streamed tool-call fragments back into whole calls.
+
+    Some upstreams build a non-streamed reply by concatenating stream chunks
+    without merging them, so one call arrives as several entries: the first
+    with the name and empty arguments, the rest with no name and a piece of
+    the arguments each. Fragments are joined by ``index`` when they have one;
+    otherwise a nameless entry continues the call before it. Whole calls pass
+    through untouched.
+    """
+    if not isinstance(tool_calls, list) or len(tool_calls) < 2:
+        return tool_calls
+    merged: list[dict] = []
+    by_index: dict = {}
+    for tc in tool_calls:
+        if not isinstance(tc, dict):
+            merged.append(tc)
+            continue
+        fn = tc.get("function") or {}
+        idx = tc.get("index")
+        target = by_index.get(idx) if idx is not None else None
+        if target is None and not fn.get("name") and merged and isinstance(merged[-1], dict):
+            target = merged[-1]
+        if target is None:
+            call = {**tc, "function": {**fn, "arguments": fn.get("arguments") or ""}}
+            merged.append(call)
+            if idx is not None:
+                by_index[idx] = call
+            continue
+        tfn = target.setdefault("function", {})
+        piece = fn.get("arguments")
+        if isinstance(piece, str):
+            tfn["arguments"] = (tfn.get("arguments") or "") + piece
+        if fn.get("name") and not tfn.get("name"):
+            tfn["name"] = fn["name"]
+        if tc.get("id") and not target.get("id"):
+            target["id"] = tc["id"]
+    return merged
+
+
 def _tricksets_dir() -> Path:
     """Where tricksets are saved: the directory the server resolved at startup
     from -c / $PET_CONFIG_DIR. Never a hardcoded ~/.config, or a second
@@ -133,9 +175,10 @@ class ProxyHandler:
         self.upstream_status = {"ok": ok, "target": target, "status": status,
                                 "error": (error or "")[:2000], "at": time.time()}
 
-    def _note_traffic(self, x_title: str, model: str, tricksets: list[str]) -> None:
+    def _note_traffic(self, x_title: str, model: str, tricksets: list[str], user_agent: str = "") -> None:
         try:
-            self.discovered.note(x_title, model, tricksets)
+            self.discovered.note(x_title, model, tricksets, user_agent,
+                                 headers=current_request_headers())
         except Exception:
             get_logger().exception("couldn't record a discovered program")
         now = time.time()
@@ -158,7 +201,9 @@ class ProxyHandler:
             result.extend(ts.tricks)
         return result
 
-    def _matching_tricks(self, x_title: str, model: str) -> tuple[list[Trick], Trickset | None]:
+    def _matching_tricks(self, x_title: str, model: str, user_agent: str | None = None) -> tuple[list[Trick], Trickset | None]:
+        if user_agent is None:
+            user_agent = current_user_agent()
         tricks: list[Trick] = []
         matched: Trickset | None = None
         default_ts = self.tricksets.get("_default")
@@ -166,7 +211,7 @@ class ProxyHandler:
         for name, ts in self.tricksets.items():
             if name == "_default":
                 continue
-            if ts.matches(x_title, model):
+            if ts.matches(x_title, model, user_agent):
                 enabled = [t for i, t in enumerate(ts.tricks) if i < len(ts.trick_enabled) and ts.trick_enabled[i]]
                 ts.get_logger().info(
                     "%strickset '%s' matched (X-Title=%r, Model=%r) -> %d enabled tricks",
@@ -188,7 +233,7 @@ class ProxyHandler:
             tricks.extend(enabled)
             matched = default_ts
             hit.append("_default")
-        self._note_traffic(x_title, model, hit)
+        self._note_traffic(x_title, model, hit, user_agent)
         return tricks, matched
 
     def _build_headers(self, model_cfg: dict | None = None) -> dict[str, str]:
@@ -920,6 +965,8 @@ class ProxyHandler:
             log.debug("%supstream response: %s", request_tag(), json.dumps(result, indent=2))
 
             assistant_message = result["choices"][0]["message"]
+            if assistant_message.get("tool_calls"):
+                assistant_message["tool_calls"] = merge_tool_call_fragments(assistant_message["tool_calls"])
             context = messages + [assistant_message]
 
             log.debug("%scontext before post-hooks: %s", request_tag(), json.dumps(context, indent=2))

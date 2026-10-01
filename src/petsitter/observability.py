@@ -216,3 +216,29 @@ def get_logger() -> logging.Logger:
     if ts is not None:
         return ts.get_logger()
     return _base
+
+
+# The calling program's User-Agent, for channel matching. Set once per request
+# at the server's edge so it doesn't have to be threaded through every call;
+# empty when there is no request (tests, the playground).
+_user_agent: contextvars.ContextVar[str] = contextvars.ContextVar("petsitter_user_agent", default="")
+
+
+def set_user_agent(value: str):
+    return _user_agent.set(value or "")
+
+
+def current_user_agent() -> str:
+    return _user_agent.get()
+
+
+# The calling request's headers, for the Discovered programs sample.
+_headers: contextvars.ContextVar[tuple] = contextvars.ContextVar("petsitter_request_headers", default=())
+
+
+def set_request_headers(pairs) -> Any:
+    return _headers.set(tuple(pairs or ()))
+
+
+def current_request_headers() -> tuple:
+    return _headers.get()

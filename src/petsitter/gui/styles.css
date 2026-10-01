@@ -2500,8 +2500,18 @@ body.rail-collapsed .chan-alert { position: absolute; bottom: 2px; right: 2px; w
 
 /* Discovered programs (Agents page). */
 #discovered-card .card-title { justify-content: flex-start; gap: 10px; }
-.disc-table { display: grid; grid-template-columns: minmax(120px, 1.1fr) minmax(120px, 1.3fr) minmax(110px, 1fr) 90px max-content; font-size: 13px; }
-.disc-row { display: contents; }
+.disc-table { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(130px, 1.2fr) minmax(110px, 1.1fr) minmax(100px, .9fr) 80px max-content; font-size: 13px; }
+.disc-uas code { color: #8a9ab0; }
+.disc-uas i, .disc-dim { font-style: normal; color: #4a6572; }
+.disc-row { display: contents; cursor: pointer; }
+.disc-row:hover > span { background: #1a1a33; }
+.disc-row.open > span { background: #1a1a33; border-bottom-color: transparent; }
+.disc-caret { color: #5a7a8a; font-size: 10px; width: 12px; flex: none; }
+.disc-detail { grid-column: 1 / -1; background: #12122a; border-bottom: 1px solid #1e2a3a; padding: 10px 14px 14px 30px; cursor: default; }
+.disc-detail-head { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #6b8299; margin-bottom: 8px; }
+.disc-headers { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 16px; font: 12px ui-monospace, "SF Mono", Consolas, monospace; }
+.disc-headers .hk { color: #8ab4ff; }
+.disc-headers .hv { color: #c8d6e5; overflow-wrap: anywhere; }
 .disc-row > span { padding: 9px 8px; border-bottom: 1px solid #1e2a3a; display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-width: 0; }
 .disc-head > span { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #6b8299; padding-top: 2px; }
 .disc-table code { background: #1a1a33; padding: 1px 6px; border-radius: 3px; color: #c8d6e5; font-size: 12px; overflow-wrap: anywhere; }

@@ -1010,3 +1010,40 @@ class TestUpstreamStatus:
         assert st["ok"] is False and st["target"] == "http://127.0.0.1:9/v1/chat/completions"
         assert "ConnectError" in st["error"]
         configure_modelset({})
+
+
+class TestToolCallFragments:
+    """Upstreams that concatenate stream chunks send one call in pieces."""
+
+    def test_nameless_pieces_continue_the_previous_call(self):
+        from petsitter.proxy import merge_tool_call_fragments as merge
+        frags = [
+            {"id": "call_1", "type": "function", "function": {"name": "agent_write_file", "arguments": ""}},
+            {"type": "function", "function": {"arguments": "{"}},
+            {"type": "function", "function": {"arguments": '"path": "a.py", '}},
+            {"type": "function", "function": {"arguments": '"text": "hi"}'}},
+            {"id": "call_2", "type": "function", "function": {"name": "agent_run_bash_command", "arguments": ""}},
+            {"type": "function", "function": {"arguments": '{"cmd": "ls"}'}},
+        ]
+        out = merge(frags)
+        assert [c["function"]["name"] for c in out] == ["agent_write_file", "agent_run_bash_command"]
+        import json
+        assert json.loads(out[0]["function"]["arguments"]) == {"path": "a.py", "text": "hi"}
+        assert json.loads(out[1]["function"]["arguments"]) == {"cmd": "ls"}
+
+    def test_by_index_when_present(self):
+        from petsitter.proxy import merge_tool_call_fragments as merge
+        frags = [
+            {"index": 0, "id": "a", "function": {"name": "f", "arguments": '{"x":'}},
+            {"index": 1, "id": "b", "function": {"name": "g", "arguments": '{"y":'}},
+            {"index": 0, "function": {"arguments": " 1}"}},
+            {"index": 1, "function": {"arguments": " 2}"}},
+        ]
+        out = merge(frags)
+        assert [(c["function"]["name"], c["function"]["arguments"]) for c in out] == [("f", '{"x": 1}'), ("g", '{"y": 2}')]
+
+    def test_whole_calls_untouched(self):
+        from petsitter.proxy import merge_tool_call_fragments as merge
+        calls = [{"id": "a", "function": {"name": "f", "arguments": "{}"}},
+                 {"id": "b", "function": {"name": "g", "arguments": "{}"}}]
+        assert merge(calls) == calls

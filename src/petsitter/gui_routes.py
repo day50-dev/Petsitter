@@ -172,7 +172,7 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
 
     async def gui_discovered_forget(request: Request) -> Response:
         data = await request.json()
-        return JSONResponse({"success": handler.discovered.forget(str(data.get("x_title", "")))})
+        return JSONResponse({"success": handler.discovered.forget(str(data.get("key", data.get("x_title", ""))))})
     app.add_route("/api/discovered/forget", gui_discovered_forget, methods=["POST"])
 
     # ---- Live pages ------------------------------------------------------

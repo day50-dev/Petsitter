@@ -507,13 +507,22 @@ _API_PATH_RE = re.compile(r"^(?:/v1)*/(chat/completions|messages|models)/?$")
 
 
 class _NormalizeV1Path:
-    """ASGI layer: route /chat/completions, /v1/v1/messages etc. to /v1/<endpoint>."""
+    """ASGI layer at the edge of every request.
+
+    Routes /chat/completions, /v1/v1/messages etc. to /v1/<endpoint>, and
+    records the caller's User-Agent for channel matching.
+    """
 
     def __init__(self, app):
         self.app = app
 
     async def __call__(self, scope, receive, send):
         if scope.get("type") == "http":
+            from petsitter.observability import set_request_headers, set_user_agent
+            raw = scope.get("headers") or []
+            ua = next((v for k, v in raw if k == b"user-agent"), b"")
+            set_user_agent(ua.decode("latin-1", "replace"))
+            set_request_headers((k.decode("latin-1", "replace"), v.decode("latin-1", "replace")) for k, v in raw)
             m = _API_PATH_RE.match(scope.get("path", ""))
             if m:
                 path = "/v1/" + m.group(1)
@@ -657,7 +666,13 @@ def create_app(
                 for part in _chunk_text(content):
                     yield emit({"content": part})
             if "tool_calls" in message and message["tool_calls"]:
-                yield emit({"tool_calls": message["tool_calls"]})
+                # Streamed tool calls must each carry "index": clients use it to
+                # tell one call's pieces from another's, and strict ones
+                # (Goose, the OpenAI SDK) mangle or reject calls without it.
+                yield emit({"tool_calls": [
+                    {**tc, "index": i} if isinstance(tc, dict) else tc
+                    for i, tc in enumerate(message["tool_calls"])
+                ]})
             yield emit({}, finish_reason=result["choices"][0].get("finish_reason", "stop"))
             yield "data: [DONE]\n\n"
         except Exception as e:

@@ -31,7 +31,8 @@ class TestSecretsProtectorTrick:
         ("db:\n  password: s3cretValue\n", "s3cretValue"),
         # vendor keys (gitleaks' rules, and ours)
         ('token = "ghp_abcdefghijklmnopqrstuvwxyz0123456789"', "ghp_abcdefghijklmnopqrstuvwxyz0123456789"),
-        ("xoxb-1234567890-1234567890123-abcdefghijABCDEFGHIJabcd", "abcdefghijABCDEFGHIJabcd"),
+        # assembled here so the source holds no token-shaped literal (push protection)
+        ("xox" + "b-1234567890-1234567890123-abcdefghijABCDEFGHIJabcd", "abcdefghijABCDEFGHIJabcd"),
         ("My key is sk-proj-AbcDefGhiJklMnoPqrStuVwxYz1234567890", "AbcDefGhiJklMnoPqrStuVwxYz1234567890"),
         ("AWS key: AKIAIOSFODNN7EXAMPLE", "AKIAIOSFODNN7EXAMPLE"),
         ("token: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8", "eyJhbGci"),

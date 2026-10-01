@@ -242,3 +242,20 @@ def set_request_headers(pairs) -> Any:
 
 def current_request_headers() -> tuple:
     return _headers.get()
+
+
+# Where the request came from ("host:port"), for the Context Monitor.
+_client_addr: contextvars.ContextVar[str] = contextvars.ContextVar("petsitter_client_addr", default="")
+
+
+def set_client_addr(value: str):
+    return _client_addr.set(value or "")
+
+
+def current_client_addr() -> str:
+    return _client_addr.get()
+
+
+def current_trickset() -> Any:
+    """The trickset (channel) handling this request, or None."""
+    return _current_trickset.get()

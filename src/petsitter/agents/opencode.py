@@ -31,6 +31,7 @@ class OpenCodeAgent(Agent):
     # secrets out of it, carry your house rules, and be able to export a
     # conversation. Nothing here changes what the model is asked to do.
     tricks = [
+        "tricks/context_monitor.py",
         "tricks/secrets_protector.py",
         "tricks/rules_file.py",
         "tricks/exportit.py",

@@ -41,6 +41,10 @@ Available Tricks list instead.
  * [Kennel](#kennel) - Route cognitive subtasks to specialized models
  * [Multi-Model Consultant](#multi-model-consultant) - Two models cross-validate and improve each other's responses
 
+### Diagnostics
+
+ * [Context Monitor](#context-monitor) - See what your AI tool sends: who sent each request, its system prompt, messages, tools, and their size
+
 ### Security
 
  * [Secrets Protector](#secrets-protector) - Detect and pseudonymize secrets/PII before they reach the model
@@ -237,6 +241,16 @@ Example `modelset.json`:
         "model": "qwen3:8b"
     }
 }
+```
+
+### Context Monitor
+
+[tricks/context_monitor.py](tricks/context_monitor.py)
+
+Records every request and shows it on its Live tab: where it came from (address, X-Title, User-Agent, channel, model), what the context is made of (system prompt, tool definitions, conversation, tool results, as estimated tokens), how the conversation's size grows and drops when it's compacted, and the full system prompt, tools and messages. It's on by default, first in line, and the third step of Start here opens it.
+
+```bash
+pet add mine context_monitor
 ```
 
 ### Secrets Protector

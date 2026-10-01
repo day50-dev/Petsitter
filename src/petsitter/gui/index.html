@@ -104,16 +104,15 @@
     <div class="onboard-step" id="ob-step3" data-ob="3">
       <div class="ob-badge" id="ob-badge3">3</div>
       <div class="ob-content">
-        <div class="ob-top"><div class="ob-title">See it do a trick</div>
+        <div class="ob-top"><div class="ob-title">See what your tool sends</div>
           <button class="btn btn-sm btn-neutral ob-toggle" id="ob-toggle3" onclick="obToggle(3)">watch</button></div>
-        <div class="ob-desc">The first real thing: a message goes in, and a tool call comes back shaped. That&rsquo;s petsitter working, not just passing traffic through.</div>
+        <div class="ob-desc">Every request your tool makes, opened up: its system prompt, every message, the tools it offers, and how big it all is.</div>
         <div class="ob-detail" id="ob-detail3" hidden>
           <div class="ob-sum" id="ob-sum3"></div>
           <div class="ob-demo">
-            <div class="ob-demo-title">Tool-call demo</div>
-            <p>One message in, a clean tool call out. You&rsquo;ll watch the raw model answer get turned
-            into the shape your tool expects.</p>
-            <span class="ob-demo-soon">coming soon</span>
+            <div class="ob-demo-title">Context Monitor</div>
+            <p>Use your tool as normal, or send a message from <b>Try it</b>, and watch each request show up.</p>
+            <button class="btn btn-sm btn-primary" onclick="openContextMonitor()">Open Context Monitor</button>
           </div>
         </div>
       </div>
@@ -645,8 +644,8 @@ function paintOnboard() {
       ? _ob.toolName + ' is connected'
       : (_ob.provider ? 'Pick a tool to route through.' : 'Set a provider first.');
     if (n === 3) line = _introSeen > 0
-      ? _introSeen + ' message' + (_introSeen === 1 ? '' : 's') + ' through, and the trick held'
-      : 'Send one through and watch it get shaped.';
+      ? _introSeen + ' request' + (_introSeen === 1 ? '' : 's') + ' through so far'
+      : 'Send one request through and open it up.';
     sum.textContent = line;
   }
 }
@@ -656,10 +655,25 @@ function obToggle(n) {
   paintOnboard();
 }
 
-// Step three: the first real thing. A message goes in and a tool call comes
-// back shaped. Not built yet; when it lands, this runs the pass and fills
-// #ob-demo with the before/after. Left as a stub for now.
-async function obRunDemo() {}
+// Step three: see what your tool sends. Opens the Context Monitor's Live tab
+// in Default, installing it there first if it isn't already.
+async function openContextMonitor() {
+  const path = 'tricks/context_monitor.py';
+  try {
+    if (selectedTrickset !== '_default') await switchTrickset('_default');
+    const all = await fetchJSON('/api/tricks');
+    if (!all.some(t => t.trickset === '_default' && t.path === path)) {
+      await fetchJSON('/api/tricks/load', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                           body: JSON.stringify({path, trickset: '_default'})});
+    }
+    // Selection first: switchTab writes the hash, and the hash listener would
+    // otherwise reset it to whatever the old hash said.
+    _extSel = extKey(path);
+    _extView = 'live';
+    switchTab('tricks');
+    await fetchTricks();
+  } catch(e) { showToast(e.message, true); }
+}
 
 // The step-two tool list. fetchAgents() owns the full grid on the Agents tab;
 // this is the same data, reduced to the tools someone can actually turn on now.

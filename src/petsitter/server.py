@@ -80,10 +80,11 @@ _SOURCE_TRICKSETS = Path(__file__).resolve().parent / "tricksets"
 
 # Tricks seeded into a brand-new "_default" trickset when no tricks are
 # configured anywhere (no -t flags, no saved trickset file).
-# The heavy hitters: see what your tool is doing, keep secrets out of the
-# model, and keep a copy of the conversation. Tool Monitor goes first so it
-# sees the tool list before anything else changes it.
-DEFAULT_TRICKS = ["tricks/tool_monitor.py", "tricks/secrets_protector.py", "tricks/exportit.py"]
+# The heavy hitters: see what your tool sends, keep secrets out of the model,
+# and keep a copy of the conversation. The two monitors go first so they see
+# the request before anything else changes it.
+DEFAULT_TRICKS = ["tricks/context_monitor.py", "tricks/tool_monitor.py",
+                  "tricks/secrets_protector.py", "tricks/exportit.py"]
 
 _PROXY_HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*(?::\d+)?$")
 
@@ -518,7 +519,9 @@ class _NormalizeV1Path:
 
     async def __call__(self, scope, receive, send):
         if scope.get("type") == "http":
-            from petsitter.observability import set_request_headers, set_user_agent
+            from petsitter.observability import set_client_addr, set_request_headers, set_user_agent
+            client = scope.get("client") or ("", 0)
+            set_client_addr(f"{client[0]}:{client[1]}" if client and client[0] else "")
             raw = scope.get("headers") or []
             ua = next((v for k, v in raw if k == b"user-agent"), b"")
             set_user_agent(ua.decode("latin-1", "replace"))

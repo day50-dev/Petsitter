@@ -72,7 +72,8 @@ class TestCreateAppDefaults:
         app = create_app(model_url="", model_name=None, api_key="", trick_paths=[])
         tricks = await self._trick_files(app)
         files = [t["file"] for t in tricks]
-        assert files == ["tricks/tool_monitor.py", "tricks/secrets_protector.py", "tricks/exportit.py"]
+        assert files == ["tricks/context_monitor.py", "tricks/tool_monitor.py",
+                         "tricks/secrets_protector.py", "tricks/exportit.py"]
         assert all(t["enabled"] for t in tricks)
 
     @pytest.mark.asyncio
@@ -96,7 +97,7 @@ class TestCreateAppDefaults:
         ])
         app = create_app(model_url="", model_name=None, api_key="", trick_paths=[])
         tricks = await self._trick_files(app)
-        assert tricks[0]["file"] == "tricks/tool_monitor.py"
+        assert tricks[0]["file"] == "tricks/context_monitor.py"
 
     @pytest.mark.asyncio
     async def test_restore_plus_trick_paths_adds_missing_only(self, monkeypatch, tmp_path):
@@ -121,7 +122,7 @@ class TestCreateAppDefaults:
         monkeypatch.setattr("petsitter.server.TRICKSETS_DIR", tmp_path)
         app = create_app(model_url="", model_name=None, api_key="", trick_paths=[], restore_saved=True)
         tricks = await self._trick_files(app)
-        assert tricks[0]["file"] == "tricks/tool_monitor.py"
+        assert tricks[0]["file"] == "tricks/context_monitor.py"
 
 
 class TestServerEndpoints:

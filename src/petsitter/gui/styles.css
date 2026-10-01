@@ -2244,23 +2244,24 @@ body.rail-collapsed .chan-count { position: absolute; top: 0; right: 0; font-siz
 .rule-chip i { font-style: normal; color: #5a7a8a; margin-left: 4px; }
 
 @media (max-width: 800px) {
-  /* On a phone the rail becomes a row of channels you swipe through. */
-  .chan-rail {
-    position: static;
-    width: auto;
-    flex-direction: row;
-    gap: 4px;
-    overflow-x: auto;
-    padding: 6px;
-    margin-bottom: 12px;
-    border: 1px solid #1e2a3a;
-    border-radius: 8px;
+  /* On a phone the rail stays a sidebar: the narrow badge strip along the
+     left edge, and its toggle slides the full sidebar out over the page
+     (body.rail-mobile-open) rather than pushing the page aside. JS keeps
+     rail-collapsed on while it's shut, without touching the desktop choice. */
+  body { padding-left: 74px; padding-right: 12px; }
+  body.rail-mobile-open .chan-rail {
+    width: 250px;
+    padding: 22px 10px 12px;
+    box-shadow: 8px 0 32px rgba(0, 0, 0, .55);
   }
-  body.rail-collapsed .chan-rail { width: auto; padding: 6px; }
-  .chan-rail .chan-toggle, .chan-rail .chan-h, .chan-rail .chan-foot, .chan-rail .chan-warn { display: none; }
-  .chan-rail .chan-top { padding: 0; margin: 0; border: none; }
-  .chan { width: auto; flex: none; margin: 0; }
-  .chan-add { margin-top: 0; }
+  .rail-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 29;
+    background: rgba(5, 5, 12, .6);
+    display: none;
+  }
+  body.rail-mobile-open .rail-backdrop { display: block; }
 }
 @media (max-width: 620px) {
   .rule-sentence { flex-basis: 100%; border-left: none; padding-left: 0; }
@@ -2322,3 +2323,18 @@ body.rail-collapsed .chan-count { position: absolute; top: 0; right: 0; font-siz
 .newchan-form .rule-ed-actions { margin-top: 18px; }
 .newchan-form .rule-ed-actions .btn { padding: 6px 16px; font-size: 13px; }
 .chan-add.active { background: #1a2a4d; color: #fff; }
+
+/* Pop out: the Live page in its own browser tab. */
+.ext-popout {
+  margin-left: auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 5px;
+  color: #8a9ab0;
+  font-size: 12px;
+  text-decoration: none;
+}
+.ext-popout:hover { color: #fff; background: #1a2a4d; }

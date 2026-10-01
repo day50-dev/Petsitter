@@ -47,6 +47,7 @@
      apps (and models) it matches run through its extensions. They are all
      live at once; picking one here only chooses what the tabs show. -->
 <nav class="chan-rail" id="chan-rail" aria-label="Channels"></nav>
+<div class="rail-backdrop" onclick="toggleRail(true)" aria-hidden="true"></div>
 <div class="app-main">
 <!-- The selected channel, like a chat app's channel topic bar. -->
 <div class="rule-bar" id="ts-bar">
@@ -381,6 +382,7 @@ function switchTab(name) {
   // whenever it runs, which on boot happens after this.
   document.body.classList.toggle('on-intro', name === 'intro');
   document.body.classList.toggle('no-channel', NO_CHANNEL_TABS.includes(name));
+  if (typeof _closeMobileRail === 'function') _closeMobileRail();
   if (typeof renderChannelRail === 'function') renderChannelRail();
   if (typeof queueFitExtPanes === 'function') queueFitExtPanes();
   if (name === 'intro') refreshIntro();
@@ -1055,6 +1057,13 @@ function renderExtDetail() {
     + (live ? `<button class="ext-tab${_extView === 'live' ? ' active' : ''}" onclick="setExtView('live')"><span class="ext-live-dot" aria-hidden="true"></span>Live</button>` : '')
     + `<button class="ext-tab${_extView === 'details' ? ' active' : ''}" onclick="setExtView('details')">Details</button>`
     + (e.source !== 'file' ? `<button class="ext-tab${_extView === 'source' ? ' active' : ''}" onclick="setExtView('source')">Source code</button>` : '')
+    // Pop out: the Live page on its own in a browser tab. It only uses
+    // relative URLs, so the same address works standalone.
+    + (_extView === 'live'
+        ? `<a class="ext-popout" href="/api/tricks/ui/${encodeURIComponent(inst.id || '')}/" target="_blank" rel="noopener" title="Open ${escapeHtml(nm)}'s live view in its own tab" aria-label="Open in its own tab">`
+          + `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>`
+          + `<span>Pop out</span></a>`
+        : '')
     + `</div>`;
 
   let body;
@@ -1671,20 +1680,46 @@ function renderChannelRail() {
 
 // From a page that isn't about any channel (Start here, Help), opening a
 // channel means seeing what it does, so it lands on its extensions.
+function _closeMobileRail() {
+  if (_railMobileOpen) { _railMobileOpen = false; applyRailMode(); }
+}
+
 function openChannel(name) {
+  _closeMobileRail();
   if (NO_CHANNEL_TABS.includes(currentTab)) switchTab('tricks');
   switchTrickset(name);
 }
 
 // The rail folds down to a strip of channel initials, like an editor's
 // sidebar. The choice is per browser, and the page works without storage.
-function toggleRail(force) {
-  const collapsed = force !== undefined ? force : !document.body.classList.contains('rail-collapsed');
-  document.body.classList.toggle('rail-collapsed', collapsed);
-  try { localStorage.setItem('petsitter.railCollapsed', collapsed ? '1' : '0'); } catch(e) {}
-  renderChannelRail();
+//
+// On a phone it's the same sidebar, but it starts shut (the badge strip) and
+// opens *over* the page. That state is separate from the desktop choice, so
+// using a phone never changes how the rail looks on a laptop.
+const _railNarrow = window.matchMedia('(max-width: 800px)');
+let _railMobileOpen = false;
+let _railDesktopCollapsed = false;
+try { _railDesktopCollapsed = localStorage.getItem('petsitter.railCollapsed') === '1'; } catch(e) {}
+
+function applyRailMode() {
+  const narrow = _railNarrow.matches;
+  if (!narrow) _railMobileOpen = false;
+  document.body.classList.toggle('rail-mobile-open', narrow && _railMobileOpen);
+  document.body.classList.toggle('rail-collapsed', narrow ? !_railMobileOpen : _railDesktopCollapsed);
+  if (typeof renderChannelRail === 'function') renderChannelRail();
 }
-try { if (localStorage.getItem('petsitter.railCollapsed') === '1') document.body.classList.add('rail-collapsed'); } catch(e) {}
+
+function toggleRail(force) {
+  if (_railNarrow.matches) {
+    _railMobileOpen = force !== undefined ? !force : !_railMobileOpen;
+  } else {
+    _railDesktopCollapsed = force !== undefined ? force : !_railDesktopCollapsed;
+    try { localStorage.setItem('petsitter.railCollapsed', _railDesktopCollapsed ? '1' : '0'); } catch(e) {}
+  }
+  applyRailMode();
+}
+_railNarrow.addEventListener('change', applyRailMode);
+applyRailMode();
 
 // Pick up channels created or removed elsewhere (connecting a tool, the
 // pet CLI). Only the rail is redrawn, and only when the set of channels

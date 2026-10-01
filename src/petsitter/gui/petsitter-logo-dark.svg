@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 8 360 50" width="360" height="50" role="img" aria-label="Petsitter">
+  <!-- A request passing through petsitter: in from your tool on the left
+       (hollow ring), through the word, out to the provider on the right
+       (solid dot). A faint pulse travels the same path now and then. -->
+  <style>
+    .word {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      font-size: 56px;
+      font-weight: 700;
+      letter-spacing: -1.5px;
+    }
+    .pulse { opacity: 0; }
+    @media (prefers-reduced-motion: reduce) {
+      .pulse { display: none; }
+    }
+  </style>
+  <defs>
+    <!-- userSpaceOnUse: a flat line has no height, so a bounding-box
+         gradient on it would paint nothing -->
+    <linearGradient id="lineIn" gradientUnits="userSpaceOnUse" x1="18" y1="0" x2="70" y2="0">
+      <stop offset="0" stop-color="#8AB4FF" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#4A6A8A" stop-opacity="0.3"/>
+    </linearGradient>
+    <linearGradient id="lineOut" gradientUnits="userSpaceOnUse" x1="290" y1="0" x2="342" y2="0">
+      <stop offset="0" stop-color="#4A6A8A" stop-opacity="0.3"/>
+      <stop offset="1" stop-color="#8AB4FF" stop-opacity="0.95"/>
+    </linearGradient>
+    <radialGradient id="glow">
+      <stop offset="0" stop-color="#CFE2FF" stop-opacity="1"/>
+      <stop offset="0.5" stop-color="#8AB4FF" stop-opacity="0.6"/>
+      <stop offset="1" stop-color="#8AB4FF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- the line runs right up to the word on both sides -->
+  <path d="M 18 33 H 70" stroke="url(#lineIn)" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M 290 33 H 342" stroke="url(#lineOut)" stroke-width="3.5" stroke-linecap="round"/>
+
+  <!-- in: your tool -->
+  <circle cx="11" cy="33" r="6.5" fill="none" stroke="#8AB4FF" stroke-width="3.5"/>
+  <!-- out: the provider -->
+  <circle cx="349" cy="33" r="8" fill="#8AB4FF"/>
+
+  <text class="word" x="180" y="53" text-anchor="middle" fill="#A4B8D4">Petsitter</text>
+
+  <!-- the pulse: in along the left line, out along the right, every ~6s -->
+  <circle class="pulse" r="7" cy="33" fill="url(#glow)">
+    <animate attributeName="cx" values="18;70" dur="0.7s" begin="1s;pulseOut.end+4.6s" id="pulseIn" fill="freeze"/>
+    <animate attributeName="opacity" values="0;1;0" dur="0.7s" begin="1s;pulseOut.end+4.6s"/>
+  </circle>
+  <circle class="pulse" r="7" cy="33" fill="url(#glow)">
+    <animate attributeName="cx" values="290;342" dur="0.7s" begin="pulseIn.end" id="pulseOut" fill="freeze"/>
+    <animate attributeName="opacity" values="0;1;0" dur="0.7s" begin="pulseIn.end"/>
+  </circle>
+</svg>

@@ -1,8 +1,10 @@
 """Base Trick class and callmodel utility for petsitter."""
 
+import html
 import json
 import sys
 import threading
+import time
 from collections import deque
 from pathlib import Path
 from typing import Any
@@ -355,6 +357,10 @@ class Trick:
         ``self.publish(anything_json_able)`` feeds ``events``; ``ui_action(data)``
         answers ``action`` and returns a JSON-able reply (or None).
 
+        Most tricks need none of that: call ``self.report("what I did")`` and
+        the standard Live page shows it as a log. A page of your own replaces
+        the standard one.
+
     Lifecycle hooks (called automatically by the framework):
         install()    — when the trick is first added to a trickset
         startup()    — when the first concurrent request uses this trick (0→1)
@@ -390,20 +396,51 @@ class Trick:
         """Send one event to this trick's Live page. Cheap, never blocks."""
         self.live_feed.publish(event)
 
+    def report(self, message: str, **details: Any) -> None:
+        """Say what you just did, in one sentence, for the Live page.
+
+        The standard Live page shows these as a timestamped log, so a trick
+        gets a readable view of itself without writing any UI::
+
+            self.report("Replaced 3 em-dashes")
+            self.report("Rephrased a message", before=old[:80], after=new[:80])
+
+        Never put anything in a report you wouldn't show on screen.
+        """
+        self.publish({"event": "report", "message": str(message),
+                      "details": details or None, "ts": time.time()})
+
     def ui_html(self) -> str | None:
-        """The Live page's HTML, or None when the trick has no page."""
-        if not self.ui_page:
-            return None
-        module = sys.modules.get(type(self).__module__)
-        base = Path(getattr(module, "__file__", "") or ".").parent
-        return (base / self.ui_page).read_text(encoding="utf-8")
+        """The Live page's HTML.
+
+        Defaults to the standard page (a log of ``report()`` calls); set
+        ``ui_page`` or override this for a page of your own.
+        """
+        if self.ui_page:
+            module = sys.modules.get(type(self).__module__)
+            base = Path(getattr(module, "__file__", "") or ".").parent
+            return (base / self.ui_page).read_text(encoding="utf-8")
+        page = (Path(__file__).resolve().parent / "gui" / "live_default.html").read_text(encoding="utf-8")
+        name = getattr(self, "__display_name__", "") or type(self).__name__
+        return page.replace("__TRICK_NAME__", html.escape(name))
 
     def ui_action(self, data: Any) -> Any:
-        """Answer a POST from the Live page. Return anything JSON-able."""
-        return None
+        """Answer a POST from the Live page. Return anything JSON-able.
+
+        The standard page sends ``{"action": "clear"}``; overriding pages can
+        send whatever they like.
+        """
+        if isinstance(data, dict) and data.get("action") == "clear":
+            self.live_feed.clear()
+        return {"ok": True}
 
     @classmethod
     def has_ui(cls) -> bool:
+        """Every trick has a Live page: its own, or the standard report log."""
+        return True
+
+    @classmethod
+    def has_custom_ui(cls) -> bool:
         return bool(cls.ui_page) or cls.ui_html is not Trick.ui_html
 
     def configure(self, config: dict) -> None:

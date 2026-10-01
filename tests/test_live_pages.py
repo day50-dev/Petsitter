@@ -39,11 +39,56 @@ def test_publish_is_kept_for_late_viewers():
     assert [e for _, e in t.live_feed.since(last)] == [{"a": 2}]
 
 
-def test_has_ui():
-    assert Echo.has_ui()
-    assert ToolMonitorTrick.has_ui()
-    assert SecretsProtectorTrick.has_ui()
-    assert not Trick.has_ui()
+def test_every_trick_has_a_live_page():
+    assert Trick.has_ui() and Echo.has_ui()
+    assert ToolMonitorTrick.has_custom_ui() and SecretsProtectorTrick.has_custom_ui()
+    assert not Trick.has_custom_ui()
+
+
+def test_standard_page_and_report():
+    class Plain(Trick):
+        __display_name__ = "Plain <One>"
+    t = Plain()
+    page = t.ui_html()
+    assert "Plain &lt;One&gt;" in page and "__TRICK_NAME__" not in page
+    t.report("Replaced 2 em-dashes", count=2)
+    (_, e), = t.live_feed.since(0)
+    assert e["event"] == "report" and e["message"] == "Replaced 2 em-dashes" and e["details"] == {"count": 2}
+    t.ui_action({"action": "clear"})
+    assert t.live_feed.since(0) == []
+
+
+def test_no_emdash_reports():
+    from petsitter.tricks.no_emdash import NoEmDashTrick
+    t = NoEmDashTrick()
+    ctx = [{"role": "assistant", "content": "a\u2014b\u2014c"}]
+    t.post_hook(ctx)
+    assert ctx[-1]["content"] == "a-b-c"
+    assert t.live_feed.since(0)[0][1]["message"] == "Replaced 2 em-dashes in a reply"
+
+
+def test_politeify_rewrites_once_and_reuses_for_history(monkeypatch):
+    from petsitter.tricks import politeify
+    calls = []
+
+    def fake_callmodel(ctx, msg, **kw):
+        calls.append(msg)
+        return ctx + [{"role": "user", "content": msg}, {"role": "assistant", "content": "POLITE: " + msg}]
+    monkeypatch.setattr(politeify, "callmodel_sync", fake_callmodel)
+    monkeypatch.setattr(politeify.PoliteifyTrick, "_model_config", staticmethod(lambda: {}))
+    t = politeify.PoliteifyTrick()
+    turn1 = [{"role": "user", "content": "fix this garbage code now"}]
+    t.pre_hook(turn1, {})
+    assert turn1[0]["content"] == "POLITE: fix this garbage code now"
+    # next turn: the client resends the ORIGINAL first message plus a new one
+    turn2 = [{"role": "user", "content": "fix this garbage code now"},
+             {"role": "assistant", "content": "ok"},
+             {"role": "user", "content": "still broken, idiot machine"}]
+    t.pre_hook(turn2, {})
+    assert turn2[0]["content"] == "POLITE: fix this garbage code now"     # from the cache
+    assert turn2[2]["content"] == "POLITE: still broken, idiot machine"
+    assert calls == ["fix this garbage code now", "still broken, idiot machine"]   # no repeat call
+    assert [e["message"] for _, e in t.live_feed.since(0)] == ["Rephrased a message to be more polite"] * 2
 
 
 def test_page_and_action_routes():

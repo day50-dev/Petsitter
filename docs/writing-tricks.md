@@ -146,10 +146,28 @@ def info(self, capabilities: dict) -> dict:
 
 ## Live page
 
-A trick can show itself working. Give it a page and it gets a **Live** tab on
-its extension page in the dashboard, and installing it opens straight onto that
-tab. It is a dumb container: petsitter serves your HTML and two pipes, and puts
-no schema on either.
+Every trick gets a **Live** tab on its extension page in the dashboard, and
+installing it (or clicking it once installed) opens straight onto that tab.
+
+Most tricks only need to say what they did. Call `self.report()` and the
+standard Live page shows it as a timestamped log; no UI to write:
+
+```python
+def post_hook(self, context):
+    n = reply.count("\u2014")
+    if n:
+        ...
+        self.report(f"Replaced {n} em-dashes in a reply")
+    return context
+
+self.report("Rephrased a message", before=old[:300], after=new[:300])  # details expand
+```
+
+Only the trick knows what it changed (it can edit anything in flight however it
+likes), so reporting is its job; the framework can't infer it.
+
+A trick that wants more can ship its own page instead. It is a dumb container:
+petsitter serves your HTML and two pipes, and puts no schema on either.
 
 ```python
 class MyTrick(Trick):

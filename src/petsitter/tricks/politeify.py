@@ -23,14 +23,20 @@ models; otherwise it uses the `default` model.
 
 ## How it works
 
-- `pre_hook`: finds the last user message (string content only) and makes one
+- `pre_hook`: the newest user message (string content only) gets one
   `callmodel_sync` call with a rewrite-only instruction.
+- Every rewrite is cached (original -> rewritten, last 1000). Your tool resends
+  the whole conversation each turn, so earlier messages are swapped from the
+  cache: the model keeps seeing the polite versions, with no extra calls.
 - Model config: the `politeify` modelset entry if present, else `default`.
 - If the rewrite call fails or returns nothing, the message is sent unchanged
-  (a warning is logged). Nothing about the rewrite shows up in the response.
+  (a warning is logged). Each rephrasing, and each failure, shows up on the
+  Live tab.
 """
 
 import logging
+import threading
+from collections import OrderedDict
 
 from petsitter.trick import Trick, callmodel_sync, get_model_config
 
@@ -66,18 +72,45 @@ class PoliteifyTrick(Trick):
         },
     ]
 
+    # Rewrites already made, original -> rewritten. The client resends the
+    # whole conversation every turn, so without this every earlier message
+    # would reach the model in its original wording again (or cost a fresh
+    # rewrite each time). Bounded, oldest dropped first.
+    CACHE_SIZE = 1000
+
     def __init__(self, min_length: int = 12):
         self.min_length = min_length
+        self._cache: OrderedDict[str, str] = OrderedDict()
+        self._cache_lock = threading.Lock()
 
     def pre_hook(self, context: list, params: dict) -> list:
-        idx = self._last_user_index(context)
-        if idx is None:
+        last = self._last_user_index(context)
+        if last is None:
             return context
+        minimum = int(self.min_length or 0)
+        for idx, msg in enumerate(context):
+            if msg.get("role") != "user":
+                continue
+            original = msg.get("content")
+            if not isinstance(original, str) or len(original.strip()) < minimum:
+                continue
+            cached = self._cached(original)
+            if cached is None and idx == last:
+                # Only the newest message costs a rewrite; anything older that
+                # isn't cached came from before this trick was on, and stays.
+                cached = self._rewrite(original)
+            if cached and cached != original:
+                context[idx] = {**msg, "content": cached}
+        return context
 
-        original = context[idx].get("content")
-        if not isinstance(original, str) or len(original.strip()) < int(self.min_length or 0):
-            return context
+    def _cached(self, original: str) -> str | None:
+        with self._cache_lock:
+            hit = self._cache.get(original)
+            if hit is not None:
+                self._cache.move_to_end(original)
+            return hit
 
+    def _rewrite(self, original: str) -> str | None:
         cfg = self._model_config()
         try:
             rewritten_ctx = callmodel_sync(
@@ -89,12 +122,19 @@ class PoliteifyTrick(Trick):
             )
         except Exception as e:
             logger.warning("politeify: rewrite failed, passing message through unchanged: %s", e)
-            return context
-
+            self.report("Couldn't rephrase a message; sent it as written", error=str(e)[:200])
+            return None
         rewritten = rewritten_ctx[-1].get("content", "").strip() if rewritten_ctx else ""
-        if rewritten:
-            context[idx] = {**context[idx], "content": rewritten}
-        return context
+        if not rewritten:
+            return None
+        with self._cache_lock:
+            self._cache[original] = rewritten
+            while len(self._cache) > self.CACHE_SIZE:
+                self._cache.popitem(last=False)
+        if rewritten != original:
+            self.report("Rephrased a message to be more polite",
+                        before=original[:300], after=rewritten[:300])
+        return rewritten
 
     def info(self, capabilities: dict) -> dict:
         capabilities["politeify"] = True

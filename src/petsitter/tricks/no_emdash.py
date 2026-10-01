@@ -48,9 +48,10 @@ class NoEmDashTrick(Trick):
 
         last = context[-1]
         content = last.get("content", "")
-        if EMDASH in content:
-            content = content.replace(EMDASH, "-")
-            last["content"] = content
+        if isinstance(content, str) and EMDASH in content:
+            n = content.count(EMDASH)
+            last["content"] = content.replace(EMDASH, "-")
+            self.report(f"Replaced {n} em-dash{'es' if n != 1 else ''} in a reply")
 
         return context
 

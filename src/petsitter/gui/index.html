@@ -15,7 +15,7 @@
 
 <header>
 <div class="brand">
-<img src="/static/petsitter-logo-dark.svg" alt="Petsitter">
+<img src="/static/petsitter-logo-dark.svg" alt="Petsitter" id="brand-logo" title="Petsitter">
 </div>
 <div class="nav">
 <a href="https://github.com/day50-dev/Petsitter" target="_blank">GitHub</a>
@@ -23,7 +23,9 @@
 <a href="#" onclick="switchTab('help');return false">Help</a>
 </div>
 <div class="info">
-<span><span class="label">v</span><span id="info-version">--</span></span>
+<button class="base-chip" id="base-chip" onclick="copyBaseUrl(this)" title="Base URL: click to copy">
+<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v6"/><path d="M15 2v6"/><path d="M6 8h12v4a6 6 0 0 1-12 0V8z"/><path d="M12 18v4"/></svg>
+<span id="base-chip-url"></span></button>
 <div class="try-btn btn" id="try-btn" onclick="togglePlayground()" title="Try it &mdash; send a message through this trickset">
 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.9 8.9 0 0 1-3.8-.9L3 21l1.9-5.1A8.4 8.4 0 0 1 12 3a8.4 8.4 0 0 1 9 8.5z"/></svg>
 </div>
@@ -291,6 +293,12 @@ file back exactly as it was. Your tool keeps using its own account &mdash; petsi
 </div>
 </div>
 <div id="agents-grid" class="agents-grid"><div class="loader">Loading agents...</div></div>
+</div>
+<div class="card" id="discovered-card">
+<div class="card-title"><h2>Discovered programs</h2><span class="ext-count" id="discovered-count"></span></div>
+<div class="section-desc">Every program that has sent requests through petsitter, by the X-Title header it sends,
+and which channel its requests went to. Kept across restarts.</div>
+<div id="discovered-list"></div>
 </div>
 </div>
 
@@ -662,17 +670,76 @@ async function obConnectTool(id) {
   paintOnboard();
 }
 
+// ---- discovered programs ----
+// What each program actually sends (X-Title, models) and where its requests
+// went. The answer to "my channel isn't catching it": the X-Title is right
+// here, next to the channel that did get it.
+function renderDiscovered() {
+  const list = document.getElementById('discovered-list');
+  if (!list) return;
+  const programs = _traffic.programs || [];
+  document.getElementById('discovered-count').textContent = programs.length || '';
+  if (!programs.length) {
+    list.innerHTML = '<div class="empty">Nothing yet. Run a program through petsitter and it shows up here, with the X-Title it sends.</div>';
+    return;
+  }
+  list.innerHTML = `<div class="disc-table">`
+    + `<div class="disc-row disc-head"><span>X-Title header</span><span>Models</span><span>Went to</span><span>Requests</span><span></span></div>`
+    + programs.map(p => {
+      const models = Object.entries(p.models || {}).sort((a, b) => b[1] - a[1]);
+      const chans = Object.entries(p.channels || {}).sort((a, b) => b[1] - a[1]);
+      const topModel = models.length ? models[0][0] : '';
+      const xt = p.x_title
+        ? `<code>${escapeHtml(p.x_title)}</code>`
+        : `<span class="disc-none" title="This program sends no X-Title header, so a channel can only catch it by model">none sent</span>`;
+      const args = escapeHtml(JSON.stringify(p.x_title)) + ',' + escapeHtml(JSON.stringify(p.x_title ? '' : topModel));
+      return `<div class="disc-row">`
+        + `<span>${xt}</span>`
+        + `<span class="disc-models">${models.map(([m, n]) => `<code title="${n} requests">${escapeHtml(m)}</code>`).join(' ') || '&mdash;'}</span>`
+        + `<span class="disc-chans">${chans.map(([c, n]) => `<a href="#" class="disc-chan" onclick="openChannel(${escapeHtml(JSON.stringify(c))});return false" title="${n} requests">${c === '_default' ? '&lowast; Default' : '#' + escapeHtml(c)}</a>`).join(' ')}</span>`
+        + `<span class="disc-n">${p.count}<i>${_ago(p.ago)}</i></span>`
+        + `<span class="disc-actions"><button class="btn btn-sm btn-neutral" onclick="newChannelFor(${args})">New channel for this</button>`
+        + `<button class="btn btn-sm btn-secondary" onclick="forgetProgram(${escapeHtml(JSON.stringify(p.x_title))})" title="Remove from this list">Forget</button></span>`
+        + `</div>`;
+    }).join('') + `</div>`;
+}
+
+function newChannelFor(xtitle, model) {
+  _newChanPrefill = {xtitle: xtitle || '', model: model || ''};
+  if (currentTab === 'newchannel') openRuleEditor(true); else switchTab('newchannel');
+}
+
+async function forgetProgram(xtitle) {
+  try {
+    await fetchJSON('/api/discovered/forget', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                                body: JSON.stringify({x_title: xtitle})});
+    await fetchTraffic();
+  } catch(e) { showToast(e.message, true); }
+}
+
 // ---- base URL ----
 // The address the browser used is the one other tools on the same network use.
+function baseUrl() { return location.origin + '/v1'; }
+
+function copyBaseUrl(btn) {
+  const span = document.getElementById('base-chip-url');
+  const was = span.textContent;
+  copyText('base-chip-url', null, ok => {
+    span.textContent = ok ? 'copied' : was;
+    setTimeout(() => { span.textContent = was; }, 1200);
+  });
+}
+
 function paintBaseUrl() {
-  const base = location.origin + '/v1';
+  const base = baseUrl();
   document.getElementById('base-url').textContent = base;
   document.getElementById('base-url-env').textContent = `OPENAI_BASE_URL=${base} your-program`;
 }
 
-function copyText(id, btn) {
+function copyText(id, btn, after) {
   const text = document.getElementById(id).textContent;
   const done = ok => {
+    if (after) after(ok);
     if (!btn) return;
     const was = btn.textContent;
     btn.textContent = ok ? 'Copied' : 'Select and copy';
@@ -695,11 +762,17 @@ function copyText(id, btn) {
   done(ok);
 }
 
+document.addEventListener('DOMContentLoaded', () => {
+  const el = document.getElementById('base-chip-url');
+  if (el) el.textContent = baseUrl();
+});
+
 // ---- info ----
 async function fetchInfo() {
     try {
       const d = await fetchJSON('/api/info');
-      document.getElementById('info-version').textContent = d.version || '--';
+      // The version lives in the logo's tooltip now; the header shows the base URL.
+      document.getElementById('brand-logo').title = 'Petsitter v' + (d.version || '?');
     } catch(e) { console.error(e); }
   }
 
@@ -1712,6 +1785,7 @@ function _setTricksetList(loaded, avail) {
 async function fetchTraffic() {
   try { _traffic = await fetchJSON('/api/traffic'); } catch(e) {}
   renderRuleBar();
+  renderDiscovered();
   // Fresh suggestions for an untouched New channel form (never over typing).
   if (currentTab === 'newchannel'
       && ['rule-app', 'rule-model', 'rule-name-input'].every(id => !(document.getElementById(id) || {}).value)) {
@@ -1762,6 +1836,7 @@ function renderChannelRail() {
       + `<span class="chan-abbr" aria-hidden="true">${escapeHtml(abbr)}</span>`
       + `<span class="chan-glyph">${n === '_default' ? '∗' : '#'}</span>`
       + `<span class="chan-name">${escapeHtml(ruleLabel(n))}</span>`
+      + (n === '_default' && catchAll ? `<span class="chan-alert" title="Default never runs: #${escapeHtml(catchAll.name)} matches every request">!</span>` : '')
       + (off ? '<span class="chan-off">off</span>'
              : t ? `<span class="chan-count${live ? ' live' : ''}">${t.count > 999 ? '999+' : t.count}</span>` : '')
       + `</button>`;
@@ -1779,13 +1854,14 @@ function renderChannelRail() {
     + `<button class="chan chan-page${currentTab === 'connecting' ? ' active' : ''}" onclick="switchTab('connecting')" title="Connecting: the base URL your tools point at">`
     + `<span class="chan-abbr" aria-hidden="true">${_plugIcon}</span><span class="chan-glyph" aria-hidden="true">${_plugIcon}</span><span class="chan-name">Connecting</span></button>`
     + `<button class="chan chan-page${currentTab === 'agents' ? ' active' : ''}" onclick="switchTab('agents')" title="Agents: the coding tools connected to petsitter">`
-    + `<span class="chan-abbr" aria-hidden="true">${_agentsIcon}</span><span class="chan-glyph" aria-hidden="true">${_agentsIcon}</span><span class="chan-name">Agents</span></button>`
+    + `<span class="chan-abbr" aria-hidden="true">${_agentsIcon}</span><span class="chan-glyph" aria-hidden="true">${_agentsIcon}</span><span class="chan-name">Agents</span>`
+    + ((_traffic.programs || []).length ? `<span class="chan-count" title="Discovered programs">${(_traffic.programs || []).length}</span>` : '')
+    + `</button>`
     + `<button class="chan chan-page${currentTab === 'models' ? ' active' : ''}" onclick="switchTab('models')" title="Models: your provider, and the models petsitter sends to">`
     + `<span class="chan-abbr" aria-hidden="true">${_modelsIcon}</span><span class="chan-glyph" aria-hidden="true">${_modelsIcon}</span><span class="chan-name">Models</span></button>`
     + `<div class="chan-h">Channels</div>`
     + names.map(item).join('')
     + item('_default')
-    + (catchAll ? `<div class="chan-warn">Default never runs while <b>#${escapeHtml(catchAll.name)}</b> matches every request.</div>` : '')
     + `<button class="chan chan-add${currentTab === 'newchannel' ? ' active' : ''}" onclick="openRuleEditor(true)" title="Add channel"><span class="chan-abbr" aria-hidden="true">+</span><span class="chan-glyph">+</span><span class="chan-name">Add channel</span></button>`
     + `<div class="chan-foot">Each app's requests go through every channel that matches it. <b>Default</b> gets what no channel matches.</div>`;
 }
@@ -1855,32 +1931,38 @@ async function refreshChannelList() {
 // light poll while the page is visible.
 setInterval(() => { if (!document.hidden) { fetchTraffic(); refreshChannelList(); } }, 10000);
 
+let _newChanPrefill = null;   // {xtitle, model} from "New channel for this"
+
 function openRuleEditor(isNew) {
   // A new channel isn't part of the one on screen, so it gets its own page.
   if (isNew && currentTab !== 'newchannel') { switchTab('newchannel'); return; }
   _ruleEditingNew = isNew;
   const ts = isNew ? null : loadedTricksets[selectedTrickset];
   if (!isNew && (!ts || ts.name === '_default')) return;
-  const app = ts ? ((ts.filters || {})['X-Title'] || '*') : '*';
-  const model = ts ? ((ts.filters || {})['Model'] || '*') : '*';
+  const pre = isNew ? (_newChanPrefill || {}) : {};
+  _newChanPrefill = null;
+  const app = ts ? ((ts.filters || {})['X-Title'] || '*') : (pre.xtitle || '*');
+  const model = ts ? ((ts.filters || {})['Model'] || '*') : (pre.model || '*');
+  const name = ts ? ts.name : (pre.xtitle ? _slug(pre.xtitle) : '');
   const val = v => v === '*' ? '' : escapeHtml(v);
-  const covered = new Set(Object.values(loadedTricksets).map(t => (t.filters || {})['X-Title']).filter(Boolean));
-  const seenApps = (_traffic.apps || []).filter(a => !covered.has(a.name));
-  const suggest = isNew && seenApps.length
-    ? `<div class="rule-suggest"><span>Apps petsitter has seen:</span>${seenApps.slice(0, 8).map(a =>
-        `<button class="rule-chip" onclick="fillRuleApp(${escapeHtml(JSON.stringify(a.name))})">${escapeHtml(a.name)} <i>${a.count}</i></button>`).join('')}</div>`
-    : (isNew ? '<div class="rule-suggest"><span>Once an app sends requests through petsitter, it shows up here to pick from.</span></div>' : '');
-  const opts = list => (list || []).map(x => `<option value="${escapeHtml(x.name)}"></option>`).join('');
+  const programs = (_traffic.programs || []).filter(p => p.x_title);
+  const models = [...new Set((_traffic.programs || []).flatMap(p => Object.keys(p.models || {})))];
+  const opt = v => `<option value="${escapeHtml(v)}"></option>`;
   const ed = document.getElementById(isNew ? 'newchannel-form' : 'rule-editor');
   ed.innerHTML = (isNew ? '' : `<div class="rule-ed-title">Edit channel</div>`)
-    + suggest
-    + `<div class="rule-ed-sentence">`
-    + `<span>For requests from</span><input type="text" id="rule-app" list="rule-app-list" value="${val(app)}" placeholder="any app" spellcheck="false" oninput="ruleEdPreview()">`
-    + `<span>using</span><input type="text" id="rule-model" list="rule-model-list" value="${val(model)}" placeholder="any model" spellcheck="false" oninput="ruleEdPreview()">`
-    + `<span class="rule-ed-then">Those requests run through this channel&rsquo;s extensions.</span></div>`
-    + `<datalist id="rule-app-list">${opts(_traffic.apps)}</datalist><datalist id="rule-model-list">${opts(_traffic.models)}</datalist>`
-    + `<label class="rule-ed-name"><span>Name</span><input type="text" id="rule-name-input" value="${ts ? escapeHtml(ts.name) : ''}" placeholder="e.g. claude-code" spellcheck="false"></label>`
-    + `<div class="rule-ed-hint">The app is what your tool sends as its X-Title header. Leave a box empty for any. <code>*</code> works as a wildcard, as in <code>claude*</code>.</div>`
+    + `<div class="rule-fields">`
+    + `<label class="rule-field"><span class="rule-label">Name</span>`
+    + `<input type="text" id="rule-name-input" value="${escapeHtml(name)}" placeholder="e.g. claude-code" spellcheck="false"></label>`
+    + `<label class="rule-field"><span class="rule-label">X-Title header</span>`
+    + `<input type="text" id="rule-app" list="rule-app-list" value="${val(app)}" placeholder="*" spellcheck="false" autocomplete="off" oninput="ruleEdPreview()">`
+    + `<span class="rule-help">The X-Title header the program sends. Don&rsquo;t know what to put? Run your program through petsitter once and it appears in this list.</span></label>`
+    + `<label class="rule-field"><span class="rule-label">Model</span>`
+    + `<input type="text" id="rule-model" list="rule-model-list" value="${val(model)}" placeholder="*" spellcheck="false" autocomplete="off" oninput="ruleEdPreview()">`
+    + `<span class="rule-help">The model named in the request.</span></label>`
+    + `</div>`
+    + `<datalist id="rule-app-list">${programs.map(p => opt(p.x_title)).join('')}</datalist>`
+    + `<datalist id="rule-model-list">${models.map(opt).join('')}</datalist>`
+    + `<div class="rule-ed-hint">Both must match. Case doesn&rsquo;t matter; <code>*</code> matches anything (<code>claude*</code>). Empty means <code>*</code>. A request no channel matches goes to Default.</div>`
     + `<div class="rule-ed-preview" id="rule-ed-preview"></div>`
     + `<div class="rule-ed-actions"><button class="btn btn-sm btn-neutral" onclick="saveRule()">${isNew ? 'Create channel' : 'Save'}</button>`
     + `<button class="btn btn-sm btn-secondary" onclick="${isNew ? 'cancelNewChannel()' : 'closeRuleEditor()'}">Cancel</button>`
@@ -1889,27 +1971,43 @@ function openRuleEditor(isNew) {
         + `<button class="btn btn-sm btn-danger" onclick="deleteTrickset()">Delete channel</button>`)
     + `</div>`;
   ed.hidden = false;
-  ruleEdPreview(isNew);
-  (isNew ? document.getElementById('rule-app') : document.getElementById('rule-name-input')).focus();
-}
-
-function fillRuleApp(name) {
-  document.getElementById('rule-app').value = name;
-  const n = document.getElementById('rule-name-input');
-  if (!n.value) n.value = name.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-|-$/g, '');
   ruleEdPreview();
+  (isNew ? document.getElementById(pre.xtitle ? 'rule-name-input' : 'rule-app') : document.getElementById('rule-name-input')).focus();
 }
 
-function ruleEdPreview(quiet) {
+function _slug(v) { return String(v).toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-|-$/g, '') || 'channel'; }
+
+// The server's matching rule (fnmatch, lowercased), so the preview tells the
+// truth about what a channel will catch.
+function _globMatch(value, pattern) {
+  const p = String(pattern || '*').toLowerCase();
+  const re = '^' + p.replace(/[.+^${}()|\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$';
+  try { return new RegExp(re).test(String(value || '').toLowerCase()); } catch (e) { return false; }
+}
+
+function ruleEdPreview() {
   const app = document.getElementById('rule-app').value.trim() || '*';
   const model = document.getElementById('rule-model').value.trim() || '*';
   const el = document.getElementById('rule-ed-preview');
-  if (quiet !== true && app === '*' && model === '*') {
-    el.innerHTML = 'This matches <b>every</b> request, so <b>Default</b> would never run.';
+  const programs = _traffic.programs || [];
+  if (app === '*' && model === '*') {
+    el.innerHTML = 'Matches <b>every</b> request, so Default would never run.';
     el.className = 'rule-ed-preview warn';
-  } else {
-    el.innerHTML = '';
+    return;
+  }
+  const hits = programs.filter(p => _globMatch(p.x_title, app)
+    && (model === '*' || Object.keys(p.models || {}).some(m => _globMatch(m, model))));
+  const label = p => p.x_title ? escapeHtml(p.x_title) : '<i>no X-Title</i>';
+  if (!programs.length) {
+    el.innerHTML = 'No programs seen yet to check this against.';
     el.className = 'rule-ed-preview';
+  } else if (hits.length) {
+    el.innerHTML = `Would catch ${hits.length} of ${programs.length} programs seen: `
+      + hits.slice(0, 6).map(p => `<code>${label(p)}</code>`).join(' ') + (hits.length > 6 ? ' &hellip;' : '');
+    el.className = 'rule-ed-preview ok';
+  } else {
+    el.innerHTML = `Catches none of the ${programs.length} programs seen so far. Check the X-Title against <a href="#" onclick="switchTab('agents');return false">Discovered programs</a>.`;
+    el.className = 'rule-ed-preview warn';
   }
 }
 
@@ -1928,7 +2026,7 @@ async function saveRule() {
   const name = document.getElementById('rule-name-input').value.trim();
   if (!name) { showToast('Give the channel a name', true); return; }
   if (name === '_default') { showToast('That name is reserved', true); return; }
-  if (_ruleEditingNew && app === '*' && model === '*') { ruleEdPreview(); showToast('Pick an app or a model for this channel', true); return; }
+  if (_ruleEditingNew && app === '*' && model === '*') { ruleEdPreview(); showToast('Set an X-Title or a model for this channel', true); return; }
   const filters = {'X-Title': app, 'Model': model};
   try {
     if (_ruleEditingNew) {

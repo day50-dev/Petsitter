@@ -158,8 +158,19 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
                 {"name": k, "count": v["count"], "ago": round(now - v["last"])}
                 for k, v in sorted(bucket.items(), key=lambda kv: -kv[1]["last"])
             ]
+        # Programs (by X-Title) come from the saved record, so the choices
+        # offered when making a channel survive restarts.
+        programs = handler.discovered.snapshot()
+        out["programs"] = programs
+        out["apps"] = [{"name": p["x_title"], "count": p["count"], "ago": p["ago"]}
+                       for p in programs if p["x_title"]]
         return JSONResponse(out)
     app.add_route("/api/traffic", gui_traffic, methods=["GET"])
+
+    async def gui_discovered_forget(request: Request) -> Response:
+        data = await request.json()
+        return JSONResponse({"success": handler.discovered.forget(str(data.get("x_title", "")))})
+    app.add_route("/api/discovered/forget", gui_discovered_forget, methods=["POST"])
 
     # ---- Live pages ------------------------------------------------------
     # A trick's optional page (Trick.ui_page / ui_html) and its two pipes,

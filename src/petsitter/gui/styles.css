@@ -2438,3 +2438,83 @@ body.chan-off:not(.no-channel) #tab-settings { display: none !important; }
   user-select: all;
 }
 .copy-row .btn { padding: 0 18px; font-size: 13px; min-height: 42px; }
+
+/* Header: the base URL, click to copy. */
+.base-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #0f1a2a;
+  border: 1px solid #1e2a3a;
+  border-radius: 5px;
+  padding: 3px 8px;
+  color: #6b9ac5;
+  font: 12px ui-monospace, "SF Mono", Consolas, monospace;
+  cursor: pointer;
+  max-width: 280px;
+}
+.base-chip:hover { border-color: #2a4a6a; color: #8ab4ff; }
+.base-chip span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* "!" on a channel that has a problem; the reason is in its tooltip. */
+.chan-alert {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: #ffb84d;
+  color: #1a1206;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: help;
+}
+body.rail-collapsed .chan-alert { position: absolute; bottom: 2px; right: 2px; width: 14px; height: 14px; font-size: 9px; }
+
+/* Channel editor: labeled fields, not a sentence to fill in. */
+.rule-fields { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 12px 14px; align-items: start; max-width: 640px; }
+.rule-field { display: contents; }
+.rule-label { font-size: 13px; color: #a4b8d4; padding-top: 7px; white-space: nowrap; }
+.rule-field input {
+  background: #0f0f23;
+  border: 1px solid #2a3a4a;
+  border-radius: 5px;
+  color: #e0e0e0;
+  font: 13px ui-monospace, "SF Mono", Consolas, monospace;
+  padding: 7px 10px;
+  width: 100%;
+}
+.rule-field input:focus { outline: none; border-color: #3a5a7a; }
+.rule-help { grid-column: 2; margin-top: -8px; font-size: 11px; color: #5a7a8a; line-height: 1.45; }
+.rule-ed-preview { margin-top: 12px; font-size: 12px; color: #8a9ab0; }
+.rule-ed-preview.ok { color: #9be8b0; }
+.rule-ed-preview code { background: #1a1a33; padding: 1px 6px; border-radius: 3px; color: #c8d6e5; }
+.rule-ed-preview a { color: #8ab4ff; }
+@media (max-width: 620px) {
+  .rule-fields { grid-template-columns: minmax(0, 1fr); }
+  .rule-label { padding-top: 0; }
+  .rule-help { grid-column: 1; margin-top: -6px; }
+}
+
+/* Discovered programs (Agents page). */
+#discovered-card .card-title { justify-content: flex-start; gap: 10px; }
+.disc-table { display: grid; grid-template-columns: minmax(120px, 1.1fr) minmax(120px, 1.3fr) minmax(110px, 1fr) 90px max-content; font-size: 13px; }
+.disc-row { display: contents; }
+.disc-row > span { padding: 9px 8px; border-bottom: 1px solid #1e2a3a; display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.disc-head > span { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #6b8299; padding-top: 2px; }
+.disc-table code { background: #1a1a33; padding: 1px 6px; border-radius: 3px; color: #c8d6e5; font-size: 12px; overflow-wrap: anywhere; }
+.disc-none { color: #ffb84d; font-size: 12px; cursor: help; border-bottom: 1px dotted #6a5a2f; }
+.disc-models code { color: #8a9ab0; }
+.disc-chan { color: #8ab4ff; text-decoration: none; font-size: 12px; background: #1a2a4d; padding: 1px 7px; border-radius: 9px; }
+.disc-chan:hover { background: #253a6a; }
+.disc-n { color: #c8d6e5; font-variant-numeric: tabular-nums; flex-direction: column; align-items: flex-start !important; gap: 0 !important; }
+.disc-n i { font-style: normal; font-size: 11px; color: #5a7a8a; }
+.disc-actions { justify-content: flex-end; flex-wrap: nowrap !important; }
+@media (max-width: 900px) {
+  .disc-table { grid-template-columns: minmax(0, 1fr); }
+  .disc-head { display: none; }
+  .disc-row > span { border-bottom: none; padding: 3px 4px; }
+  .disc-row > span:last-child { border-bottom: 1px solid #1e2a3a; padding-bottom: 10px; justify-content: flex-start; }
+}

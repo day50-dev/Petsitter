@@ -13,6 +13,7 @@ from typing import Any
 import httpx
 
 from petsitter.context import append_to_system_prompt
+from petsitter.discovered import DiscoveredPrograms
 from petsitter.observability import (
     get_logger,
     new_request_id,
@@ -117,11 +118,18 @@ class ProxyHandler:
         # in. The dashboard uses it to say a rule is live ("12 requests") and
         # to suggest new rules from apps it has really seen.
         self.traffic: dict[str, dict[str, dict]] = {"apps": {}, "models": {}, "tricksets": {}}
+        # Every program seen (by X-Title), kept across restarts once the server
+        # gives it a file (create_app); in memory until then.
+        self.discovered = DiscoveredPrograms(None)
         configure(self.model_url, self.model_name or "", self.api_key)
 
     TRAFFIC_KEEP = 50
 
     def _note_traffic(self, x_title: str, model: str, tricksets: list[str]) -> None:
+        try:
+            self.discovered.note(x_title, model, tricksets)
+        except Exception:
+            get_logger().exception("couldn't record a discovered program")
         now = time.time()
         for kind, keys in (("apps", [x_title]), ("models", [model]), ("tricksets", tricksets)):
             bucket = self.traffic[kind]

@@ -567,6 +567,9 @@ def create_app(
         tricksets["_default"] = default_ts
 
     handler = ProxyHandler(model_url, model_name, api_key, tricksets=tricksets)
+    if restore_saved:
+        from petsitter.discovered import DiscoveredPrograms
+        handler.discovered = DiscoveredPrograms(CONFIG_DIR / "discovered.json")
 
     global _log_capture, _agent_manager
     _agent_manager = AgentManager(config_dir=str(CONFIG_DIR), handler=handler)

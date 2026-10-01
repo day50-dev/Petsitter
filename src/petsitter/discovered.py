@@ -59,6 +59,9 @@ class DiscoveredPrograms:
                 fresh = fresh or model not in entry["models"]
                 entry["models"][model] = entry["models"].get(model, 0) + 1
             for ch in channels:
+                # A program landing somewhere new is exactly what you'd want
+                # to see after a restart, so it's saved right away too.
+                fresh = fresh or ch not in entry["channels"]
                 entry["channels"][ch] = entry["channels"].get(ch, 0) + 1
             if len(self.programs) > self.KEEP:
                 for stale in sorted(self.programs, key=lambda k: self.programs[k]["last"])[:len(self.programs) - self.KEEP]:

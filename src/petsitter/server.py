@@ -593,6 +593,8 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app):
         yield
+        # Whatever was seen since the last save (they're batched).
+        handler.discovered.save()
         handler.shutdown_all()
         # Tools are disconnected here, while the app is still shutting down
         # cleanly. _restore_agents records what it undid so the CLI can tell

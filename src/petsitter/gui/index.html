@@ -405,7 +405,10 @@ let currentTab = 'intro';
 let _prevTab = null;
 const NO_CHANNEL_TABS = ['intro', 'help', 'newchannel', 'connecting', 'agents', 'models'];
 function switchTab(name) {
-  if (typeof currentTab !== 'undefined' && currentTab !== name) _prevTab = currentTab;
+  // Changing the hash calls back into here for the tab we're already on;
+  // per-page setup that resets state (the New channel form) runs on arrival only.
+  const arriving = currentTab !== name;
+  if (arriving) _prevTab = currentTab;
   if (name !== 'tricks') dismissTricksContext();
   currentTab = name;
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
@@ -422,7 +425,7 @@ function switchTab(name) {
   if (name === 'intro') refreshIntro();
   if (name === 'help') loadHelpContent();
   if (name === 'connecting') paintBaseUrl();
-  if (name === 'newchannel') openRuleEditor(true);
+  if (name === 'newchannel' && (arriving || _newChanPrefill)) openRuleEditor(true);
   if (name === 'models') renderModels('_default', _cachedConfiguredModels);
   if (name === 'settings') renderChannelModels();
   if (name === 'logs') {
@@ -1954,11 +1957,13 @@ function openRuleEditor(isNew) {
     + `<label class="rule-field"><span class="rule-label">Name</span>`
     + `<input type="text" id="rule-name-input" value="${escapeHtml(name)}" placeholder="e.g. claude-code" spellcheck="false"></label>`
     + `<label class="rule-field"><span class="rule-label">X-Title header</span>`
-    + `<input type="text" id="rule-app" list="rule-app-list" value="${val(app)}" placeholder="*" spellcheck="false" autocomplete="off" oninput="ruleEdPreview()">`
-    + `<span class="rule-help">The X-Title header the program sends. Don&rsquo;t know what to put? Run your program through petsitter once and it appears in this list.</span></label>`
+    + `<input type="text" id="rule-app" list="rule-app-list" value="${val(app)}" placeholder="* (start typing to see options)" spellcheck="false" autocomplete="off" oninput="ruleEdPreview()">`
+    + `<span class="rule-help">The X-Title header the program sends.</span>`
+    + `</label>`
     + `<label class="rule-field"><span class="rule-label">Model</span>`
-    + `<input type="text" id="rule-model" list="rule-model-list" value="${val(model)}" placeholder="*" spellcheck="false" autocomplete="off" oninput="ruleEdPreview()">`
-    + `<span class="rule-help">The model named in the request.</span></label>`
+    + `<input type="text" id="rule-model" list="rule-model-list" value="${val(model)}" placeholder="* (start typing to see options)" spellcheck="false" autocomplete="off" oninput="ruleEdPreview()">`
+    + `<span class="rule-help">The model named in the request.</span>`
+    + `</label>`
     + `</div>`
     + `<datalist id="rule-app-list">${programs.map(p => opt(p.x_title)).join('')}</datalist>`
     + `<datalist id="rule-model-list">${models.map(opt).join('')}</datalist>`
@@ -1971,7 +1976,7 @@ function openRuleEditor(isNew) {
         + `<button class="btn btn-sm btn-danger" onclick="deleteTrickset()">Delete channel</button>`)
     + `</div>`;
   ed.hidden = false;
-  ruleEdPreview();
+  ruleEdPreview(isNew);
   (isNew ? document.getElementById(pre.xtitle ? 'rule-name-input' : 'rule-app') : document.getElementById('rule-name-input')).focus();
 }
 
@@ -1985,12 +1990,14 @@ function _globMatch(value, pattern) {
   try { return new RegExp(re).test(String(value || '').toLowerCase()); } catch (e) { return false; }
 }
 
-function ruleEdPreview() {
+function ruleEdPreview(quiet) {
   const app = document.getElementById('rule-app').value.trim() || '*';
   const model = document.getElementById('rule-model').value.trim() || '*';
   const el = document.getElementById('rule-ed-preview');
   const programs = _traffic.programs || [];
   if (app === '*' && model === '*') {
+    // A blank new form isn't a mistake yet; say nothing until it's typed in.
+    if (quiet === true) { el.innerHTML = ''; el.className = 'rule-ed-preview'; return; }
     el.innerHTML = 'Matches <b>every</b> request, so Default would never run.';
     el.className = 'rule-ed-preview warn';
     return;

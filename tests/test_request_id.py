@@ -62,7 +62,7 @@ def test_tricks_and_the_traffic_logger_keep_the_arrival_id(tmp_path, monkeypatch
     finally:
         reset_request_id(token)
 
-    records = [json.loads(l) for f in ("outbound.jsonl", "inbound.jsonl")
+    records = [json.loads(l) for f in ("before.jsonl", "after.jsonl")
                for l in (tmp_path / f).read_text().splitlines()]
     assert [r["event"] for r in records] == ["request", "response"]
     assert {r["request_id"] for r in records} == {"edge1234"}

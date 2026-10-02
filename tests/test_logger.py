@@ -24,12 +24,12 @@ class TestLoggerTrick:
 
     def test_default_folder_used_when_unconfigured(self):
         trick = LoggerTrick()
-        assert trick._log_path("out") == DEFAULT_LOGGER_PATH / "outbound.jsonl"
-        assert trick._log_path("in") == DEFAULT_LOGGER_PATH / "inbound.jsonl"
+        assert trick._log_path("before") == DEFAULT_LOGGER_PATH / "before.jsonl"
+        assert trick._log_path("after") == DEFAULT_LOGGER_PATH / "after.jsonl"
 
     def test_pre_hook_records_request(self, tmp_path):
         trick = LoggerTrick(path=str(tmp_path))
-        logfile = tmp_path / "outbound.jsonl"
+        logfile = tmp_path / "before.jsonl"
         context = [{"role": "user", "content": "hello there"}]
         params = {"model": "my-model", "temperature": 0.5, "tools": []}
 
@@ -38,7 +38,7 @@ class TestLoggerTrick:
         assert result is context
         rec = _records(logfile)[0]
         assert rec["event"] == "request"
-        assert rec["direction"] == "out"
+        assert rec["stage"] == "before"
         assert rec["messages"] == context
         assert rec["payload"] == params
         assert rec["timestamp"]
@@ -46,7 +46,7 @@ class TestLoggerTrick:
 
     def test_post_hook_records_response(self, tmp_path):
         trick = LoggerTrick(path=str(tmp_path))
-        logfile = tmp_path / "inbound.jsonl"
+        logfile = tmp_path / "after.jsonl"
         context = [
             {"role": "user", "content": "hello"},
             {"role": "assistant", "content": "hi!"},
@@ -57,7 +57,7 @@ class TestLoggerTrick:
         assert result is context
         rec = _records(logfile)[0]
         assert rec["event"] == "response"
-        assert rec["direction"] == "in"
+        assert rec["stage"] == "after"
         assert rec["messages"] == context
         assert rec["answer"] == context[-1]
         assert rec["timestamp"]
@@ -69,29 +69,29 @@ class TestLoggerTrick:
             {"role": "user", "content": "go"},
             {"role": "assistant", "content": "done"},
         ])
-        assert [r["event"] for r in _records(tmp_path / "outbound.jsonl")] == ["request"]
-        assert [r["event"] for r in _records(tmp_path / "inbound.jsonl")] == ["response"]
+        assert [r["event"] for r in _records(tmp_path / "before.jsonl")] == ["request"]
+        assert [r["event"] for r in _records(tmp_path / "after.jsonl")] == ["response"]
 
     def test_an_old_file_setting_puts_both_files_beside_it(self, tmp_path):
         trick = LoggerTrick(path=str(tmp_path / "traffic.jsonl"))
-        assert trick._log_path("out") == tmp_path / "traffic.outbound.jsonl"
-        assert trick._log_path("in") == tmp_path / "traffic.inbound.jsonl"
+        assert trick._log_path("before") == tmp_path / "traffic.before.jsonl"
+        assert trick._log_path("after") == tmp_path / "traffic.after.jsonl"
 
     def test_parent_dirs_are_created(self, tmp_path):
         folder = tmp_path / "deep" / "nest"
         trick = LoggerTrick(path=str(folder))
         trick.pre_hook([], {})
-        assert (folder / "outbound.jsonl").exists()
+        assert (folder / "before.jsonl").exists()
 
     def test_lines_are_valid_jsonl(self, tmp_path):
         trick = LoggerTrick(path=str(tmp_path))
         trick.pre_hook([{"role": "user", "content": "hi"}], {"tools": []})
         trick.post_hook([{"role": "user", "content": "hi"}, {"role": "assistant", "content": None}])
-        for rec in _records(tmp_path / "outbound.jsonl") + _records(tmp_path / "inbound.jsonl"):
+        for rec in _records(tmp_path / "before.jsonl") + _records(tmp_path / "after.jsonl"):
             assert "timestamp" in rec
             assert rec["trick"] == "LoggerTrick"
 
     def test_empty_context_post_hook_no_record(self, tmp_path):
         trick = LoggerTrick(path=str(tmp_path))
         assert trick.post_hook([]) == []
-        assert not (tmp_path / "inbound.jsonl").exists()
+        assert not (tmp_path / "after.jsonl").exists()

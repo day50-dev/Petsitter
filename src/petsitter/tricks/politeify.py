@@ -14,17 +14,25 @@ written. The original wording never leaves petsitter.
 
 ## How to use
 
-Nothing to type. Every message you send in the trickset is rewritten. Messages
-shorter than the `min_length` setting (default 12 characters) are skipped, so
-short replies like "yes" or a bare keyword pass through untouched.
+Nothing to type. A message is only sent for a rewrite when it might have
+swearing, insults or ALL-CAPS SHOUTING in it (shouting used to help with older
+models; with current ones it tends to hurt); anything else goes to the model exactly as you wrote
+it. The rewrite removes them even where you quote them ("what do you make of:
+..."), and leaves a message alone if nothing in it was actually rude.
 
 To send the rewrite to a separate, cheaper model, add a `politeify` entry to your
 models; otherwise it uses the `default` model.
 
 ## How it works
 
-- `pre_hook`: the newest user message (string content only) gets one
-  `callmodel_sync` call with a rewrite-only instruction.
+- `pre_hook` checks the newest user message against a word list (outside code
+  blocks): the classic LDNOOBW list (`data/profanity-en.txt`, CC BY 4.0) plus
+  common swearing and name-calling it leaves out, and three or more all-caps
+  words in a row. A match only means "worth a
+  look": that message gets one `callmodel_sync` call with a rewrite-only
+  instruction, and the model decides what, if anything, to change. Nothing is
+  masked or blocked. Messages that don't match, or are shorter than the
+  `min_length` setting (default 12 characters), pass through untouched.
 - Every rewrite is cached (original -> rewritten, last 1000). Your tool resends
   the whole conversation each turn, so earlier messages are swapped from the
   cache: the model keeps seeing the polite versions, with no extra calls.
@@ -35,7 +43,9 @@ models; otherwise it uses the `default` model.
 """
 
 import logging
+import re
 import threading
+from pathlib import Path
 from collections import OrderedDict
 
 from petsitter.trick import Trick, callmodel_sync, get_model_config
@@ -44,13 +54,55 @@ logger = logging.getLogger("petsitter")
 
 REWRITE_INSTRUCTION = (
     "Rewrite the following message to be polite and professional in tone. "
-    "Keep its meaning, intent, and every factual or technical detail "
-    "completely unchanged -- do not answer it, comment on it, soften the "
-    "actual request, or add anything of your own. Preserve code blocks, "
-    "file paths, commands, and technical terms exactly as written. Reply "
-    "with ONLY the rewritten message and nothing else -- no preamble, no "
-    "quotes around it."
+    "Remove every swear word, slur and insult wherever it appears, including "
+    "inside quotation marks, examples, or text the message asks about: describe "
+    "such words generically instead (for example \"an insult with profanity\"), "
+    "never repeat them. Write ALL-CAPS shouting in normal case (acronyms and "
+    "identifiers stay as they are). Keep the meaning, intent, and every factual or technical "
+    "detail unchanged -- do not answer it, comment on it, soften the actual "
+    "request, or add anything of your own. Preserve code blocks, file paths, "
+    "commands, and technical terms exactly as written. Reply with ONLY the "
+    "rewritten message and nothing else -- no preamble, no quotes around it. If "
+    "nothing in it is actually rude, reply with the message exactly as it is."
 )
+
+# Whether a message is worth sending for a rewrite. It's only a hint: the
+# rewriter is free to leave a message alone ("Dick Van Dyke" trips the list, and
+# comes back unchanged), so a broad, crude list is fine. Nothing is ever masked
+# or blocked here.
+#
+# The classic LDNOOBW list (data/profanity-en.txt, CC BY 4.0) is mostly sexual
+# and crude terms; these add the swearing and name-calling it leaves out.
+_EXTRA = ("fuck", "fucking", "fucked", "fucker", "motherfucker", "shit", "shitty", "bullshit",
+          "damn", "dammit", "goddamn", "crap", "crappy", "piss", "pissed", "hell", "wtf", "stfu",
+          "ffs", "idiot", "idiots", "idiotic", "moron", "moronic", "dumbass", "jackass",
+          "imbecile", "cretin", "stupid", "pathetic", "incompetent", "shut up", "loser")
+
+
+def _load_words() -> re.Pattern:
+    words = set(_EXTRA)
+    try:
+        path = Path(__file__).resolve().parent.parent / "data" / "profanity-en.txt"
+        words |= {w.strip().lower() for w in path.read_text(encoding="utf-8").splitlines() if w.strip()}
+    except OSError:
+        logger.warning("politeify: word list missing; using the short built-in one")
+    alts = sorted((re.escape(w) for w in words), key=len, reverse=True)
+    return re.compile(r"(?i)(?<![\w-])(?:" + "|".join(alts) + r")(?![\w-])")
+
+
+_RUDE_RE = _load_words()
+# SHOUTING: three or more all-caps words in a row. It used to help with older
+# models; with current ones it tends to hurt, so it's worth a rewrite too.
+# (A run of acronyms trips it as well; the rewriter leaves those alone.)
+_SHOUT_RE = re.compile(r"\b[A-Z][A-Z']+(?:[\s,.!?;:-]+[A-Z][A-Z']+){2,}\b")
+# Code is left alone: fenced blocks and `inline` spans.
+_CODE_RE = re.compile(r"```.*?```|`[^`\n]*`", re.S)
+
+
+def is_rude(text: str) -> bool:
+    """Might this message be worth rephrasing? (Outside code.)"""
+    text = _CODE_RE.sub(" ", text)
+    return bool(_RUDE_RE.search(text) or _SHOUT_RE.search(text))
 
 
 class PoliteifyTrick(Trick):
@@ -92,12 +144,12 @@ class PoliteifyTrick(Trick):
             if msg.get("role") != "user":
                 continue
             original = msg.get("content")
-            if not isinstance(original, str) or len(original.strip()) < minimum:
-                continue
+            if not isinstance(original, str) or not is_rude(original):
+                continue   # civil messages go as written
             cached = self._cached(original)
-            if cached is None and idx == last:
-                # Only the newest message costs a rewrite; anything older that
-                # isn't cached came from before this trick was on, and stays.
+            if cached is None and idx == last and len(original.strip()) >= minimum:
+                # Only the newest message costs a rewrite; older ones that
+                # aren't cached came from before this trick was on, and stay.
                 cached = self._rewrite(original)
             if cached and cached != original:
                 context[idx] = {**msg, "content": cached}

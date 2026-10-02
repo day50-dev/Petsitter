@@ -60,7 +60,7 @@ Available Tricks list instead.
  * [Reference Check](#reference-check) - Challenge answers that cite no valid reference from a retrieval tool
  * [Recommender List](#recommender-list) - Make the model pick software from your preferred list
  * [Export It](#export-it) - Export conversation as llcat-compatible JSON
- * [Traffic Logger](#traffic-logger) - Log every request and reply as JSONL, outbound and inbound in separate files
+ * [Traffic Logger](#traffic-logger) - Log every request as JSONL, before and after the extensions transform it
 
 ---
 
@@ -542,20 +542,22 @@ The corollary is worth keeping in mind: the residual errors that survive this ch
 
 [tricks/logger.py](tricks/logger.py)
 
-Appends one timestamped JSON line per request, and one per reply, that passes through the trick — the debugging view into whatever harness is misbehaving. Reproduce the problem and you have the full traffic in both directions, one file each:
+Appends one timestamped JSON line per request to each of two files — the debugging view into whatever harness is misbehaving, and into what the extensions did to it:
 
-- `outbound.jsonl`: payloads, tools and messages on the way to the model
-- `inbound.jsonl`: the message list and the model's answer on the way back
+- `before.jsonl`: the payload, tools and messages, before the extensions after the logger transform them
+- `after.jsonl`: the message list after they did, with the model's answer
+
+Put the logger first in the channel and `before.jsonl` is exactly what your tool sent; comparing the two shows every change the extensions made.
 
 ```bash
-pet add mine logger            # writes ~/.cache/petsitter/traffic/{outbound,inbound}.jsonl
+pet add mine logger            # writes ~/.cache/petsitter/traffic/{before,after}.jsonl
 ```
 
 Each request produces one record in each file:
 
 ```jsonl
-{"timestamp":"2026-08-29T12:00:00.000+00:00","trick":"LoggerTrick","event":"request","direction":"out","request_id":"ab12cd34","x_title":"opencode*","model":"qwen3:8b","stream":false,"tools":[],"payload":{"model":"qwen3:8b","messages":[{"role":"user","content":"hello"}]},"messages":[{"role":"user","content":"hello"}]}
-{"timestamp":"2026-08-29T12:00:00.150+00:00","trick":"LoggerTrick","event":"response","direction":"in","request_id":"ab12cd34","x_title":"opencode*","model":"qwen3:8b","messages":[...],"answer":{"role":"assistant","content":"hi!"}}
+{"timestamp":"2026-08-29T12:00:00.000+00:00","trick":"LoggerTrick","event":"request","stage":"before","request_id":"ab12cd34","x_title":"opencode*","model":"qwen3:8b","stream":false,"tools":[],"payload":{"model":"qwen3:8b","messages":[{"role":"user","content":"hello"}]},"messages":[{"role":"user","content":"hello"}]}
+{"timestamp":"2026-08-29T12:00:00.150+00:00","trick":"LoggerTrick","event":"response","stage":"after","request_id":"ab12cd34","x_title":"opencode*","model":"qwen3:8b","messages":[...],"answer":{"role":"assistant","content":"hi!"}}
 ```
 
 Records come straight off the hooks:
@@ -567,8 +569,8 @@ Both records carry the same `request_id`, the ID petsitter gives a request on ar
 
 ```bash
 cd ~/.cache/petsitter/traffic
-jq -c '{request_id, model, last: .messages[-1].content}' outbound.jsonl
-jq -s 'group_by(.request_id)' outbound.jsonl inbound.jsonl
+jq -c '{request_id, model, last: .messages[-1].content}' before.jsonl
+jq -s 'group_by(.request_id)' before.jsonl after.jsonl
 ```
 
 The trick is passive — both hooks return the context untouched, so nothing it logs changes what the model sees.
@@ -586,7 +588,7 @@ A trick that short-circuits the pipeline (a prompt-keyword handler, or a `post_h
 
 | Field | Default | What it does |
 |---|---|---|
-| `path` | `~/.cache/petsitter/traffic/` | The folder `outbound.jsonl` and `inbound.jsonl` are written in, created on demand. A path to a `.jsonl` file (an older setting) puts the two beside it: `traffic.jsonl` becomes `traffic.outbound.jsonl` and `traffic.inbound.jsonl`. |
+| `path` | `~/.cache/petsitter/traffic/` | The folder `before.jsonl` and `after.jsonl` are written in, created on demand. A path to a `.jsonl` file (an older setting) puts the two beside it: `traffic.jsonl` becomes `traffic.before.jsonl` and `traffic.after.jsonl`. |
 
 
 

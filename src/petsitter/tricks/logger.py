@@ -1,4 +1,4 @@
-"""Records every request sent to the model and every reply that comes back, in two JSONL files, so you can see exactly what your AI tool is doing.
+"""Records every request and reply in two JSONL files, before and after the extensions transform them, so you can see exactly what your AI tool sent and what changed.
 
 When an agent misbehaves ("why did it forget my instructions?", "what tools did it
 actually send?"), the answer is usually in the raw traffic, which your tool
@@ -11,20 +11,22 @@ It never changes what the model sees.
 It writes two files in `~/.cache/petsitter/traffic/` (change the folder with the
 `path` setting), one line per request in each:
 
-- `outbound.jsonl`: each request as it goes to the model
-- `inbound.jsonl`: each reply as it comes back
+- `before.jsonl`: the request before the extensions after the logger transform it
+- `after.jsonl`: the conversation after they did, with the model's reply
+
+Put it first in the channel and `before.jsonl` is exactly what your tool sent.
 
 ```
-outbound.jsonl  {"timestamp": "...", "event": "request",  "direction": "out", "request_id": "ab12cd34", "model": "qwen3:8b", "payload": {...}, "messages": [...]}
-inbound.jsonl   {"timestamp": "...", "event": "response", "direction": "in",  "request_id": "ab12cd34", "messages": [...], "answer": {"role": "assistant", "content": "hi!"}}
+before.jsonl  {"timestamp": "...", "event": "request",  "stage": "before", "request_id": "ab12cd34", "model": "qwen3:8b", "payload": {...}, "messages": [...]}
+after.jsonl   {"timestamp": "...", "event": "response", "stage": "after",  "request_id": "ab12cd34", "messages": [...], "answer": {"role": "assistant", "content": "hi!"}}
 ```
 
-`request_id` ties a request to its reply, so each file can be read on its own or
-the two joined:
+`request_id` ties the two together, so each file can be read on its own or the
+two joined, which shows exactly what the extensions changed:
 
 ```
-jq -c '{request_id, last: .messages[-1].content}' outbound.jsonl
-jq -s 'group_by(.request_id)' outbound.jsonl inbound.jsonl
+jq -c '{request_id, last: .messages[-1].content}' before.jsonl
+jq -s 'group_by(.request_id)' before.jsonl after.jsonl
 ```
 
 Where it sits in the trickset matters. First, it records messages as they arrive
@@ -43,8 +45,8 @@ everything after it, so put the logger first to be sure of a record.
   (one first, one last, to see what the tricks in between changed), or
   alongside petsitter's own log, lines can be lined up by it.
 - `path` is a folder. If it names a `.jsonl` file instead (an older setting),
-  the two files go beside it: `traffic.jsonl` becomes `traffic.outbound.jsonl`
-  and `traffic.inbound.jsonl`. Folders are created on demand.
+  the two files go beside it: `traffic.jsonl` becomes `traffic.before.jsonl`
+  and `traffic.after.jsonl`. Folders are created on demand.
 - Appends are serialized with a module-level lock. Unserializable values are
   written via `str()`; write errors are swallowed so logging never breaks a
   request.
@@ -67,9 +69,9 @@ def _json_default(value) -> str:
 
 
 class LoggerTrick(Trick):
-    """Appends timestamped JSONL records: requests to outbound.jsonl, replies to inbound.jsonl."""
+    """Appends timestamped JSONL records to before.jsonl (requests) and after.jsonl (transformed, with the reply)."""
 
-    __brief__ = "Writes every request and reply as JSONL, outbound and inbound in separate files"
+    __brief__ = "Writes every request as JSONL, before and after the extensions transform it"
     __display_name__ = "Traffic Logger"
     __category__ = "Diagnostics"
     needs_window = 0   # only looks at replies, so they can stream
@@ -78,9 +80,9 @@ class LoggerTrick(Trick):
             "key": "path",
             "label": "Log folder",
             "description": (
-                "Where to write outbound.jsonl (requests to the model) and "
-                "inbound.jsonl (its replies), one JSON line each. Blank uses "
-                "~/.cache/petsitter/traffic/."
+                "Where to write before.jsonl (requests, before the extensions "
+                "after the logger change them) and after.jsonl (the conversation "
+                "after they did, with the reply). Blank uses ~/.cache/petsitter/traffic/."
             ),
             "type": "path",
             "default": str(DEFAULT_LOGGER_PATH),
@@ -98,14 +100,14 @@ class LoggerTrick(Trick):
     # -- hooking -------------------------------------------------------------
 
     def pre_hook(self, context: list, params: dict) -> list:
-        """Record the outbound request: full payload and message list."""
+        """Record the request in before.jsonl: full payload and message list."""
         meta = request_meta()
         tools = meta.get("tools") or (params or {}).get("tools") or []
-        if self._append("out", {
+        if self._append("before", {
             "timestamp": _now(),
             "trick": type(self).__name__,
             "event": "request",
-            "direction": "out",
+            "stage": "before",
             "request_id": self.request_id,
             "x_title": meta.get("x_title", ""),
             "model": meta.get("model", (params or {}).get("model", "")),
@@ -117,19 +119,19 @@ class LoggerTrick(Trick):
             # Reported on the way out: a request whose reply never comes back
             # (the provider timed out) was still logged. Repeats fold (x N);
             # the reply joins its request in the log without a second line.
-            self.report(f"Logged a request to {self._log_path('out').parent}")
+            self.report(f"Logged a request to {self._log_path('before').parent}")
         return context
 
     def post_hook(self, context: list) -> list:
-        """Record the inbound response: the message list including the answer."""
+        """Record the transformed conversation and the reply in after.jsonl."""
         if not context:
             return context
         meta = request_meta()
-        self._append("in", {
+        self._append("after", {
             "timestamp": _now(),
             "trick": type(self).__name__,
             "event": "response",
-            "direction": "in",
+            "stage": "after",
             "request_id": self.request_id,
             "x_title": meta.get("x_title", ""),
             "model": meta.get("model", ""),
@@ -140,16 +142,17 @@ class LoggerTrick(Trick):
 
     # -- helpers -------------------------------------------------------------
 
-    def _log_path(self, direction: str) -> Path:
-        """The file for one direction: "out" (requests) or "in" (replies)."""
-        name = "outbound" if direction == "out" else "inbound"
+    def _log_path(self, stage: str) -> Path:
+        """The file for "before" (requests) or "after" (the transformed
+        conversation and the reply)."""
+        name = "before" if stage == "before" else "after"
         path = Path(self.path or str(DEFAULT_LOGGER_PATH)).expanduser()
         if path.suffix == ".jsonl" and not path.is_dir():
             return path.with_name(f"{path.stem}.{name}.jsonl")
         return path / f"{name}.jsonl"
 
-    def _append(self, direction: str, record: dict) -> bool:
-        path = self._log_path(direction)
+    def _append(self, stage: str, record: dict) -> bool:
+        path = self._log_path(stage)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             line = json.dumps(record, default=_json_default) + "\n"

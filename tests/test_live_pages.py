@@ -77,17 +77,17 @@ def test_politeify_rewrites_once_and_reuses_for_history(monkeypatch):
     monkeypatch.setattr(politeify, "callmodel_sync", fake_callmodel)
     monkeypatch.setattr(politeify.PoliteifyTrick, "_model_config", staticmethod(lambda: {}))
     t = politeify.PoliteifyTrick()
-    turn1 = [{"role": "user", "content": "fix this garbage code now"}]
+    turn1 = [{"role": "user", "content": "fix this crap code now"}]
     t.pre_hook(turn1, {})
-    assert turn1[0]["content"] == "POLITE: fix this garbage code now"
+    assert turn1[0]["content"] == "POLITE: fix this crap code now"
     # next turn: the client resends the ORIGINAL first message plus a new one
-    turn2 = [{"role": "user", "content": "fix this garbage code now"},
+    turn2 = [{"role": "user", "content": "fix this crap code now"},
              {"role": "assistant", "content": "ok"},
              {"role": "user", "content": "still broken, idiot machine"}]
     t.pre_hook(turn2, {})
-    assert turn2[0]["content"] == "POLITE: fix this garbage code now"     # from the cache
+    assert turn2[0]["content"] == "POLITE: fix this crap code now"     # from the cache
     assert turn2[2]["content"] == "POLITE: still broken, idiot machine"
-    assert calls == ["fix this garbage code now", "still broken, idiot machine"]   # no repeat call
+    assert calls == ["fix this crap code now", "still broken, idiot machine"]   # no repeat call
     assert [e["message"] for _, e in t.live_feed.since(0)] == ["Rephrased a message to be more polite"] * 2
 
 

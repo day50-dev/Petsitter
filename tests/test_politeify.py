@@ -22,10 +22,10 @@ class TestPoliteify:
 
         monkeypatch.setattr(pf, "callmodel_sync", fake)
         t = PoliteifyTrick()
-        result = t.pre_hook(_convo("just fix this garbage now"), {})
+        result = t.pre_hook(_convo("just fix this shit now"), {})
 
         assert result[-1]["content"] == "Could you please help me with X?"
-        assert calls[0][0] == "just fix this garbage now"
+        assert calls[0][0] == "just fix this shit now"
 
     def test_only_the_last_user_message_is_rewritten(self, monkeypatch):
         def fake(context, message="", **kw):
@@ -34,12 +34,12 @@ class TestPoliteify:
         monkeypatch.setattr(pf, "callmodel_sync", fake)
         t = PoliteifyTrick()
         context = [
-            {"role": "user", "content": "first message, long enough to pass the filter"},
+            {"role": "user", "content": "first message, long enough, and damn rude"},
             {"role": "assistant", "content": "ok"},
-            {"role": "user", "content": "second message, also long enough to pass"},
+            {"role": "user", "content": "second message, also long enough and shit"},
         ]
         result = t.pre_hook(context, {})
-        assert result[0]["content"] == "first message, long enough to pass the filter"
+        assert result[0]["content"] == "first message, long enough, and damn rude"   # older: left
         assert result[2]["content"] == "polite version"
 
     def test_short_messages_are_left_alone(self, monkeypatch):
@@ -66,9 +66,9 @@ class TestPoliteify:
 
         monkeypatch.setattr(pf, "callmodel_sync", boom)
         t = PoliteifyTrick()
-        original = _convo("this is broken and i hate it, fix it now")
+        original = _convo("this is fucking broken, fix it now")
         result = t.pre_hook(original, {})
-        assert result[0]["content"] == "this is broken and i hate it, fix it now"
+        assert result[0]["content"] == "this is fucking broken, fix it now"   # sent as written
 
     def test_empty_rewrite_passes_the_original_through(self, monkeypatch):
         def fake(context, message="", **kw):
@@ -76,8 +76,8 @@ class TestPoliteify:
 
         monkeypatch.setattr(pf, "callmodel_sync", fake)
         t = PoliteifyTrick()
-        result = t.pre_hook(_convo("original wording stays here intact"), {})
-        assert result[0]["content"] == "original wording stays here intact"
+        result = t.pre_hook(_convo("original wording, damn it, stays"), {})
+        assert result[0]["content"] == "original wording, damn it, stays"
 
     def test_uses_a_dedicated_politeify_model_when_configured(self, monkeypatch):
         configure_modelset({
@@ -94,7 +94,7 @@ class TestPoliteify:
 
             monkeypatch.setattr(pf, "callmodel_sync", fake)
             t = PoliteifyTrick()
-            t.pre_hook(_convo("please rewrite this longer message"), {})
+            t.pre_hook(_convo("please rewrite this crappy message"), {})
             assert seen["url"] == "http://polite-host"
             assert seen["model"] == "polite-model"
             assert seen["key"] == "pk"
@@ -114,7 +114,7 @@ class TestPoliteify:
 
             monkeypatch.setattr(pf, "callmodel_sync", fake)
             t = PoliteifyTrick()
-            t.pre_hook(_convo("please rewrite this longer message"), {})
+            t.pre_hook(_convo("please rewrite this crappy message"), {})
             assert seen["url"] == "http://default-host"
         finally:
             remove_model_config("default")
@@ -123,3 +123,43 @@ class TestPoliteify:
         t = PoliteifyTrick()
         caps = t.info({})
         assert caps["politeify"] is True
+
+
+class TestOnlyRudeMessages:
+    def test_civil_messages_go_as_written_with_no_call(self, monkeypatch):
+        def fake(*a, **kw):
+            raise AssertionError("a civil message shouldn't be rewritten")
+        monkeypatch.setattr(pf, "callmodel_sync", fake)
+        for text in ["great! it's working! fantastic news!",
+                     "you aren't supposed to know about it!",
+                     "free the garbage collector and drop the useless variable"]:
+            assert PoliteifyTrick().pre_hook(_convo(text), {})[0]["content"] == text
+
+    def test_a_possibly_rude_message_is_offered_to_the_rewriter(self, monkeypatch):
+        """The word list only says "worth a look": the rewriter may keep it as is."""
+        seen = []
+
+        def fake(context, message="", **kw):
+            seen.append(message)
+            return list(context) + [{"role": "assistant", "content": message}]
+        monkeypatch.setattr(pf, "callmodel_sync", fake)
+        out = PoliteifyTrick().pre_hook(_convo("Dick Van Dyke was in Mary Poppins"), {})
+        assert seen == ["Dick Van Dyke was in Mary Poppins"]
+        assert out[0]["content"] == "Dick Van Dyke was in Mary Poppins"
+
+    def test_the_instruction_covers_quoted_swearing(self):
+        assert "inside quotation marks" in pf.REWRITE_INSTRUCTION
+
+    def test_code_is_left_out_of_the_check(self):
+        assert not pf.is_rude("run `rm -rf shit/` please")
+        assert not pf.is_rude("```\nassert hell == 1\n```")
+        assert pf.is_rude("you fucking idiot")
+
+
+def test_shouting_is_worth_a_rewrite():
+    assert pf.is_rude("WHY IS THIS STILL BROKEN, fix it")
+    assert pf.is_rude("IT IS NOT WORKING")
+    assert not pf.is_rude("please DO NOT touch the tests")
+    assert not pf.is_rude("set the API URL in the README")
+    assert not pf.is_rude("```\nRUN THIS NOW PLEASE\n```")
+    assert "normal case" in pf.REWRITE_INSTRUCTION

@@ -7,6 +7,7 @@
 <link rel="icon" type="image/png" href="/static/favicon.png">
 <link rel="stylesheet" href="/static/styles.css">
 <link rel="stylesheet" href="/static/vendor/github-dark.min.css">
+<script src="/static/stream.js"></script>
 <script src="/static/vendor/marked.min.js"></script>
 <script src="/static/vendor/highlight.min.js"></script>
 <script src="/static/vendor/mermaid.min.js"></script>
@@ -15,12 +16,7 @@
 
 <header>
 <div class="brand">
-<img src="/static/petsitter-logo-dark.svg" alt="Petsitter" id="brand-logo" title="Petsitter">
-</div>
-<div class="nav">
-<a href="https://github.com/day50-dev/Petsitter" target="_blank">GitHub</a>
-<a href="/docs">API</a>
-<a href="#" onclick="switchTab('help');return false">Help</a>
+<a href="https://github.com/day50-dev/Petsitter" target="_blank" rel="noopener"><img src="/static/petsitter-logo-dark.svg" alt="Petsitter" id="brand-logo" title="Petsitter"></a>
 </div>
 <div class="info">
 <button class="base-chip" id="base-chip" onclick="copyBaseUrl(this)" title="Base URL: click to copy">
@@ -206,13 +202,6 @@ exactly as before.</p>
 <div class="browse-status" id="avail-status"></div>
 </div>
 </section>
-<details class="ext-custom">
-<summary>Load from a file&hellip;</summary>
-<div class="custom-path">
-<input type="text" id="custom-path" placeholder="/path/to/my_trick.py" title="Absolute path to a trick Python file" spellcheck="false">
-<button class="btn btn-neutral btn-sm" onclick="loadCustomTrick()" title="Install from this file">Install</button>
-</div>
-</details>
 </aside>
 <main class="card ext-detail" id="ext-detail"></main>
 </div>
@@ -272,6 +261,18 @@ the default model. Set an API key to false (passthrough) to let the client suppl
 <button class="btn btn-secondary" onclick="copyText('base-url-env', this)">Copy</button>
 </div>
 </section>
+<div class="bypass">
+<h3>Your extensions, any provider</h3>
+<p>Put a provider after <code>/use/</code> and requests go to it with your tool's own key and model, through your extensions. Your model here isn't used.</p>
+<div class="copy-row">
+<code id="use-claude"></code>
+<button class="btn btn-secondary" onclick="copyText('use-claude', this)">Copy</button>
+</div>
+<div class="copy-row">
+<code id="use-codex"></code>
+<button class="btn btn-secondary" onclick="copyText('use-codex', this)">Copy</button>
+</div>
+</div>
 <div class="bypass">
 <h3>Bypass petsitter processing</h3>
 <p>Requests to this base URL go straight to your provider, like a traditional proxy. Useful for easy model rerouting and secrets management.</p>
@@ -378,6 +379,7 @@ User-Agent, when it sends no X-Title), and which channel its requests went to. K
 <!-- === HELP TAB === -->
 <div class="tab-pane" id="tab-help">
 <div class="card">
+<p class="help-lead">Each app's requests go through every channel that matches it. <b>Default</b> gets what no channel matches.</p>
 <div style="margin-bottom:16px">
 <button class="btn btn-accent" id="btn-install-examples" onclick="installExamples()" title="Install the example channels and their extensions">Install Examples</button>
 <div id="install-examples-result" style="margin-top:8px"></div>
@@ -560,15 +562,16 @@ async function refreshIntro() {
 }
 
 // A visitor needs to see the thing react to their own traffic. This used to
-// open its own EventSource to /api/logs -- a second permanent connection to
+// open its own EventSource to the log stream -- a second permanent connection to
 // the same endpoint the Logs tab already streams, on top by default whether
 // or not the Logs tab was ever opened. A browser caps how many simultaneous
 // connections it will hold open to one origin (6 for HTTP/1.1, which is all
 // uvicorn speaks here); two tabs of the dashboard open ate 4 of those on
 // nothing but duplicate log streams, three tabs hit the ceiling and every
 // other request -- images, /api/* calls, everything -- queued forever. Fixed
-// by having the intro counter read off the single stream startLogStream()
-// already keeps open, via noteIntroTraffic() below, instead of opening its own.
+// by having the intro counter read off the logs the page already receives,
+// via noteIntroTraffic() below, instead of opening its own stream. (Since then
+// every tab shares one stream for the whole browser: see stream.js.)
 function noteIntroTraffic(entry) {
   const msg = (entry && entry.message) || '';
   if (msg.indexOf('active tricks (') === -1) return;
@@ -796,6 +799,8 @@ function paintBaseUrl() {
   document.getElementById('base-url').textContent = base;
   document.getElementById('base-url-env').textContent = `OPENAI_BASE_URL=${base} your-program`;
   document.getElementById('bypass-url').textContent = location.origin + '/bypass/v1';
+  document.getElementById('use-claude').textContent = `ANTHROPIC_BASE_URL=${location.origin}/use/anthropic.com claude`;
+  document.getElementById('use-codex').textContent = `OPENAI_BASE_URL=${location.origin}/use/openai.com/v1 codex`;
 }
 
 function copyText(id, btn, after) {
@@ -882,19 +887,9 @@ function renderPauseState(paused) {
   if (banner) banner.classList.toggle('visible', !!paused);
 }
 
-let pauseEventSource = null;
+// Over the browser's one shared stream (stream.js), like the logs below.
 function startPauseStream() {
-  if (pauseEventSource) pauseEventSource.close();
-  pauseEventSource = new EventSource('/api/pause/stream');
-  pauseEventSource.onmessage = function(e) {
-    if (e.data && e.data.startsWith('{')) {
-      try { renderPauseState(JSON.parse(e.data).paused); } catch(_) {}
-    }
-  };
-  pauseEventSource.onerror = function() {
-    pauseEventSource.close();
-    setTimeout(startPauseStream, 3000);
-  };
+  PetsitterStream.subscribe('pause', d => renderPauseState(d && d.paused));
 }
 
 async function togglePause() {
@@ -1241,9 +1236,15 @@ function _howToUse(e, installed) {
   if (kw) {
     rows.push(['In a message', `type <code>(${escapeHtml(kw)}: &hellip;)</code> anywhere, and petsitter handles it before the model sees it.`]);
   }
-  const extra = (e.required_models || []).filter(m => m !== 'default');
-  if (extra.length) {
-    rows.push(['Needs', `extra models named ${extra.map(m => `<code>${escapeHtml(m)}</code>`).join(', ')}. <a href="#" onclick="switchTab('models');return false">Set them up in Models</a>.`]);
+  // Models beyond your default one: what someone has to set up, or can.
+  const need = (e.required_models || []).filter(m => m !== 'default');
+  const may = (e.optional_models || []).filter(m => m !== 'default' && !need.includes(m));
+  if (need.length || may.length) {
+    const names = ms => ms.map(m => `<code>${escapeHtml(m)}</code>`).join(', ');
+    const bits = [];
+    if (need.length) bits.push(`Needs ${need.length > 1 ? 'models' : 'a model'} named ${names(need)}.`);
+    if (may.length) bits.push(`Uses ${names(may)} if you set ${may.length > 1 ? 'them' : 'one'} up, otherwise your default model.`);
+    rows.push(['Models', bits.join(' ') + ` <a href="#" onclick="switchTab('models');return false">Set up in Models</a>`]);
   }
   if (e.has_ui) {
     rows.push(['See it work', installed
@@ -1929,14 +1930,6 @@ async function addInstalled(name, version) {
   await loadTrick('pkg:' + name + '@' + version);
 }
 
-async function loadCustomTrick() {
-  const inp = document.getElementById('custom-path');
-  const path = inp.value.trim();
-  if (!path) return;
-  await loadTrick(path);
-  inp.value = '';
-}
-
 async function unloadTrick(id, name) {
   try {
     await fetchJSON('/api/tricks/unload', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id, name, trickset: selectedTrickset}) });
@@ -2053,6 +2046,7 @@ function renderRuleBar() {
 // The channel list: every trickset, always on screen, each with its traffic.
 // A dot means it caught a request in the last minute.
 const _homeIcon = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg>';
+const _helpIcon = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.6 2.6 0 0 1 5 .9c0 1.7-2.5 2.3-2.5 3.9"/><line x1="12" y1="17" x2="12" y2="17.01"/></svg>';
 const _plugIcon = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6"/><path d="M15 2v6"/><path d="M6 8h12v4a6 6 0 0 1-12 0V8z"/><path d="M12 18v4"/></svg>';
 const _modelsIcon = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/><line x1="9" y1="2" x2="9" y2="6"/><line x1="15" y1="2" x2="15" y2="6"/><line x1="9" y1="18" x2="9" y2="22"/><line x1="15" y1="18" x2="15" y2="22"/><line x1="2" y1="9" x2="6" y2="9"/><line x1="2" y1="15" x2="6" y2="15"/><line x1="18" y1="9" x2="22" y2="9"/><line x1="18" y1="15" x2="22" y2="15"/></svg>';
 const _agentsIcon = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>';
@@ -2107,7 +2101,8 @@ function renderChannelRail() {
     + names.map(item).join('')
     + item('_default')
     + `<button class="chan chan-add${currentTab === 'newchannel' ? ' active' : ''}" onclick="openRuleEditor(true)" title="Add channel"><span class="chan-abbr" aria-hidden="true">+</span><span class="chan-glyph">+</span><span class="chan-name">Add channel</span></button>`
-    + `<div class="chan-foot">Each app's requests go through every channel that matches it. <b>Default</b> gets what no channel matches.</div>`;
+    + `<button class="chan chan-page chan-help${currentTab === 'help' ? ' active' : ''}" onclick="switchTab('help')" title="Help: how petsitter works">`
+    + `<span class="chan-abbr" aria-hidden="true">${_helpIcon}</span><span class="chan-glyph" aria-hidden="true">${_helpIcon}</span><span class="chan-name">Help</span></button>`;
 }
 
 // From a page that isn't about any channel (Start here, Help), opening a
@@ -2994,56 +2989,58 @@ function offPassthrough(input) {
 }
 
 // ---- logs ----
-let logEventSource = null;
+// Entries arrive over the browser's one shared stream (stream.js): the recent
+// backlog first, then live. They're kept here so the level filter can re-show
+// them without reconnecting.
+const LOG_KEEP = 500;
+let _logEntries = [];
+
+function _logLine(entry) {
+  return `<div class="log-entry lvl-${entry.level}"><span class="time">${escapeHtml(entry.time)}</span>${escapeHtml(entry.level)}: ${escapeHtml(entry.message)}</div>`;
+}
+
+function _logShown(entry) {
+  const level = document.getElementById('level-filter').value;
+  return !level || entry.level === level;
+}
+
+function renderLogs() {
+  const viewer = document.getElementById('log-viewer');
+  const shown = _logEntries.filter(_logShown);
+  viewer.innerHTML = shown.map(_logLine).join('');
+  document.getElementById('log-count').textContent = shown.length + ' entries';
+  viewer.scrollTop = viewer.scrollHeight;
+}
 
 function startLogStream() {
-  if (logEventSource) logEventSource.close();
-  const level = document.getElementById('level-filter').value;
-  const url = '/api/logs' + (level ? '?level=' + encodeURIComponent(level) : '');
-  const viewer = document.getElementById('log-viewer');
-  let pending = 0;
-  logEventSource = new EventSource(url);
-  logEventSource.onmessage = function(e) {
-    if (e.data && e.data.startsWith('{')) {
-      try {
-        const entry = JSON.parse(e.data);
-        noteIntroTraffic(entry);
-        if (viewer.querySelector('.loader')) viewer.innerHTML = '';
-        const atBottom = viewer.scrollHeight - viewer.scrollTop - viewer.clientHeight < 40;
-        viewer.insertAdjacentHTML('beforeend', `<div class="log-entry lvl-${entry.level}"><span class="time">${escapeHtml(entry.time)}</span>${escapeHtml(entry.level)}: ${escapeHtml(entry.message)}</div>`);
-        pending++;
-        document.getElementById('log-count').textContent = viewer.querySelectorAll('.log-entry').length + ' entries';
-        if (atBottom) viewer.scrollTop = viewer.scrollHeight;
-      } catch(_) {}
-    }
-  };
-  logEventSource.onerror = function() {
-    logEventSource.close();
-    setTimeout(startLogStream, 3000);
-  };
+  let reconnecting = false;
+  PetsitterStream.onStatus(ok => {
+    // After a reconnect the server sends the backlog again: start over.
+    if (!ok) { reconnecting = true; return; }
+    if (reconnecting) { reconnecting = false; _logEntries = []; renderLogs(); }
+  });
+  PetsitterStream.subscribe('logs', entry => {
+    if (!entry || typeof entry !== 'object') return;
+    noteIntroTraffic(entry);
+    _logEntries.push(entry);
+    if (_logEntries.length > LOG_KEEP) _logEntries.splice(0, _logEntries.length - LOG_KEEP);
+    if (!_logShown(entry)) return;
+    const viewer = document.getElementById('log-viewer');
+    if (viewer.querySelector('.loader')) viewer.innerHTML = '';
+    const atBottom = viewer.scrollHeight - viewer.scrollTop - viewer.clientHeight < 40;
+    viewer.insertAdjacentHTML('beforeend', _logLine(entry));
+    document.getElementById('log-count').textContent = viewer.querySelectorAll('.log-entry').length + ' entries';
+    if (atBottom) viewer.scrollTop = viewer.scrollHeight;
+  });
 }
 
 function changeLogLevel() {
-  const viewer = document.getElementById('log-viewer');
-  viewer.innerHTML = '';
-  document.getElementById('log-count').textContent = '0 entries';
-  startLogStream();
+  renderLogs();
 }
 
-// Close the log stream the moment the page goes away. Without this, a reload
-// or tab close has an open streaming response to unwind and the navigation
-// stalls on it until the server gives up; pagehide fires before the old
-// document is torn down, so the connection is released cleanly.
-window.addEventListener('pagehide', function() {
-  if (logEventSource) logEventSource.close();
-  if (pauseEventSource) pauseEventSource.close();
-});
-
 function clearLogDisplay() {
-  if (logEventSource) logEventSource.close();
-  document.getElementById('log-viewer').innerHTML = '';
-  document.getElementById('log-count').textContent = '0 entries';
-  setTimeout(startLogStream, 100);
+  _logEntries = [];
+  renderLogs();
 }
 
 // ---- trickset log ----

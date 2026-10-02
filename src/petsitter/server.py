@@ -27,6 +27,7 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 from petsitter.agent_manager import AgentManager
 from petsitter.gui_routes import register_gui_routes
 from petsitter.proxy import ANTHROPIC_UPSTREAM, ProxyHandler
+from petsitter.providers import api_host_for
 from petsitter.trick import (
     chat_completions_url,
     configure,
@@ -299,15 +300,15 @@ def _print_goodbye(restored: list[str] | None = None) -> None:
     click.echo("")
 
 
-def _parse_p_path(path: str) -> tuple[str, str] | None:
-    """Parse a ``/p/`` proxy path into ``(host, subpath)``.
+def _parse_use_path(path: str) -> tuple[str, str] | None:
+    """Parse a ``/use/`` path into ``(host, subpath)``.
 
-    ``/p/build.nvidia.com/v1/chat/completions`` -> ``("build.nvidia.com", "/v1/chat/completions")``.
-    Returns ``None`` if the path isn't a ``/p/`` route or the host is invalid.
+    ``/use/build.nvidia.com/v1/chat/completions`` -> ``("build.nvidia.com", "/v1/chat/completions")``.
+    Returns ``None`` if the path isn't a ``/use/`` route or the host is invalid.
     """
-    if not path.startswith("/p/"):
+    if not path.startswith("/use/"):
         return None
-    rest = path[len("/p/"):]
+    rest = path[len("/use/"):]
     host, sep, sub = rest.partition("/")
     if not host or not _PROXY_HOST_RE.match(host):
         return None
@@ -708,7 +709,13 @@ def create_app(
 
     async def anthropic_messages(request: Request) -> Response:
         """Anthropic's Messages API, which is what ANTHROPIC_BASE_URL points at."""
+        return await serve_messages(request)
+
+    async def serve_messages(request: Request, upstream: str = "") -> Response:
+        """A Messages API request through the pipeline, to Anthropic or, from
+        /use/<host>/, to the host the caller named."""
         from petsitter import anthropic_compat as ac
+        target = upstream or f"{ANTHROPIC_UPSTREAM}/v1/messages"
         try:
             payload = await request.json()
         except Exception:
@@ -725,10 +732,9 @@ def create_app(
             # Genuinely off: the request never goes through to_openai_messages /
             # to_anthropic_payload / stream_events at all, so there is no
             # translation round trip left to mangle thinking blocks or anything
-            # else. Bytes go straight to Anthropic and straight back, the same
-            # helper the plain `/p/` reverse proxy uses.
+            # else. Bytes go straight to the upstream and straight back.
             logging.getLogger("petsitter").info("/v1/messages: petsitter paused; raw passthrough")
-            return await _generic_proxy(f"{ANTHROPIC_UPSTREAM}/v1/messages", request, timeout=600.0)
+            return await _generic_proxy(target, request, timeout=600.0)
 
         if streaming:
             # Streams Anthropic's own events when no trick needs the whole
@@ -736,7 +742,8 @@ def create_app(
             async def event_stream():
                 try:
                     async for chunk in handler.messages_stream(payload, x_title=x_title,
-                                                               forward_headers=forward):
+                                                               forward_headers=forward,
+                                                               upstream_request_url=upstream):
                         yield chunk
                 except Exception as e:
                     logging.getLogger("petsitter").exception("/v1/messages failed")
@@ -744,7 +751,8 @@ def create_app(
             return StreamingResponse(event_stream(), media_type="text/event-stream")
 
         try:
-            result = await handler.messages(payload, x_title=x_title, forward_headers=forward)
+            result = await handler.messages(payload, x_title=x_title, forward_headers=forward,
+                                            upstream_request_url=upstream)
         except Exception as e:
             logging.getLogger("petsitter").exception("/v1/messages failed")
             return JSONResponse(
@@ -813,32 +821,38 @@ def create_app(
         return await _generic_proxy(f"{base}/{endpoint}", request, timeout=600.0, extra_headers=extra_headers)
     app.add_route("/bypass/{rest:path}", bypass, methods=["GET", "POST"])
 
-    # ----- /p/ path-prefix transparent proxy -----
-    # http://localhost:8080/p/<host>/<rest> proxies to https://<host>/<rest>
-    # through the normal trick pipeline. Trickset selection relies on the
-    # existing X-Title/Model filters; the client's Authorization header and
-    # model field pass through to the upstream.
+    # ----- /use/<host>/...: your extensions, someone else's provider -----
+    # http://localhost:8080/use/<host>/<rest> goes to https://<host>/<rest>
+    # through the normal pipeline, with the caller's own key and model: the
+    # configured default model is never involved. A bare provider domain is
+    # resolved to its API host from the provider catalog (openai.com ->
+    # api.openai.com). Channel selection is the usual X-Title/User-Agent/Model
+    # matching.
 
-    async def proxy_p(request: Request) -> Response:
-        parsed = _parse_p_path(request.url.path)
+    async def use_route(request: Request) -> Response:
+        parsed = _parse_use_path(request.url.path)
         if parsed is None:
-            return JSONResponse({"error": "Invalid /p/ proxy target", "type": "invalid_request"}, status_code=400)
+            return JSONResponse({"error": "Invalid /use/ target", "type": "invalid_request"}, status_code=400)
         host, rest = parsed
+        host = api_host_for(host)
 
         if 'localhost' in host or '127.0.0.1' in host:
           upstream = f"http://{host}{rest}"
         else:
           upstream = f"https://{host}{rest}"
 
+        if request.method == "POST" and rest.rstrip("/").endswith("/v1/messages"):
+            return await serve_messages(request, upstream)
+
         forward_headers = {}
         if request.headers.get("authorization"):
             forward_headers["Authorization"] = request.headers["authorization"]
         x_title = request.headers.get("X-Title", "")
-        logging.getLogger("petsitter").info("/p/ proxy -> %s (x_title=%r)", upstream, x_title)
+        logging.getLogger("petsitter").info("/use/ -> %s (x_title=%r)", upstream, x_title)
 
         if request.method == "POST" and rest.endswith("/chat/completions"):
             if handler.paused:
-                logging.getLogger("petsitter").info("/p/ proxy: petsitter paused; raw passthrough -> %s", upstream)
+                logging.getLogger("petsitter").info("/use/: petsitter paused; raw passthrough -> %s", upstream)
                 return await _generic_proxy(upstream, request, timeout=600.0)
             try:
                 payload = await request.json()
@@ -856,7 +870,7 @@ def create_app(
                 return JSONResponse({"error": str(e), "type": "setup_required"}, status_code=503)
             except Exception as e:
                 import traceback
-                logging.getLogger("petsitter").error(f"Error in /p/ chat_completions: {e}\n{traceback.format_exc()}")
+                logging.getLogger("petsitter").error(f"Error in /use/ chat_completions: {e}\n{traceback.format_exc()}")
                 return JSONResponse({"error": str(e), "type": "proxy_error"}, status_code=500)
 
         if request.method == "GET" and rest.endswith("/models"):
@@ -867,11 +881,11 @@ def create_app(
                 return JSONResponse({"error": str(e), "type": "setup_required"}, status_code=503)
             except Exception as e:
                 import traceback
-                logging.getLogger("petsitter").error(f"Error in /p/ models: {e}\n{traceback.format_exc()}")
+                logging.getLogger("petsitter").error(f"Error in /use/ models: {e}\n{traceback.format_exc()}")
                 return JSONResponse({"error": str(e), "type": "proxy_error"}, status_code=500)
 
         return await _generic_proxy(upstream, request)
-    app.add_route("/p/{path:path}", proxy_p, methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])
+    app.add_route("/use/{path:path}", use_route, methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])
 
     register_gui_routes(app, handler, api_key, config_path=config_path)
 

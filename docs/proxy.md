@@ -6,27 +6,41 @@ Host override, the config diagnostic, and the HTTP surface petsitter serves.
 
 ---
 
-## Zero-Config Host Override (`/p/`)
+## Your extensions, any provider (`/use/`)
 
-The `/p/` route is the easy way to proxy an existing endpoint: prefix whatever host you already use with `http://localhost:8080/p/` and petsitter handles the rest. No trickset to create, no model config to swap.
-
-```
-# Instead of https://build.nvidia.com/...
-http://localhost:8080/p/build.nvidia.com/...
-```
-
-Point your client's `base_url` at `http://localhost:8080/p/<host>` and petsitter forwards everything after the host to `https://<host>/<rest>` - whatever path the client appends. It's a dumb-client-friendly trick: the client just appends `/chat/completions`, `/v1/models`, or anything else to the base you give it, and petsitter proxies it through the normal trick pipeline.
-
-Key behaviors:
-
-- **HTTPS only** - the upstream host is always assumed `https://`. This is a convenience feature for public endpoints.
-- **Auth passthrough** - your client's `Authorization` header is forwarded to the upstream, so each host's own API key works.
-- **Model passthrough** - the request's `model` field goes upstream as-is.
-- **Trickset selection** relies on the existing `X-Title`/`Model` filters - no special handling, the `/p/` path only overrides the upstream host.
-- Chat completions (streaming included), model listings, and any other path under `/p/` are proxied.
+Put `http://localhost:8080/use/<host>` in front of a provider's address and the
+request goes to that provider, with your own key and model, through your
+extensions: Traffic Logger, Tool Monitor, Context Monitor, Secrets Protector
+and the rest. The model configured in petsitter isn't involved at all.
 
 ```bash
-curl http://localhost:8080/p/build.nvidia.com/v1/chat/completions \
+# Claude Code talks to Claude, through your extensions
+ANTHROPIC_BASE_URL=http://localhost:8080/use/anthropic.com claude
+
+# Codex talks to OpenAI, through the same extensions
+OPENAI_BASE_URL=http://localhost:8080/use/openai.com/v1 codex
+```
+
+That makes it the quickest way to show petsitter to someone: "change your base
+URL to this and open your tool as usual." They keep their own provider and model,
+and get logging, tool monitoring and context analysis with nothing to install.
+
+- **Bare provider domains work.** `openai.com`, `anthropic.com`, `groq.com`,
+  `x.ai` and the other providers in the catalog resolve to their API host
+  (`api.openai.com`, ...). Any other host is used as written:
+  `/use/build.nvidia.com/v1`.
+- **HTTPS**, except `localhost` and `127.0.0.1`, which use plain HTTP
+  (`/use/localhost:11434/v1`).
+- **Your key and model go through untouched**: `Authorization` for OpenAI-style
+  APIs; `x-api-key`, `anthropic-version` and `anthropic-beta` for Anthropic.
+- **Both APIs run through the pipeline**, streaming included: chat completions
+  (`.../chat/completions`) and Anthropic's Messages API (`.../v1/messages`).
+  Model listings are served too; any other path is forwarded as is.
+- **Channels** are picked the usual way (X-Title, User-Agent, model), so the same
+  extensions apply whichever provider a tool uses.
+
+```bash
+curl http://localhost:8080/use/build.nvidia.com/v1/chat/completions \
   -H "Authorization: Bearer <your-nvidia-key>" \
   -d '{"model":"meta/llama-3.3-70b-instruct","messages":[{"role":"user","content":"hi"}]}'
 ```
@@ -50,7 +64,7 @@ The snapshot includes:
 - **`trickset`** - the matched trickset and each active trick (class, display name, keywords, per-trick config)
 - **`tricksets`** - every loaded trickset and `capabilities`
 
-It works on `/v1/chat/completions` and `/p/<host>/.../chat/completions`, and honors `stream: true` (returned as a normal chunked stream). It only triggers on an exact full-message match, so ordinary conversation is unaffected.
+It works on `/v1/chat/completions` and `/use/<host>/.../chat/completions`, and honors `stream: true` (returned as a normal chunked stream). It only triggers on an exact full-message match, so ordinary conversation is unaffected.
 
 ## API Endpoints
 
@@ -60,7 +74,7 @@ Petsitter exposes OpenAI-compatible endpoints plus management endpoints:
 - `POST /v1/chat/completions` - Chat completions (proxied + transformed)
 - `GET /v1/models` - List available models (proxied)
 - `GET /health` - Health check
-- `* /p/{host}/{path}` - Zero-config transparent proxy to `https://{host}/{path}` (any method)
+- `* /use/{host}/{path}` - Your extensions in front of `https://{host}/{path}`, with the caller's own key and model (any method)
 
 **Management:**
 - `GET /api/info` - Server information
@@ -69,7 +83,7 @@ Petsitter exposes OpenAI-compatible endpoints plus management endpoints:
 - `POST /api/tricks/load` - Load a trick
 - `POST /api/tricks/unload` - Unload a trick
 - `POST /api/tricks/reorder` - Reorder loaded tricks
-- `GET /api/logs` - Activity log
+- `GET /api/stream` - The dashboard's live updates (logs, pause state, Live pages), one stream shared by every tab; `POST /api/stream/{sid}` with `{"subscribe": [...], "unsubscribe": [...]}` picks topics
 - `GET /api/tricksets` - List loaded tricksets
 - `GET /api/tricksets/available` - List available trickset files
 - `POST /api/tricksets/load` - Load a trickset

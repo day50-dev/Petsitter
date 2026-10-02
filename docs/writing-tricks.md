@@ -248,6 +248,11 @@ fetch("action", {method: "POST", headers: {"Content-Type": "application/json"},
                  body: JSON.stringify({action: "clear"})});
 ```
 
+- `EventSource("events")` doesn't cost a connection of its own: petsitter adds
+  a small script when it serves the page, and the stream goes over the one
+  connection the whole browser shares with the dashboard. (A browser allows
+  only 6 connections to a host across all its tabs.) Write it as a normal
+  `EventSource`; nothing else changes.
 - `publish()` is cheap and never blocks. The last 500 events are kept in memory,
   so opening the tab after using your tool still shows what happened.
 - For a single-file trick, override `ui_html()` and return the HTML as a string.
@@ -482,6 +487,12 @@ The method receives the text after `mycommand: ` and can return:
 - The pattern `(<keyword>: <request>)` properly handles nested parentheses by tracking a depth counter.
 - A second, sed-style form `(<keyword>=<D><request><D>)` takes the request verbatim between a delimiter `D` of the user's choosing, for requests with unbalanced parentheses or significant whitespace: `(secret=|ab)c|)`. One optional space is allowed on either side of `=`. This form only counts when it names a registered keyword, so code like `f(x = 'a')` is left alone.
 - Set `strip_prompt_keyword = False` on a trick to have the framework leave its pattern where the user typed it, on every turn, for the trick's own `pre_hook` to rewrite in place (secrets_protector does this). `handle_prompt_keyword` isn't called for it, and `petsitter.trick.find_prompt_keyword_patterns` gives the trick the same parser the framework uses.
+- Inside `handle_prompt_keyword`, `petsitter.trick.transformed_messages()`
+  gives the conversation as the channel's extensions would send it to the
+  model (system prompts added, pre_hooks run, on a copy; no model call, and
+  extensions with `needs_window = 0` are skipped so they record nothing). The
+  `messages` argument is the conversation as the tool sent it. Export It uses
+  both for `(exportit: both)`.
 - Keyword matching is case-insensitive.
 - If the handler raises, an error message is returned as the assistant response.
 

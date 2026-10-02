@@ -1,4 +1,4 @@
-"""Tests for the /p/ path-prefix transparent proxy."""
+"""Tests for the /use/ path-prefix transparent proxy."""
 
 import json
 
@@ -6,35 +6,35 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from petsitter.proxy import ProxyHandler
-from petsitter.server import _parse_p_path, create_app
+from petsitter.server import _parse_use_path, create_app
 
 
 class TestParsePPath:
-    """Tests for _parse_p_path."""
+    """Tests for _parse_use_path."""
 
     def test_host_and_subpath(self):
-        assert _parse_p_path("/p/build.nvidia.com/v1/chat/completions") == ("build.nvidia.com", "/v1/chat/completions")
+        assert _parse_use_path("/use/build.nvidia.com/v1/chat/completions") == ("build.nvidia.com", "/v1/chat/completions")
 
     def test_host_only(self):
-        assert _parse_p_path("/p/build.nvidia.com") == ("build.nvidia.com", "")
+        assert _parse_use_path("/use/build.nvidia.com") == ("build.nvidia.com", "")
 
     def test_host_with_trailing_slash(self):
-        assert _parse_p_path("/p/build.nvidia.com/v1/") == ("build.nvidia.com", "/v1/")
+        assert _parse_use_path("/use/build.nvidia.com/v1/") == ("build.nvidia.com", "/v1/")
 
     def test_host_with_port(self):
-        assert _parse_p_path("/p/localhost:11434/v1/models") == ("localhost:11434", "/v1/models")
+        assert _parse_use_path("/use/localhost:11434/v1/models") == ("localhost:11434", "/v1/models")
 
     def test_not_a_p_path(self):
-        assert _parse_p_path("/v1/chat/completions") is None
+        assert _parse_use_path("/v1/chat/completions") is None
 
     def test_empty_host(self):
-        assert _parse_p_path("/p//v1/chat/completions") is None
+        assert _parse_use_path("/use//v1/chat/completions") is None
 
     def test_invalid_host_chars(self):
-        assert _parse_p_path("/p/ht tp.com/v1") is None
+        assert _parse_use_path("/use/ht tp.com/v1") is None
 
     def test_double_slash_absorbed(self):
-        assert _parse_p_path("/p/build.nvidia.com//v1/chat/completions") == ("build.nvidia.com", "/v1/chat/completions")
+        assert _parse_use_path("/use/build.nvidia.com//v1/chat/completions") == ("build.nvidia.com", "/v1/chat/completions")
 
 
 def create_mock_response(data: dict) -> MagicMock:
@@ -46,12 +46,12 @@ def create_mock_response(data: dict) -> MagicMock:
     return mock
 
 
-class TestPPathHandler:
-    """Tests for /p/ upstream overrides on ProxyHandler."""
+class TestUsePathHandler:
+    """Tests for /use/ upstream overrides on ProxyHandler."""
 
     @pytest.mark.asyncio
     async def test_chat_completions_uses_override_url(self):
-        """chat_completions targets the /p/ upstream and forwards client auth + model."""
+        """chat_completions targets the /use/ upstream and forwards client auth + model."""
         handler = ProxyHandler(model_url="", model_name=None, api_key="")
 
         mock_response = create_mock_response({
@@ -77,7 +77,7 @@ class TestPPathHandler:
 
     @pytest.mark.asyncio
     async def test_models_uses_override_url(self):
-        """models() targets the /p/ upstream."""
+        """models() targets the /use/ upstream."""
         handler = ProxyHandler(model_url="", model_name=None, api_key="")
 
         mock_response = create_mock_response({"data": [{"id": "real-model"}]})
@@ -97,12 +97,12 @@ class TestPPathHandler:
             assert mock_client.get.call_args.args[0] == "https://build.nvidia.com/v1/models"
 
 
-class TestPPathEndpoint:
-    """Tests for the /p/ server route."""
+class TestUsePathEndpoint:
+    """Tests for the /use/ server route."""
 
     @pytest.mark.asyncio
-    async def test_p_route_chat_completions(self):
-        """POST /p/<host>/... proxies through the pipeline to https://<host>/..."""
+    async def test_use_route_chat_completions(self):
+        """POST /use/<host>/... proxies through the pipeline to https://<host>/..."""
         from httpx import AsyncClient, ASGITransport
 
         app = create_app(model_url="", model_name=None, api_key="", trick_paths=[])
@@ -118,7 +118,7 @@ class TestPPathEndpoint:
         with patch("httpx.AsyncClient", return_value=mock_client):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 response = await ac.post(
-                    "/p/build.nvidia.com/v1/chat/completions",
+                    "/use/build.nvidia.com/v1/chat/completions",
                     json={"messages": [{"role": "user", "content": "Hi"}], "model": "nvidia-model"},
                     headers={"Authorization": "Bearer sk-nvidia"},
                 )
@@ -129,8 +129,8 @@ class TestPPathEndpoint:
                 assert args.kwargs["headers"]["Authorization"] == "Bearer sk-nvidia"
 
     @pytest.mark.asyncio
-    async def test_p_route_models(self):
-        """GET /p/<host>/models proxies to https://<host>/models."""
+    async def test_use_route_models(self):
+        """GET /use/<host>/models proxies to https://<host>/models."""
         from httpx import AsyncClient, ASGITransport
 
         app = create_app(model_url="", model_name=None, api_key="", trick_paths=[])
@@ -144,7 +144,7 @@ class TestPPathEndpoint:
         with patch("httpx.AsyncClient", return_value=mock_client):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 response = await ac.get(
-                    "/p/build.nvidia.com/v1/models",
+                    "/use/build.nvidia.com/v1/models",
                     headers={"Authorization": "Bearer sk-nvidia"},
                 )
                 assert response.status_code == 200
@@ -153,14 +153,14 @@ class TestPPathEndpoint:
                 assert mock_client.get.call_args.args[0] == "https://build.nvidia.com/v1/models"
 
     @pytest.mark.asyncio
-    async def test_p_route_invalid_host(self):
-        """Invalid /p/ targets return 400."""
+    async def test_use_route_invalid_host(self):
+        """Invalid /use/ targets return 400."""
         from httpx import AsyncClient, ASGITransport
 
         app = create_app(model_url="", model_name=None, api_key="", trick_paths=[])
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-            response = await ac.get("/p/ht%20tp.com/v1/models")
+            response = await ac.get("/use/ht%20tp.com/v1/models")
             assert response.status_code == 400
 
     @pytest.mark.asyncio
@@ -195,7 +195,7 @@ class TestPPathEndpoint:
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 async with ac.stream(
                     "POST",
-                    "/p/build.nvidia.com/v1/chat/completions",
+                    "/use/build.nvidia.com/v1/chat/completions",
                     json={"messages": [{"role": "user", "content": "Hi"}], "stream": True},
                 ) as response:
                     assert response.status_code == 200
@@ -226,8 +226,8 @@ class TestPPathEndpoint:
         assert "".join(reasoning_parts) == "Thinking step by step."
 
     @pytest.mark.asyncio
-    async def test_p_route_config_magic_streams_diag(self):
-        """__petsitter_config__ through /p/ returns a streamed diag without hitting upstream."""
+    async def test_use_route_config_magic_streams_diag(self):
+        """__petsitter_config__ through /use/ returns a streamed diag without hitting upstream."""
         from httpx import AsyncClient, ASGITransport
 
         app = create_app(model_url="", model_name=None, api_key="", trick_paths=[])
@@ -241,7 +241,7 @@ class TestPPathEndpoint:
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 async with ac.stream(
                     "POST",
-                    "/p/build.nvidia.com/v1/chat/completions",
+                    "/use/build.nvidia.com/v1/chat/completions",
                     json={
                         "messages": [{"role": "user", "content": "__petsitter_config__"}],
                         "model": "nvidia-model",
@@ -267,8 +267,8 @@ class TestPPathEndpoint:
         assert diag["request"]["upstream"]["auth"] == "bearer"
 
     @pytest.mark.asyncio
-    async def test_p_route_generic_passthrough(self):
-        """Unknown paths under /p/ are forwarded transparently."""
+    async def test_use_route_generic_passthrough(self):
+        """Unknown paths under /use/ are forwarded transparently."""
         from httpx import AsyncClient, ASGITransport
 
         app = create_app(model_url="", model_name=None, api_key="", trick_paths=[])
@@ -286,10 +286,68 @@ class TestPPathEndpoint:
         with patch("httpx.AsyncClient", return_value=mock_client):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 response = await ac.post(
-                    "/p/build.nvidia.com/v1/embeddings",
+                    "/use/build.nvidia.com/v1/embeddings",
                     json={"input": "hello"},
                 )
                 assert response.status_code == 200
                 assert response.json() == {"ok": True}
                 assert mock_client.request.call_args.args[0] == "POST"
                 assert mock_client.request.call_args.args[1] == "https://build.nvidia.com/v1/embeddings"
+
+
+def test_bare_provider_domains_resolve_to_their_api_host():
+    from petsitter.providers import api_host_for
+    assert api_host_for("openai.com") == "api.openai.com"
+    assert api_host_for("anthropic.com") == "api.anthropic.com"
+    assert api_host_for("api.openai.com") == "api.openai.com"       # already an API host
+    assert api_host_for("build.nvidia.com") == "build.nvidia.com"   # not in the catalog: as typed
+    assert api_host_for("localhost:11434") == "localhost:11434"
+
+
+async def test_use_anthropic_runs_messages_through_the_pipeline(monkeypatch):
+    """Claude Code with ANTHROPIC_BASE_URL=.../use/anthropic.com: the extensions
+    run, the request goes to api.anthropic.com, with the caller's own key."""
+    from httpx import ASGITransport, AsyncClient
+    from petsitter.proxy import ProxyHandler
+
+    seen = {}
+
+    async def fake_messages(self, payload, x_title="", forward_headers=None, upstream_request_url=""):
+        seen.update(url=upstream_request_url, key=(forward_headers or {}).get("x-api-key"), model=payload["model"])
+        return {"id": "m", "type": "message", "role": "assistant", "model": payload["model"],
+                "content": [{"type": "text", "text": "hi"}], "stop_reason": "end_turn",
+                "usage": {"input_tokens": 1, "output_tokens": 1}}
+    monkeypatch.setattr(ProxyHandler, "messages", fake_messages)
+
+    app = create_app(model_url="", model_name=None, api_key="", trick_paths=[])
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        r = await ac.post("/use/anthropic.com/v1/messages",
+                          headers={"x-api-key": "sk-ant-test", "anthropic-version": "2023-06-01"},
+                          json={"model": "claude-opus-5-5", "max_tokens": 10,
+                                "messages": [{"role": "user", "content": "hi"}]})
+    assert r.status_code == 200 and r.json()["content"][0]["text"] == "hi"
+    assert seen == {"url": "https://api.anthropic.com/v1/messages", "key": "sk-ant-test",
+                    "model": "claude-opus-5-5"}
+
+
+def test_messages_pipeline_sends_to_the_given_target(monkeypatch):
+    import asyncio
+    import httpx
+    import petsitter.proxy as proxy_mod
+    from petsitter.proxy import ProxyHandler
+
+    hits = []
+
+    def handle(request):
+        hits.append((str(request.url), request.headers.get("x-api-key")))
+        return httpx.Response(200, json={"id": "m", "type": "message", "role": "assistant", "model": "c",
+                                         "content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn",
+                                         "usage": {"input_tokens": 1, "output_tokens": 1}})
+    real = httpx.AsyncClient
+    monkeypatch.setattr(proxy_mod.httpx, "AsyncClient",
+                        lambda *a, **kw: real(*a, transport=httpx.MockTransport(handle), **kw))
+    handler = ProxyHandler(model_url="http://unused", model_name="m")
+    asyncio.run(handler.messages({"model": "c", "max_tokens": 5, "messages": [{"role": "user", "content": "x"}]},
+                                 forward_headers={"x-api-key": "sk-1"},
+                                 upstream_request_url="https://api.example.com/v1/messages"))
+    assert hits == [("https://api.example.com/v1/messages", "sk-1")]

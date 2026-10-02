@@ -1,6 +1,7 @@
 """Base Trick class and callmodel utility for petsitter."""
 
 import html
+import contextvars
 import json
 import sys
 import threading
@@ -116,6 +117,21 @@ def learn_api_root(base: str, root: str) -> None:
     _API_ROOTS[_base_key(base)] = root
 
 
+# Set by the proxy while a prompt keyword's handler runs: a function giving the
+# conversation as the channel's extensions would send it to the model.
+_preview: contextvars.ContextVar = contextvars.ContextVar("petsitter_transform_preview", default=None)
+
+
+def transformed_messages() -> list | None:
+    """For a prompt keyword's handler: the conversation as the channel's
+    extensions would send it to the model (system prompts added, pre_hooks
+    run), worked out on a copy. The model isn't called, and extensions that
+    only watch (``needs_window = 0``) don't run, so nothing is logged for a
+    request that never happens. None outside a handler."""
+    fn = _preview.get()
+    return fn() if fn else None
+
+
 def chat_completions_url(base: str) -> str:
     """The chat endpoint for a configured model URL, whichever way it was written."""
     u = (base or "").strip().rstrip("/")
@@ -162,12 +178,15 @@ def callmodel_sync(
     model_url: str = "",
     model_name: str = "",
     api_key: str = "",
+    tools: list | None = None,
 ) -> list:
     """Synchronously call the model and get a response.
 
     Simple helper for tricks that need to loop back to the model.
     Appends the user_message and calls the model, returning updated context.
-    Can target a different model by passing model_url/model_name.
+    Can target a different model by passing model_url/model_name. ``tools``
+    are offered to the model; its reply (the last message) then may carry
+    ``tool_calls``.
     """
     if not model_url:
         model_url = _model_url
@@ -187,6 +206,8 @@ def callmodel_sync(
         "model": model_name or "default",
         "messages": messages,
     }
+    if tools:
+        payload["tools"] = tools
 
     headers = {"Content-Type": "application/json"}
     if api_key:
@@ -333,6 +354,9 @@ class Trick:
     a modelset. Default is ["default"] — the single model configured via
     --url/--model/--key. Multi-model tricks (e.g. KennelTrick) should
     override with additional keys like ["default", "thinker", "toolcall"].
+    Set ``optional_models`` for models the trick uses when they're set up and
+    does without otherwise (Politeify's "rephraser" falls back to "default").
+    Both are shown on the extension's page, so people know what to set up.
 
     Subclasses should set:
         __brief__: Short one-line description shown in the dashboard.
@@ -399,6 +423,7 @@ class Trick:
     # the model verbatim unless the pre_hook deals with it.
     strip_prompt_keyword: bool = True
     required_models: list[str] = ["default"]
+    optional_models: list[str] = []
     replace_system_prompt: bool = False
     __brief__: str = ""
     __display_name__: str = ""

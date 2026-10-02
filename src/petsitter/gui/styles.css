@@ -478,24 +478,8 @@ header .nav a:hover { background: #1a2a4d; }
 }
 .avail-category:first-child { margin-top: 0; }
 
-.custom-path {
-  display: flex;
-  gap: 8px;
-  margin-top: 10px;
-}
 
-.custom-path input {
-  flex: 1;
-  background: #0f0f1a;
-  border: 1px solid #1e2a3a;
-  border-radius: 4px;
-  padding: 7px 10px;
-  color: #c8d6e5;
-  font-size: 13px;
-  font-family: monospace;
-}
 
-.custom-path input::placeholder { color: #3a4a5a; }
 
 /* models */
 .models-list { display: grid; gap: 6px; }
@@ -1976,10 +1960,6 @@ body.no-channel .tabs { display: none; }
 }
 .ext-side .avail-category:first-child { margin-top: 2px; }
 .ext-side .avail-more { margin-top: 6px; }
-.ext-custom { margin-top: 14px; font-size: 12px; color: #5a7a8a; }
-.ext-custom summary { cursor: pointer; }
-.ext-custom summary:hover { color: #8ab4ff; }
-.ext-custom .custom-path { margin-top: 8px; }
 
 .ext-avatar {
   flex: none;
@@ -2152,8 +2132,7 @@ body.rail-collapsed .chan-rail .chan-h:not(.chan-h-off),
 body.rail-collapsed .chan-name,
 body.rail-collapsed .chan-rail .chan-glyph,
 body.rail-collapsed .chan-off,
-body.rail-collapsed .chan-warn,
-body.rail-collapsed .chan-foot { display: none; }
+body.rail-collapsed .chan-warn { display: none; }
 body.rail-collapsed .chan-h-off { display: block; font-size: 0; height: 1px; padding: 0; margin: 10px 6px; background: #1e2a3a; }
 body.rail-collapsed .chan { position: relative; justify-content: center; padding: 4px 0; background: none; }
 body.rail-collapsed .chan-abbr {
@@ -2212,8 +2191,10 @@ body.rail-collapsed .chan-count { position: absolute; top: 0; right: 0; font-siz
 .chan-add .chan-glyph { color: #4a7a5a; }
 .chan-warn { font-size: 11px; color: #ffb84d; padding: 4px 8px; line-height: 1.4; }
 .chan-warn b { color: #ffd08a; }
-.chan-foot { font-size: 11px; line-height: 1.45; color: #4a6572; border-top: 1px solid #1e2a3a; margin-top: auto; padding: 12px 8px 2px; }
-.chan-foot b { color: #6b8299; }
+/* Help sits at the bottom of the rail */
+.chan.chan-help { margin-top: auto; }
+.help-lead { margin: 0 0 14px; font-size: 14px; color: #a4b8d4; }
+.help-lead b { color: #c8d6e5; }
 
 .rule-bar { position: relative; margin: 0 0 12px; }
 .rule-row {
@@ -2565,6 +2546,8 @@ body.rail-collapsed .chan-alert { position: absolute; bottom: 2px; right: 2px; w
 .bypass { margin-top: 26px; padding: 0 4px; }
 .bypass h3 { font-size: 14px; color: #a4b8d4; margin: 0 0 4px; }
 .bypass p { font-size: 13px; color: #6b8299; margin: 0; }
+.bypass p code { font-size: 12.5px; color: #a4b8d4; background: transparent; padding: 0; }
+.bypass .copy-row + .copy-row { margin-top: 6px; }
 .bypass .copy-row code { font-size: 14px; color: #8a9ab0; background: transparent; }
 
 .upstream-dismiss {

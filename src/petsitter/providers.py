@@ -387,3 +387,22 @@ async def discover_models(
     if not models:
         raise ValueError("Connected, but that provider listed no models.")
     return models
+
+
+def api_host_for(host: str) -> str:
+    """The API host for a bare provider domain, from the catalog:
+    "openai.com" -> "api.openai.com", "anthropic.com" -> "api.anthropic.com".
+    Anything the catalog doesn't know (or already an API host) comes back as is."""
+    from urllib.parse import urlparse
+    h = (host or "").lower()
+    name, _, port = h.partition(":")
+    if port:
+        return host
+    matches = []
+    for p in provider_catalog():
+        api = (urlparse(p.get("base_url") or "").hostname or "").lower()
+        if api == name:
+            return host
+        if api.endswith("." + name):
+            matches.append(api)
+    return matches[0] if len(set(matches)) == 1 else host

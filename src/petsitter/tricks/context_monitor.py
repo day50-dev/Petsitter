@@ -95,6 +95,7 @@ class ContextMonitorTrick(Trick):
     __display_name__ = "Context Monitor"
     __category__ = "Diagnostics"
     ui_page = "context_monitor.html"
+    needs_window = 0   # only looks
 
     def __init__(self):
         self._full: OrderedDict[str, dict] = OrderedDict()

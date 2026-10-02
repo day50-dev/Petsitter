@@ -35,6 +35,7 @@ from petsitter.observability import (
 )
 from petsitter.reply_window import ReplyWindow, channel_window
 from petsitter.trick import (
+    _preview,
     api_root_candidates,
     chat_completions_url,
     learn_api_root,
@@ -131,6 +132,13 @@ def _problems_of(trick) -> list[str]:
         return [str(p) for p in (trick.problems() or [])]
     except Exception as e:
         return [f"Couldn't check its setup: {e}"]
+
+
+def _window_of(trick) -> int:
+    try:
+        return int(trick.needs_window)
+    except (TypeError, ValueError):
+        return -1
 
 
 def _wants_all(trick) -> bool:
@@ -276,7 +284,8 @@ class ProxyHandler:
             result.extend(ts.tricks)
         return result
 
-    def _matching_tricks(self, x_title: str, model: str, user_agent: str | None = None) -> tuple[list[Trick], Trickset | None]:
+    def _matching_tricks(self, x_title: str, model: str, user_agent: str | None = None,
+                         record: bool = True) -> tuple[list[Trick], Trickset | None]:
         if user_agent is None:
             user_agent = current_user_agent()
         tricks: list[Trick] = []
@@ -308,8 +317,36 @@ class ProxyHandler:
             tricks.extend(enabled)
             matched = default_ts
             hit.append("_default")
-        self._note_traffic(x_title, model, hit, user_agent)
+        if record:
+            self._note_traffic(x_title, model, hit, user_agent)
         return tricks, matched
+
+    def _preview_transform(self, messages: list, payload: dict | None) -> list:
+        """The conversation as the matching channel's extensions would send it,
+        on a copy: system prompts and pre_hooks, no model call, and none of the
+        extensions that only watch, so nothing is logged or counted."""
+        import copy
+        msgs = copy.deepcopy(messages)
+        params = copy.deepcopy({k: v for k, v in (payload or {}).items() if k != "messages"})
+        model = params.get("model", "") or ""
+        if model.startswith("trickset/") and model.split("/", 1)[1] in self.tricksets:
+            ts = self.tricksets[model.split("/", 1)[1]]
+            tricks = [t for i, t in enumerate(ts.tricks) if i < len(ts.trick_enabled) and ts.trick_enabled[i]]
+        else:
+            x_title = request_meta().get("x_title") or next(
+                (v for k, v in current_request_headers() if k.lower() == "x-title"), "")
+            tricks, _ = self._matching_tricks(x_title, model, record=False)
+        tricks, msgs = self._filter_tricks_by_keywords(tricks, msgs)
+        tricks = [t for t in tricks if _window_of(t) != 0]
+        system_prompt = ""
+        if msgs and msgs[0].get("role") == "system":
+            system_prompt = msgs[0].get("content", "")
+            msgs = msgs[1:]
+        new_system_prompt = self._apply_system_prompt_tricks(system_prompt, tricks)
+        if new_system_prompt:
+            msgs = [{"role": "system", "content": new_system_prompt}] + msgs
+        params["messages"] = msgs
+        return self._apply_pre_hooks(msgs, params, tricks)
 
     def _build_headers(self, model_cfg: dict | None = None) -> dict[str, str]:
         if model_cfg is not None:
@@ -642,6 +679,7 @@ class ProxyHandler:
                 seen = trick.live_feed.since(0)
                 before = seen[-1][0] if seen else 0
                 shown = f"({keyword}: {request_text[:80]}{'...' if len(request_text) > 80 else ''})" if request_text else f"({keyword})"
+                preview_token = _preview.set(lambda m=list(modified): self._preview_transform(m, payload))
                 try:
                     response = trick.handle_prompt_keyword(request_text, modified, payload)
                 except Exception as e:
@@ -654,6 +692,8 @@ class ProxyHandler:
                 else:
                     if not trick.live_feed.since(before):
                         trick.report(f"Ran {shown}" + (" and answered it directly" if isinstance(response, dict) else ""))
+                finally:
+                    _preview.reset(preview_token)
                 if isinstance(response, dict):
                     log.info(
                         "%sprompt keyword %r handled by %s -> response injected",
@@ -812,6 +852,7 @@ class ProxyHandler:
                     "keywords": list(t.keywords),
                     "prompt_keyword": (ts.trick_keywords[i] if i < len(ts.trick_keywords) and ts.trick_keywords[i] else None) or getattr(t, "prompt_keyword", "") or "",
                     "required_models": list(t.required_models),
+                    "optional_models": list(getattr(t, "optional_models", []) or []),
                     "config_fields": list(getattr(type(t), "config_fields", []) or []),
                     "config": ts.trick_configs.get(tid, {}),
                     "has_ui": type(t).has_ui(),
@@ -1376,7 +1417,8 @@ class ProxyHandler:
             reset_request_meta(req.meta_token)
         reset_request_id(req.rid_token)
 
-    def _prepare_messages(self, req, payload: dict, x_title: str, forward_headers: dict | None) -> dict | None:
+    def _prepare_messages(self, req, payload: dict, x_title: str, forward_headers: dict | None,
+                          upstream_request_url: str = "") -> dict | None:
         """Translate to the OpenAI shape tricks are written against, run the
         pipeline up to the model, and translate back. Returns a finished
         response when a prompt keyword answered it."""
@@ -1449,7 +1491,7 @@ class ProxyHandler:
         req.shadow = shadow
         req.body = ac.to_anthropic_payload(messages, shadow.get("tools") or [], payload)
         req.headers = _anthropic_headers(forward_headers or {})
-        req.target = f"{ANTHROPIC_UPSTREAM.rstrip('/')}/v1/messages"
+        req.target = upstream_request_url or f"{ANTHROPIC_UPSTREAM.rstrip('/')}/v1/messages"
         req.log = log
         return None
 
@@ -1481,12 +1523,12 @@ class ProxyHandler:
         return result
 
     async def messages(self, payload: dict, x_title: str = "",
-                       forward_headers: dict | None = None) -> dict:
+                       forward_headers: dict | None = None, upstream_request_url: str = "") -> dict:
         """Serve Anthropic's /v1/messages through the ordinary trick pipeline,
         as one whole response."""
         req = self._begin_messages()
         try:
-            early = self._prepare_messages(req, payload, x_title, forward_headers)
+            early = self._prepare_messages(req, payload, x_title, forward_headers, upstream_request_url)
             if early is not None:
                 return early
             return await self._finish_messages_buffered(req)
@@ -1494,7 +1536,7 @@ class ProxyHandler:
             self._end_messages(req)
 
     async def messages_stream(self, payload: dict, x_title: str = "",
-                              forward_headers: dict | None = None):
+                              forward_headers: dict | None = None, upstream_request_url: str = ""):
         """The same request as Anthropic server-sent events.
 
         Held whole (with ping events every few seconds, which Anthropic
@@ -1505,7 +1547,7 @@ class ProxyHandler:
         from petsitter import anthropic_compat as ac
         req = self._begin_messages()
         try:
-            early = self._prepare_messages(req, payload, x_title, forward_headers)
+            early = self._prepare_messages(req, payload, x_title, forward_headers, upstream_request_url)
             if early is not None:
                 for chunk in ac.stream_events(early):
                     yield chunk

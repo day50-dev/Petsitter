@@ -362,10 +362,17 @@ pet add mine exportit
 User: (exportit)
 Assistant: Conversation exported to `/tmp/petsitter/convo-20260718-143022.json` (6 messages, llcat-compatible)
 
+User: (exportit: both)
+Assistant: Conversation exported, before and after the extensions:
+Before: `/tmp/petsitter/convo-20260718-143022-before.json` (6 messages, llcat-compatible)
+After: `/tmp/petsitter/convo-20260718-143022-after.json` (7 messages, llcat-compatible)
+
 User: (exportit: backup before refactor)
 Assistant: Conversation exported to `/tmp/petsitter/convo-20260718-143022.json` (6 messages, llcat-compatible)
 Note: backup before refactor
 ```
+
+By default the export is the conversation **after** the channel's extensions transformed it, which is what the model would see: rewritten messages, secrets as stand-ins, added system prompts. `(exportit: both)` also saves the **before** side, as your tool sent it, so the two can be compared. Nothing is sent to the model, and extensions that only watch (Traffic Logger, Tool Monitor, Context Monitor) don't record the export.
 
 The exported JSON is a plain array of messages in OpenAI Chat Completions format:
 

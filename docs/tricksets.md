@@ -98,7 +98,7 @@ curl -X PUT http://localhost:8080/api/tricksets/my-trickset \
   -d '{"logfile": "~/.cache/petsitter/my-trickset.log", "loglevel": "DEBUG"}'
 ```
 
-Every request through the pipeline is tagged with a short correlation id so you can follow it end-to-end. The tag appears in the matched trickset's log file and in the global activity log (Logs tab / `GET /api/logs`):
+Every request through the pipeline is tagged with a short correlation id so you can follow it end-to-end. The tag appears in the matched trickset's log file and in the global activity log (the Logs tab):
 
 ```
 [ab12cd34] trickset 'gemma4' matched (X-Title='*' Model='gemma4*')

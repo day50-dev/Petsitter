@@ -102,6 +102,12 @@ def handle_prompt_keyword(self, request: str) -> dict | None:
 - `(mycommand)` and `(mycommand:)` give an empty `request`.
 - `(mycommand=|value with ) parens|)` takes everything between a delimiter of
   the user's choosing, verbatim.
+- Inside `handle_prompt_keyword`, `petsitter.trick.transformed_messages()`
+  gives the conversation as the channel's extensions would send it to the
+  model (system prompts added, pre_hooks run, on a copy; no model call, and
+  extensions with `needs_window = 0` are skipped so they record nothing). The
+  `messages` argument is the conversation as the tool sent it. Export It uses
+  both for `(exportit: both)`.
 - With `strip_prompt_keyword = False` the pattern stays where the user typed
   it, on every turn, and `handle_prompt_keyword` isn't called: the trick's own
   `pre_hook` rewrites it in place (Secrets Protector replaces
@@ -181,6 +187,11 @@ fetch("action", {method: "POST", headers: {"Content-Type": "application/json"},
                  body: JSON.stringify({action: "clear"})});
 ```
 
+- `EventSource("events")` doesn't cost a connection of its own: petsitter adds
+  a small script when it serves the page, and the stream goes over the one
+  connection the whole browser shares with the dashboard. (A browser allows
+  only 6 connections to a host across all its tabs.) Write it as a normal
+  `EventSource`; nothing else changes.
 - `publish()` is cheap and never blocks. The last 500 events are kept in memory,
   so opening the tab after using your tool still shows what happened.
 - For a single-file trick, override `ui_html()` and return the HTML as a string.

@@ -3,6 +3,7 @@
 import asyncio
 import time
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -74,7 +75,7 @@ def _introspect_trick_file(path: Path) -> dict:
     """Extract display_name, brief, keywords, and prompt_keyword from a trick module without instantiating."""
     import importlib.util
 
-    info = {"path": str(path), "name": "", "display_name": None, "brief": None, "category": "", "keywords": [], "prompt_keyword": "", "required_models": [], "config_fields": [], "readme": "", "has_ui": False, "mtime": path.stat().st_mtime_ns}
+    info = {"path": str(path), "name": "", "display_name": None, "brief": None, "category": "", "keywords": [], "prompt_keyword": "", "required_models": [], "optional_models": [], "config_fields": [], "readme": "", "has_ui": False, "mtime": path.stat().st_mtime_ns}
     try:
         info["readme"] = _module_readme(path.read_text(encoding="utf-8"))
     except OSError:
@@ -90,6 +91,7 @@ def _introspect_trick_file(path: Path) -> dict:
                     info["name"] = name
                     info["display_name"] = getattr(obj, "__display_name__", None) or name
                     info["required_models"] = list(getattr(obj, "required_models", []) or [])
+                    info["optional_models"] = list(getattr(obj, "optional_models", []) or [])
                     info["has_ui"] = obj.has_ui()
                     info["brief"] = getattr(obj, "__brief__", "")
                     info["category"] = getattr(obj, "__category__", "") or ""
@@ -120,12 +122,12 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
         content = (gui_dir / "index.html").read_text()
         # The stylesheet is a separate file the browser caches on its own, so
         # name it by its modification time: a changed file is a new URL.
-        css = gui_dir / "styles.css"
-        try:
-            content = content.replace('href="/static/styles.css"',
-                                      f'href="/static/styles.css?v={int(css.stat().st_mtime)}"', 1)
-        except OSError:
-            pass
+        for attr, name in (("href", "styles.css"), ("src", "stream.js")):
+            try:
+                v = int((gui_dir / name).stat().st_mtime)
+                content = content.replace(f'{attr}="/static/{name}"', f'{attr}="/static/{name}?v={v}"', 1)
+            except OSError:
+                pass
         return Response(content=content, media_type="text/html", headers=NO_STORE)
     app.add_route("/gui", gui_page, methods=["GET"])
     app.add_route("/", gui_page, methods=["GET"])
@@ -136,9 +138,13 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
     app.add_route("/docs", docs_page, methods=["GET"])
 
     async def help_page(request: Request) -> Response:
-        readme = Path(__file__).resolve().parent / "README.md"
-        text = readme.read_text(encoding="utf-8")
-        return Response(content=text, media_type="text/plain")
+        # Installed, the README is copied into the package (pyproject's
+        # force-include); run from a checkout (./petsitter), it's at the repo root.
+        here = Path(__file__).resolve().parent
+        for readme in (here / "README.md", here.parent.parent / "README.md"):
+            if readme.is_file():
+                return Response(content=readme.read_text(encoding="utf-8"), media_type="text/plain")
+        return Response(content="petsitter's README wasn't found.", media_type="text/plain", status_code=404)
     app.add_route("/api/help", help_page, methods=["GET"])
 
     async def gui_info(request: Request) -> Response:
@@ -211,6 +217,15 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
             page = trick.ui_html() or ""
         except OSError as e:
             return JSONResponse({"error": f"couldn't read the live page: {e}"}, status_code=500)
+        # Its EventSource("events") then goes over the browser's one shared
+        # stream instead of costing a connection of its own (gui/stream.js).
+        try:
+            v = int((gui_dir / "stream.js").stat().st_mtime)
+        except OSError:
+            v = 0
+        tag = f'<script src="/static/stream.js?v={v}"></script>'
+        m = re.search(r"<head[^>]*>", page, re.I)
+        page = page[:m.end()] + tag + page[m.end():] if m else tag + page
         return Response(content=page, media_type="text/html", headers=NO_STORE)
     app.add_route("/api/tricks/ui/{tid}", gui_trick_ui, methods=["GET"])
     app.add_route("/api/tricks/ui/{tid}/", gui_trick_ui, methods=["GET"])
@@ -242,6 +257,121 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
         return StreamingResponse(event_generator(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache"})
     app.add_route("/api/tricks/ui/{tid}/events", gui_trick_ui_events, methods=["GET"])
+
+    # ---- One stream for the whole dashboard --------------------------------
+    # A browser holds at most 6 connections to one host (HTTP/1.1, which is all
+    # uvicorn speaks), shared by every tab. Each dashboard tab used to keep two
+    # or three event streams open (logs, pause, a Live page), so two or three
+    # tabs filled all six and every other request -- page loads, /api calls --
+    # queued behind them. Now one stream carries every topic, and the browser
+    # shares it between all its tabs (gui/stream-worker.js).
+    #
+    #   GET  /api/stream             -> SSE; first event {"sid": ...}, then
+    #                                   {"topic": ..., "data": ...} per message
+    #   POST /api/stream/<sid>       {"subscribe": [...], "unsubscribe": [...]}
+    #
+    # Topics: "logs", "pause", "live:<extension id>". Subscribing sends the
+    # topic's backlog first: recent log entries, the pause state, or the Live
+    # feed's history.
+    _streams: dict[str, dict] = {}
+
+    def _stream_unsubscribe(state: dict, topic: str) -> None:
+        state["topics"].discard(topic)
+        if topic == "logs" and state.get("log_q") is not None:
+            if _log_capture:
+                _log_capture.remove_sse_client(state["log_q"])
+            state["log_q"] = None
+        elif topic == "pause" and state.get("pause_q") is not None:
+            _pause_clients.discard(state["pause_q"])
+            state["pause_q"] = None
+        elif topic.startswith("live:"):
+            state["cursors"].pop(topic[5:], None)
+
+    def _stream_subscribe(state: dict, topic: str) -> None:
+        if topic in state["topics"]:
+            return
+        if topic == "logs":
+            if _log_capture:
+                state["log_q"] = _log_capture.add_sse_client()
+                state["pending"] += [("logs", e) for e in _log_capture.get_logs(limit=200)]
+        elif topic == "pause":
+            q: asyncio.Queue = asyncio.Queue()
+            _pause_clients.add(q)
+            state["pause_q"] = q
+            state["pending"].append(("pause", {"paused": handler.paused}))
+        elif topic.startswith("live:"):
+            state["cursors"][topic[5:]] = 0   # history first, then live
+        else:
+            return
+        state["topics"].add(topic)
+
+    async def gui_stream(request: Request) -> Response:
+        import uuid as _uuid
+        sid = _uuid.uuid4().hex[:12]
+        state = {"topics": set(), "pending": [], "cursors": {}, "log_q": None, "pause_q": None}
+        _streams[sid] = state
+
+        def msg(topic, data) -> str:
+            return f"data: {json.dumps({'topic': topic, 'data': data}, default=str)}\n\n"
+
+        async def event_generator():
+            from petsitter.server import is_shutting_down
+            idle = 0.0
+            try:
+                yield f"data: {json.dumps({'sid': sid})}\n\n"
+                while True:
+                    out = []
+                    pending, state["pending"] = state["pending"], []
+                    out += [msg(t, d) for t, d in pending]
+                    q = state.get("log_q")
+                    while q is not None and not q.empty():
+                        out.append(msg("logs", q.get_nowait()))
+                    q = state.get("pause_q")
+                    if q is not None and not q.empty():
+                        while not q.empty():
+                            q.get_nowait()
+                        out.append(msg("pause", {"paused": handler.paused}))
+                    for tid, cursor in list(state["cursors"].items()):
+                        trick = _trick_by_id(tid)
+                        if trick is None:
+                            continue
+                        for cursor, event in trick.live_feed.since(cursor):
+                            out.append(msg("live:" + tid, event))
+                        state["cursors"][tid] = cursor
+                    for line in out:
+                        yield line
+                    idle = 0.0 if out else idle + 0.2
+                    if idle >= 15:
+                        idle = 0.0
+                        yield ": keepalive\n\n"
+                    if is_shutting_down() or await request.is_disconnected():
+                        break
+                    await asyncio.sleep(0.2)
+            except asyncio.CancelledError:
+                pass
+            finally:
+                for topic in list(state["topics"]):
+                    _stream_unsubscribe(state, topic)
+                _streams.pop(sid, None)
+
+        return StreamingResponse(event_generator(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache"})
+    app.add_route("/api/stream", gui_stream, methods=["GET"])
+
+    async def gui_stream_topics(request: Request) -> Response:
+        state = _streams.get(request.path_params.get("sid", ""))
+        if state is None:
+            return JSONResponse({"error": "no such stream"}, status_code=404)
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        for topic in data.get("unsubscribe") or []:
+            _stream_unsubscribe(state, str(topic))
+        for topic in data.get("subscribe") or []:
+            _stream_subscribe(state, str(topic))
+        return JSONResponse({"topics": sorted(state["topics"])})
+    app.add_route("/api/stream/{sid}", gui_stream_topics, methods=["POST"])
 
     async def gui_trick_ui_action(request: Request) -> Response:
         trick = _trick_by_id(request.path_params.get("tid", ""))
@@ -628,71 +758,4 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
         return JSONResponse({"success": True, "name": name})
     app.add_route("/api/tricksets/create", gui_trickset_create, methods=["POST"])
 
-    async def gui_logs_sse(request: Request) -> StreamingResponse:
-        level = request.query_params.get("level", "")
 
-        async def event_generator():
-            if not _log_capture:
-                return
-            q = _log_capture.add_sse_client()
-            try:
-                for entry in _log_capture.get_logs(level=level, limit=200):
-                    if level and entry["level"] != level.upper():
-                        continue
-                    yield f"data: {json.dumps(entry)}\n\n"
-                # Poll in short steps rather than blocking for 30s, so that a
-                # Ctrl-C is noticed while uvicorn is still waiting politely.
-                from petsitter.server import is_shutting_down
-                idle = 0.0
-                while True:
-                    if is_shutting_down() or await request.is_disconnected():
-                        break
-                    try:
-                        entry = await asyncio.wait_for(q.get(), timeout=1.0)
-                    except asyncio.TimeoutError:
-                        idle += 1.0
-                        if idle >= 30:
-                            idle = 0.0
-                            yield ": keepalive\n\n"
-                        continue
-                    idle = 0.0
-                    if level and entry["level"] != level.upper():
-                        continue
-                    yield f"data: {json.dumps(entry)}\n\n"
-            except asyncio.CancelledError:
-                pass
-            finally:
-                _log_capture.remove_sse_client(q)
-
-        return StreamingResponse(event_generator(), media_type="text/event-stream")
-    app.add_route("/api/logs", gui_logs_sse, methods=["GET"])
-
-    async def gui_pause_sse(request: Request) -> StreamingResponse:
-        from petsitter.server import is_shutting_down
-
-        async def event_generator():
-            q: asyncio.Queue = asyncio.Queue()
-            _pause_clients.add(q)
-            try:
-                yield f"data: {json.dumps({'paused': handler.paused})}\n\n"
-                idle = 0.0
-                while True:
-                    if is_shutting_down() or await request.is_disconnected():
-                        break
-                    try:
-                        await asyncio.wait_for(q.get(), timeout=1.0)
-                    except asyncio.TimeoutError:
-                        idle += 1.0
-                        if idle >= 30:
-                            idle = 0.0
-                            yield ": keepalive\n\n"
-                        continue
-                    idle = 0.0
-                    yield f"data: {json.dumps({'paused': handler.paused})}\n\n"
-            except asyncio.CancelledError:
-                pass
-            finally:
-                _pause_clients.discard(q)
-
-        return StreamingResponse(event_generator(), media_type="text/event-stream")
-    app.add_route("/api/pause/stream", gui_pause_sse, methods=["GET"])

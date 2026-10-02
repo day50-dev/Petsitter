@@ -17,11 +17,12 @@ written. The original wording never leaves petsitter.
 Nothing to type. A message is only sent for a rewrite when it might have
 swearing, insults or ALL-CAPS SHOUTING in it (shouting used to help with older
 models; with current ones it tends to hurt); anything else goes to the model exactly as you wrote
-it. The rewrite removes them even where you quote them ("what do you make of:
-..."), and leaves a message alone if nothing in it was actually rude.
+it.
 
-To send the rewrite to a separate, cheaper model, add a `politeify` entry to your
-models; otherwise it uses the `default` model.
+The rewrite goes to a model named `rephraser` if you add one under Models;
+otherwise to your `default` model. Any chat model works, no tool support or
+uncensored model needed; an uncensored one keeps the most of your urgency
+(`qwen3.5-9b-uncensored` works well).
 
 ## How it works
 
@@ -29,14 +30,23 @@ models; otherwise it uses the `default` model.
   blocks): the classic LDNOOBW list (`data/profanity-en.txt`, CC BY 4.0) plus
   common swearing and name-calling it leaves out, and three or more all-caps
   words in a row. A match only means "worth a
-  look": that message gets one `callmodel_sync` call with a rewrite-only
-  instruction, and the model decides what, if anything, to change. Nothing is
+  look": that message goes to the `rephraser` model, asked to swap foul
+  language and rudeness for professional language while keeping the
+  message's sentiment, intent and urgency.
+- That model gets a conversation that has already got going: it was asked for
+  a rewrite sent back as a code block, "agreed" (noting it won't swear, but
+  will rephrase swearing), and was then handed the draft in a code block. A
+  small model given a message as a plain user turn tends to answer or refuse
+  it; one that has already agreed to send back only a code block sends back the
+  rewrite. Only the code block counts: a reply without one is never sent on,
+  and the message goes as written. No tool support is needed. Nothing is
   masked or blocked. Messages that don't match, or are shorter than the
   `min_length` setting (default 12 characters), pass through untouched.
-- Every rewrite is cached (original -> rewritten, last 1000). Your tool resends
+- Every rewrite is cached (original -> rewritten, the 200 most recently used). Your tool resends
   the whole conversation each turn, so earlier messages are swapped from the
   cache: the model keeps seeing the polite versions, with no extra calls.
-- Model config: the `politeify` modelset entry if present, else `default`.
+- Model: the `rephraser` entry in your models if present (an older
+  `politeify` entry also works), else `default`.
 - If the rewrite call fails or returns nothing, the message is sent unchanged
   (a warning is logged). Each rephrasing, and each failure, shows up on the
   Live tab.
@@ -52,19 +62,47 @@ from petsitter.trick import Trick, callmodel_sync, get_model_config
 
 logger = logging.getLogger("petsitter")
 
+# The model is handed a conversation that has already got going: the user
+# asked for a rewrite returned as a code block, the assistant agreed (and
+# noted it won't swear, but will rephrase swearing), and the user has just
+# pasted the draft. A small model given a message as a plain user turn tends
+# to answer it ("Yes, Dick Van Dyke played Bert") or refuse it; one that has
+# already agreed to send back only a code block sends back the rewrite. The
+# note lets a model that won't produce profanity still rework it.
 REWRITE_INSTRUCTION = (
-    "Rewrite the following message to be polite and professional in tone. "
-    "Remove every swear word, slur and insult wherever it appears, including "
-    "inside quotation marks, examples, or text the message asks about: describe "
-    "such words generically instead (for example \"an insult with profanity\"), "
-    "never repeat them. Write ALL-CAPS shouting in normal case (acronyms and "
-    "identifiers stay as they are). Keep the meaning, intent, and every factual or technical "
-    "detail unchanged -- do not answer it, comment on it, soften the actual "
-    "request, or add anything of your own. Preserve code blocks, file paths, "
-    "commands, and technical terms exactly as written. Reply with ONLY the "
-    "rewritten message and nothing else -- no preamble, no quotes around it. If "
-    "nothing in it is actually rude, reply with the message exactly as it is."
+    "can you help me rephrase the following message (the prompt)? While keeping the "
+    "sentiments, intentions and urgency of the message intact, swap out foul language "
+    "or rude behavior with more professional language, and keep code, file paths and "
+    "commands exactly as written. Send it back to me in markdown braces like ```"
 )
+AGREED = (
+    "Sure, tell me what you'd like me to rephrase and I will send it back without any "
+    "commentary, as a code block in braces like this ```. As a note, I'm not allowed to "
+    "generate profane language, but I'll be happy to rephrase any profanity in ways that "
+    "capture its sentiment while maintaining professionalism."
+)
+
+
+def _rewriter_conversation(draft: str) -> list:
+    fence = "```"
+    while fence in draft:   # so code in the draft can't close the block early
+        fence += "`"
+    return [
+        {"role": "user", "content": REWRITE_INSTRUCTION},
+        {"role": "assistant", "content": AGREED},
+        {"role": "user", "content": f"here is the original message to rephrase\n{fence}\n{draft}\n{fence}"},
+    ]
+
+
+_FENCED_RE = re.compile(r"(`{3,})[^\n]*\n(.*?)\n?\1", re.S)
+
+
+def _rephrased(reply: dict) -> str | None:
+    """The rewrite: the first code block in the reply, if there is one."""
+    m = _FENCED_RE.search(reply.get("content") or "")
+    text = m.group(2).strip() if m else ""
+    return text or None
+
 
 # Whether a message is worth sending for a rewrite. It's only a hint: the
 # rewriter is free to leave a message alone ("Dick Van Dyke" trips the list, and
@@ -111,6 +149,7 @@ class PoliteifyTrick(Trick):
     __brief__ = "Rewrites the user's message to be more polite before it reaches the model"
     __display_name__ = "Politeify"
     __category__ = "Output & Style"
+    optional_models = ["rephraser"]
     config_fields = [
         {
             "key": "min_length",
@@ -128,7 +167,7 @@ class PoliteifyTrick(Trick):
     # whole conversation every turn, so without this every earlier message
     # would reach the model in its original wording again (or cost a fresh
     # rewrite each time). Bounded, oldest dropped first.
-    CACHE_SIZE = 1000
+    CACHE_SIZE = 200
 
     def __init__(self, min_length: int = 12):
         self.min_length = min_length
@@ -165,19 +204,22 @@ class PoliteifyTrick(Trick):
     def _rewrite(self, original: str) -> str | None:
         cfg = self._model_config()
         try:
-            rewritten_ctx = callmodel_sync(
-                [{"role": "system", "content": REWRITE_INSTRUCTION}],
-                original,
+            reply = callmodel_sync(
+                _rewriter_conversation(original),
                 model_url=cfg.get("url") or "",
                 model_name=cfg.get("model") or "",
                 api_key=cfg.get("key") or "",
-            )
+            )[-1]
         except Exception as e:
             logger.warning("politeify: rewrite failed, passing message through unchanged: %s", e)
             self.report("Couldn't rephrase a message; sent it as written", error=str(e)[:200])
             return None
-        rewritten = rewritten_ctx[-1].get("content", "").strip() if rewritten_ctx else ""
+        rewritten = _rephrased(reply)
         if not rewritten:
+            # No code block: it answered or refused instead. Never send that on.
+            said = (reply.get("content") or "").strip()
+            self.report("The rephraser didn't rewrite a message; sent it as written",
+                        draft=original[:300], it_said=said[:300])
             return None
         with self._cache_lock:
             self._cache[original] = rewritten
@@ -196,11 +238,14 @@ class PoliteifyTrick(Trick):
 
     @staticmethod
     def _model_config() -> dict:
-        """A dedicated "politeify" modelset entry if one exists, else "default"."""
-        try:
-            return get_model_config("politeify")
-        except KeyError:
-            return get_model_config("default")
+        """The "rephraser" model if one is set up (or an older "politeify"
+        entry), else "default"."""
+        for key in ("rephraser", "politeify"):
+            try:
+                return get_model_config(key)
+            except KeyError:
+                continue
+        return get_model_config("default")
 
     @staticmethod
     def _last_user_index(context: list) -> int | None:

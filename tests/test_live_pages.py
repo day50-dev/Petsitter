@@ -71,9 +71,10 @@ def test_politeify_rewrites_once_and_reuses_for_history(monkeypatch):
     from petsitter.tricks import politeify
     calls = []
 
-    def fake_callmodel(ctx, msg, **kw):
-        calls.append(msg)
-        return ctx + [{"role": "user", "content": msg}, {"role": "assistant", "content": "POLITE: " + msg}]
+    def fake_callmodel(ctx, msg="", **kw):
+        draft = ctx[-1]["content"].split("```\n", 1)[1].rsplit("\n```", 1)[0]
+        calls.append(draft)
+        return ctx + [{"role": "assistant", "content": "```\nPOLITE: " + draft + "\n```"}]
     monkeypatch.setattr(politeify, "callmodel_sync", fake_callmodel)
     monkeypatch.setattr(politeify.PoliteifyTrick, "_model_config", staticmethod(lambda: {}))
     t = politeify.PoliteifyTrick()
@@ -226,3 +227,9 @@ def test_playground_passes_its_tools_and_tool_turns():
     assert r.status_code == 200
     assert seen["tools"] == tools and seen["messages"] == msgs
     assert r.json()["tool_calls"][0]["function"]["name"] == "get_table"
+
+
+def test_help_serves_the_readme_from_a_checkout():
+    client = _client(Trick())
+    r = client.get("/api/help")
+    assert r.status_code == 200 and "petsitter" in r.text.lower()

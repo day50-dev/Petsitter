@@ -154,6 +154,7 @@ def _introspect(path: Path) -> dict:
         "keywords": [],
         "prompt_keyword": "",
         "required_models": ["default"],
+        "optional_models": [],
         "config_fields": [],
         "mtime": path.stat().st_mtime_ns,
     }
@@ -172,6 +173,7 @@ def _introspect(path: Path) -> dict:
                     info["keywords"] = list(getattr(obj, "keywords", []) or [])
                     info["prompt_keyword"] = getattr(obj, "prompt_keyword", "") or ""
                     info["required_models"] = list(getattr(obj, "required_models", ["default"]) or ["default"])
+                    info["optional_models"] = list(getattr(obj, "optional_models", []) or [])
                     info["config_fields"] = list(getattr(obj, "config_fields", []) or [])
                     break
     except Exception:

@@ -237,3 +237,8 @@ class XmlToolTrick(Trick):
 | Validate and fix model output | `post_hook` | Check `context[-1]["content"]`, retry with `callmodel` |
 | Detect tool calls in text output | `post_hook` | Parse content, set `context[-1]["tool_calls"]` |
 | Declare capabilities | `info` | Add keys to capabilities dict |
+| Rewrite the reply but let it stream | `post_hook` + `needs_window = N` | Must be right on any stretch of the reply, and change nothing if run twice (`no_emdash.py`) |
+| Only watch the reply | `post_hook` + `needs_window = 0` | Runs after the reply is sent; changes are ignored (`logger.py`) |
+| Act on an inline command | `handle_prompt_keyword` + `prompt_keyword` | Return a message to answer it without the model |
+| Show what it did | `self.report(...)` | Appears on the extension's Live tab |
+| Flag a broken setup | `problems()` | Return sentences saying how to fix it; the dashboard shows a "!" |

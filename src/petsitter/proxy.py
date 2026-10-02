@@ -15,6 +15,7 @@ import httpx
 from petsitter.context import append_to_system_prompt
 from petsitter.discovered import DiscoveredPrograms
 from petsitter.observability import (
+    current_request_id,
     current_request_headers,
     current_user_agent,
     get_logger,
@@ -885,7 +886,7 @@ class ProxyHandler:
 
     def _begin_chat(self, payload: dict, x_title: str):
         from types import SimpleNamespace
-        rid = new_request_id()
+        rid = current_request_id() or new_request_id()
         return SimpleNamespace(
             rid=rid, rid_token=set_request_id(rid), ts_token=None, tricks=[],
             meta_token=start_request_meta(
@@ -1363,7 +1364,7 @@ class ProxyHandler:
 
     def _begin_messages(self):
         from types import SimpleNamespace
-        rid = new_request_id()
+        rid = current_request_id() or new_request_id()
         return SimpleNamespace(rid=rid, rid_token=set_request_id(rid), meta_token=None,
                                ts_token=None, tricks=[])
 

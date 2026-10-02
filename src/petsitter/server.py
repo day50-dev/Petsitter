@@ -512,7 +512,8 @@ class _NormalizeV1Path:
 
     async def __call__(self, scope, receive, send):
         if scope.get("type") == "http":
-            from petsitter.observability import set_client_addr, set_request_headers, set_user_agent
+            from petsitter.observability import (new_request_id, set_client_addr, set_request_headers,
+                                                 set_request_id, set_user_agent)
             client = scope.get("client") or ("", 0)
             set_client_addr(f"{client[0]}:{client[1]}" if client and client[0] else "")
             raw = scope.get("headers") or []
@@ -521,6 +522,9 @@ class _NormalizeV1Path:
             set_request_headers((k.decode("latin-1", "replace"), v.decode("latin-1", "replace")) for k, v in raw)
             m = _API_PATH_RE.match(scope.get("path", ""))
             if m:
+                # The request's ID, from the moment it arrives until its reply
+                # is sent: everything logged about it carries this one.
+                set_request_id(new_request_id())
                 path = "/v1/" + m.group(1)
                 if path != scope["path"]:
                     scope = dict(scope, path=path, raw_path=path.encode())

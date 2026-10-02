@@ -33,6 +33,13 @@ def new_request_id() -> str:
     return uuid.uuid4().hex[:8]
 
 
+def current_request_id() -> str:
+    """The ID of the request being handled, or "" outside one. Assigned the
+    moment a request arrives and kept for its whole life, so every log line
+    about it (inbound and outbound, any trick's) can carry the same one."""
+    return _request_id.get()
+
+
 def set_request_id(rid: str) -> contextvars.Token:
     return _request_id.set(rid)
 

@@ -11,7 +11,7 @@ from typing import Any
 
 import httpx
 
-from petsitter.observability import get_logger, request_tag
+from petsitter.observability import current_request_id, get_logger, request_tag
 
 
 _model_url = ""
@@ -418,6 +418,14 @@ class Trick:
     # it whole. The channel uses the largest window of its tricks; see
     # reply_window.py. Only matters for tricks with a post_hook.
     needs_window: int = -1
+
+    @property
+    def request_id(self) -> str:
+        """The ID of the request being handled ("" outside one). The same from
+        the moment the request arrives until its reply goes back, so a trick
+        that logs can tag every line with it and lines from different places
+        can be put side by side."""
+        return current_request_id()
 
     def problems(self) -> list[str]:
         """What's wrong with how this trick is set up, as sentences a person

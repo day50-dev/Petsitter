@@ -1,6 +1,8 @@
 # Writing your own trick
 
-The four hooks, the data each one gets, and the lifecycle around them.
+The hooks, the data each one gets, and everything around them: settings, the
+Live tab, streaming, problems, and testing. (The dashboard calls tricks
+*extensions* and tricksets *channels*; the code uses the older names.)
 
 [← back to the README](../README.md)
 
@@ -28,7 +30,17 @@ Tricks also have lifecycle hooks that run outside the request pipeline: `install
 Here is a minimal trick that stops the model from using em-dashes (the long dash character that LLMs love to overuse) and replaces them with regular hyphens:
 
 ```python
-"""No Em-Dash trick - replaces em-dashes with hyphens."""
+"""Replaces em-dashes in the model's replies with plain hyphens.
+
+## How to use
+
+Install it. Nothing to type; it works on every reply in the channel.
+
+## How it works
+
+- `system_prompt` asks the model not to use them; `post_hook` fixes any that
+  slip through, as the reply streams.
+"""
 
 from petsitter.trick import Trick
 
@@ -37,22 +49,29 @@ EMDASH = "\u2014"
 class NoEmDashTrick(Trick):
     __brief__ = "Replaces em-dashes with hyphens in model responses"
     __display_name__ = "No Em-Dash"
+    __category__ = "Output & Style"
+    needs_window = 1   # one character at a time, so the reply still streams
 
     def system_prompt(self, to_add: str) -> str:
         return "Do NOT use em-dashes. Use a regular hyphen (-) instead."
 
     def post_hook(self, context: list) -> list:
-        if not context:
-            return context
-        last = context[-1]
-        content = last.get("content", "")
-        if EMDASH in content:
-            content = content.replace(EMDASH, "-")
-            last["content"] = content
+        last = context[-1] if context else {}
+        content = last.get("content")
+        if isinstance(content, str) and EMDASH in content:
+            last["content"] = content.replace(EMDASH, "-")
+            self.report(f"Replaced {content.count(EMDASH)} em-dashes in a reply")
         return context
 ```
 
-The `Trick` class has four optional request hooks and optional keyword activation:
+The module docstring is the extension's page in the dashboard: its first line
+is the tagline under the name, and the rest is rendered as Markdown. Write it
+for the person installing the extension: what it does, then `## How to use`,
+then `## How it works`. `__brief__` is the one-line summary in lists and
+`__category__` groups it with similar extensions.
+
+A trick has five optional request hooks (the four below, plus
+[`handle_prompt_keyword`](#prompts)) and optional keyword activation:
 
 ### `system_prompt(to_add: str) -> str`
 
@@ -85,6 +104,18 @@ class SwapHarnessTrick(Trick):
 **Parameters:**
 - `context`: List of message dicts (`[{"role": "user", "content": "..."}]`)
 - `params`: Request parameters including `tools`, `temperature`, etc.
+
+A message's `content` is usually a string, but it can also be `None` (an
+assistant turn that only calls tools) or a list of parts
+(`[{"type": "text", "text": "..."}, {"type": "image_url", ...}]`), which some
+clients send. A tool's result arrives as
+`{"role": "tool", "tool_call_id": "...", "content": "..."}`. Anthropic-style
+requests (Claude Code) are converted to this same shape before any hook runs,
+so one trick works for every client.
+
+Don't keep per-request state on `self`: one trick instance serves every
+concurrent request in its channel. Carry it to `post_hook` in
+[`request_meta()`](#request-metadata).
 
 **Example:**
 ```python
@@ -144,6 +175,31 @@ def info(self, capabilities: dict) -> dict:
     return capabilities
 ```
 
+## Settings
+
+Give a trick settings with `config_fields`, and the dashboard shows a form for
+them (the extension's **Settings** button). Values arrive as attributes on
+`self`:
+
+```python
+class LoggerTrick(Trick):
+    config_fields = [
+        {"key": "path", "label": "JSONL log file", "type": "path",
+         "default": "~/.cache/petsitter/traffic.jsonl",
+         "description": "Where to append one line per request."},
+    ]
+
+    def pre_hook(self, context, params):
+        path = getattr(self, "path", None) or "~/.cache/petsitter/traffic.jsonl"
+        ...
+```
+
+Each field has a `key` (the attribute name) and `label`, and optionally a
+`description`, a `type` (`"text"`, `"number"`, `"boolean"` or `"path"`), a
+`default`, and `required`. Override `configure(config)` (calling
+`super().configure(config)`) to react when a value changes. The values in use
+are shown on the extension's page and on its Live tab.
+
 ## Live page
 
 Every trick gets a **Live** tab on its extension page in the dashboard, and
@@ -202,6 +258,16 @@ fetch("action", {method: "POST", headers: {"Content-Type": "application/json"},
   built-in demo) and `tricks/secrets_protector.py` + `secrets_protector.html`
   (a small activity log).
 
+## The request ID
+
+`self.request_id` is the ID of the request being handled. Petsitter assigns it
+the moment a request arrives and keeps it until the reply goes back, so it's
+the same in `pre_hook`, `post_hook` and anything they log, and the same one
+petsitter's own log lines carry (`[ab12cd34] ...`). Tag your log lines with it
+so lines about one request, from different places, can be lined up: the
+Traffic Logger does, so two of them (one first in a channel, one last) show
+exactly what the tricks in between changed. It's `""` outside a request.
+
 ## Reporting problems
 
 If a trick can't do all it says (a missing optional dependency, a setting
@@ -231,7 +297,7 @@ A reply streams to the client as the model writes it. A trick with a
 |---|---|---|
 | `-1` (default) | The whole reply. It's held until complete. | Code Validator, JSON mode |
 | `0` | None. The `post_hook` only looks, and runs once the reply has been sent, on the reassembled reply. What it changes is ignored. | Traffic Logger, Tool Monitor |
-| `N` | The last `N` characters. The reply streams with only those held back. | No em-dash (`1`), Secrets Protector (its longest stand-in) |
+| `N` | The last `N` characters. The reply streams with only those held back. | No em-dash (`1`), Secrets Protector (`52`, the length of one stand-in) |
 
 The channel uses the largest window among its tricks, and `-1` wins outright.
 With a window of `N`, the held-back tail plus the newly arrived text goes through
@@ -248,8 +314,8 @@ A trick with a window must meet two conditions:
 - **Idempotent:** run again on its own output, it changes nothing, because the
   held-back tail goes through more than once.
 
-`needs_window` can be a property when the size depends on state. Secrets
-Protector's grows with the longest stand-in it has issued.
+`needs_window` can be a property when the size depends on state the trick has
+at the start of the reply (after `pre_hook`).
 
 While a reply is held whole, petsitter sends heartbeats so the client's timeout
 doesn't fire during a long generation. These are SSE comment lines on
@@ -291,6 +357,33 @@ Tricks are free to add their own keys, and should, whenever they need to carry s
 **Do not use instance attributes for per-request state.** A trick object is shared across every concurrent request in its trickset, so a `self._something` written in `pre_hook` can be overwritten by a different request before `post_hook` reads it. Reserve instance attributes for configuration and for state that is deliberately long-lived — caches, counters, tallies.
 
 Outside a request — in a lifecycle hook, or a direct call from a test — `request_meta()` returns an inert empty dict, so reads are safe and writes are discarded.
+
+## Testing
+
+- **Unit tests.** Instantiate the trick and call its hooks with plain lists
+  of message dicts; `tests/` has plenty to copy. Wrap code that reads
+  `request_meta()` in `start_request_meta()` / `reset_request_meta(token)`.
+- **Try it.** In the dashboard, open the channel and click **Try it**. Every
+  reply shows a pill per extension, lit when it changed something, and the
+  extension's **Live** tab shows what it `report()`ed.
+- **Tool calls.** Try it has a **Table** the model can use through three
+  tools: `get_table()`, `get_value(key)` and `set_value(key, value)`. The
+  panel runs them itself. Put values in the table and ask the model to read or
+  change them: that sends your trick tool results (`role: "tool"` messages)
+  and the model's tool calls without needing a real agent. For example, with
+  Secrets Protector on, put a password in the table and ask the model to copy
+  it to another key. The model only ever sees a stand-in, and the copy holds
+  the real value.
+
+## Loading it
+
+```bash
+pet add _default path/to/my_trick.py          # into the Default channel
+curl -X POST localhost:8080/readconfig         # a running petsitter picks it up
+```
+
+Or, with petsitter running: `POST /api/tricks/load` with
+`{"path": "path/to/my_trick.py", "trickset": "_default"}`.
 
 ## Lifecycle Hooks
 

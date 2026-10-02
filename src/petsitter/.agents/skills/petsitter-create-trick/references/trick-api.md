@@ -6,16 +6,41 @@
 class Trick:
     __brief__: str = ""
     __display_name__: str = ""
+    __category__: str = ""
     keywords: list[str] = []
     required_models: list[str] = ["default"]
+    prompt_keyword: str = ""
+    strip_prompt_keyword: bool = True
+    config_fields: list[dict] = []
+    needs_window: int = -1
+    ui_page: str = ""
+    replace_system_prompt: bool = False
 
+    # request hooks
+    def handle_prompt_keyword(self, request: str) -> dict | None: ...
     def system_prompt(self, to_add: str) -> str: ...
     def pre_hook(self, context: list, params: dict) -> list: ...
     def post_hook(self, context: list) -> list: ...
     def info(self, capabilities: dict) -> dict: ...
+
+    # lifecycle hooks
+    def install(self) -> None: ...
+    def startup(self) -> None: ...
+    def shutdown(self) -> None: ...
+    def uninstall(self) -> None: ...
+
+    # settings, the dashboard, and diagnostics
+    def configure(self, config: dict) -> None: ...
+    def problems(self) -> list[str]: ...
+    def report(self, message: str, **details) -> None: ...
+    def publish(self, event) -> None: ...
+    def ui_action(self, data) -> Any: ...
+    request_id: str    # property: this request's ID
 ```
 
 All hooks default to returning their input unchanged. Override only the hooks you need.
+The module's docstring is the extension's page in the dashboard: its first line
+is the tagline, the rest is Markdown (`## How to use`, `## How it works`).
 
 ### Class attributes
 
@@ -23,8 +48,15 @@ All hooks default to returning their input unchanged. Override only the hooks yo
 |-----------|------|-------------|
 | `__brief__` | `str` | One-line summary shown in the dashboard GUI. Every trick should set this. |
 | `__display_name__` | `str` | Human-readable name for the GUI. Falls back to the class name if empty. |
+| `__category__` | `str` | Grouping in the dashboard's extension list. Reuse an existing one if it fits. |
 | `keywords` | `list[str]` | If set, the trick only activates when at least one keyword appears in the user's message. Keywords are stripped from the message before sending to the model. |
 | `required_models` | `list[str]` | Model keys this trick needs from a modelset. Default is `["default"]`. Multi-model tricks override with additional keys like `["default", "thinker", "toolcall"]`. |
+| `prompt_keyword` | `str` | Registers `(keyword: request)` in user messages; see Prompt keywords. |
+| `strip_prompt_keyword` | `bool` | `False` leaves the pattern in the message for the trick's own `pre_hook` to rewrite. |
+| `config_fields` | `list[dict]` | Settings the dashboard shows a form for; see Settings. |
+| `needs_window` | `int` | How much of a streamed reply `post_hook` needs at once; see Streaming replies. |
+| `ui_page` | `str` | An HTML file next to the trick, to replace the standard Live page. |
+| `replace_system_prompt` | `bool` | `True` makes `system_prompt`'s return value replace the whole system prompt instead of being appended. |
 
 ### `system_prompt(to_add: str) -> str`
 
@@ -53,6 +85,53 @@ Called after the upstream model responds, with the assistant's response appended
 - Use this to validate output (e.g. JSON parsing), retry with feedback via `callmodel`, detect and reformat tool calls, or transform the response content.
 
 Note that `post_hook` is not given `params`. Anything it needs to know about the request that produced the response comes from the request metadata channel below — **not** from state cached on `self`.
+
+## Prompt keywords
+
+`prompt_keyword = "mycommand"` lets the user type `(mycommand: some request)`
+anywhere in a message. The framework finds it, removes it before the model sees
+it, and calls:
+
+```python
+def handle_prompt_keyword(self, request: str) -> dict | None:
+    return {"role": "assistant", "content": f"You asked: {request}"}
+```
+
+- Return a message dict and it becomes the reply; the model isn't called.
+- Return `None` and the request carries on to the model without the pattern.
+- `(mycommand)` and `(mycommand:)` give an empty `request`.
+- `(mycommand=|value with ) parens|)` takes everything between a delimiter of
+  the user's choosing, verbatim.
+- With `strip_prompt_keyword = False` the pattern stays where the user typed
+  it, on every turn, and `handle_prompt_keyword` isn't called: the trick's own
+  `pre_hook` rewrites it in place (Secrets Protector replaces
+  `(secret: value)` with a stand-in this way). `find_prompt_keyword_patterns`
+  from `petsitter.trick` is the parser the framework uses.
+
+## Settings
+
+```python
+config_fields = [
+    {"key": "path", "label": "JSONL log file", "type": "path",
+     "default": "~/.cache/petsitter/traffic.jsonl",
+     "description": "Where to append one line per request."},
+]
+```
+
+| Field key | Meaning |
+|---|---|
+| `key` (required) | The attribute name the value arrives as on `self` |
+| `label` (required) | Shown in the dashboard |
+| `description` | Help text under the field |
+| `type` | `"text"` (default), `"number"`, `"boolean"` or `"path"` |
+| `default` | Used when nothing is stored |
+| `required` | Whether a value must be given |
+
+Values are set as attributes by `configure(config)`, when the trick is loaded and
+whenever they change. Override `configure` (and call `super().configure(config)`)
+to react to a change, such as reloading a file. Read settings as
+`getattr(self, "path", default)` in hooks, since nothing may be stored yet. The
+values in use are shown on the extension's page and its Live tab.
 
 ## Live page (optional)
 
@@ -112,6 +191,16 @@ fetch("action", {method: "POST", headers: {"Content-Type": "application/json"},
   built-in demo) and `tricks/secrets_protector.py` + `secrets_protector.html`
   (a small activity log).
 
+## The request ID
+
+`self.request_id` is the ID of the request being handled. Petsitter assigns it
+the moment a request arrives and keeps it until the reply goes back, so it's
+the same in `pre_hook`, `post_hook` and anything they log, and the same one
+petsitter's own log lines carry (`[ab12cd34] ...`). Tag your log lines with it
+so lines about one request, from different places, can be lined up: the
+Traffic Logger does, so two of them (one first in a channel, one last) show
+exactly what the tricks in between changed. It's `""` outside a request.
+
 ## Reporting problems
 
 If a trick can't do all it says (a missing optional dependency, a setting
@@ -141,7 +230,7 @@ A reply streams to the client as the model writes it. A trick with a
 |---|---|---|
 | `-1` (default) | The whole reply. It's held until complete. | Code Validator, JSON mode |
 | `0` | None. The `post_hook` only looks, and runs once the reply has been sent, on the reassembled reply. What it changes is ignored. | Traffic Logger, Tool Monitor |
-| `N` | The last `N` characters. The reply streams with only those held back. | No em-dash (`1`), Secrets Protector (its longest stand-in) |
+| `N` | The last `N` characters. The reply streams with only those held back. | No em-dash (`1`), Secrets Protector (`52`, the length of one stand-in) |
 
 The channel uses the largest window among its tricks, and `-1` wins outright.
 With a window of `N`, the held-back tail plus the newly arrived text goes through
@@ -158,8 +247,8 @@ A trick with a window must meet two conditions:
 - **Idempotent:** run again on its own output, it changes nothing, because the
   held-back tail goes through more than once.
 
-`needs_window` can be a property when the size depends on state. Secrets
-Protector's grows with the longest stand-in it has issued.
+`needs_window` can be a property when the size depends on state the trick has
+at the start of the reply (after `pre_hook`).
 
 While a reply is held whole, petsitter sends heartbeats so the client's timeout
 doesn't fire during a long generation. These are SSE comment lines on
@@ -255,6 +344,25 @@ Each message is a dict:
 ```python
 {"role": "system" | "user" | "assistant" | "tool", "content": str}
 ```
+
+`content` isn't always a string. It can be `None` (an assistant turn that only
+calls tools) or a list of parts, which some clients send for text and images:
+
+```python
+{"role": "user", "content": [{"type": "text", "text": "what's this?"},
+                             {"type": "image_url", "image_url": {"url": "data:..."}}]}
+```
+
+A trick that reads or rewrites text should handle all three. A tool's result
+comes back as a `tool` message tied to the call by its id:
+
+```python
+{"role": "tool", "tool_call_id": "call_abc123", "content": "{\"rows\": 3}"}
+```
+
+Requests from Anthropic-style clients (Claude Code, on `/v1/messages`) are
+converted to this same shape before any hook runs, and back afterwards, so a
+trick only ever deals with one format.
 
 For tool calls, the assistant message may also contain:
 

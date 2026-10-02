@@ -24,8 +24,13 @@ everything after it, so put the logger first to be sure of a record.
 ## How it works
 
 - `pre_hook` writes the `request` record (payload, tools, messages, plus
-  `request_id`, `x_title`, `model`, `stream` from the request metadata);
+  `x_title`, `model`, `stream` from the request metadata);
   `post_hook` writes the `response` record. Both return the context untouched.
+- `request_id` is the ID petsitter gives a request the moment it arrives and
+  keeps until its reply goes back (`Trick.request_id`). Every line about one
+  request carries the same one, so with more than one logger in a channel
+  (one first, one last, to see what the tricks in between changed), or
+  alongside petsitter's own log, lines can be lined up by it.
 - If `path` is a directory, ends in `/`, or has no file extension, `traffic.jsonl`
   is written inside it. Parent directories are created on demand.
 - Appends are serialized with a module-level lock. Unserializable values are
@@ -90,7 +95,7 @@ class LoggerTrick(Trick):
             "trick": type(self).__name__,
             "event": "request",
             "direction": "out",
-            "request_id": meta.get("request_id", ""),
+            "request_id": self.request_id,
             "x_title": meta.get("x_title", ""),
             "model": meta.get("model", (params or {}).get("model", "")),
             "stream": meta.get("stream", (params or {}).get("stream", False)),
@@ -114,7 +119,7 @@ class LoggerTrick(Trick):
             "trick": type(self).__name__,
             "event": "response",
             "direction": "in",
-            "request_id": meta.get("request_id", ""),
+            "request_id": self.request_id,
             "x_title": meta.get("x_title", ""),
             "model": meta.get("model", ""),
             "messages": context,

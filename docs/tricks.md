@@ -47,7 +47,7 @@ Available Tricks list instead.
 
 ### Security
 
- * [Secrets Protector](#secrets-protector) - Detect and pseudonymize secrets/PII before they reach the model
+ * [Secrets Protector](#secrets-protector) - Hide passwords, API keys and personal details from the model, and put them back in its replies
 
 ### Agent
 
@@ -257,11 +257,20 @@ pet add mine context_monitor
 
 [tricks/secrets_protector.py](tricks/secrets_protector.py)
 
-Detects and pseudonymizes sensitive information before it reaches the model, then restores original values in the response:
+Finds secrets in what your tool sends, swaps each for an opaque stand-in like `__96178c403fd9__d4360d48-...` before the model sees it, and puts the real value back wherever the stand-in comes back: in the reply, and in the arguments of the model's tool calls.
 
-- **Detection** - regex patterns for API keys (OpenAI, Anthropic, AWS, Google, Stripe), tokens (JWT, GitHub, Slack, Bearer), credentials (database URLs, private keys), and PII (emails, phones, SSNs, credit cards, IPs)
-- **Format-preserving substitutes** - realistic replacements (e.g., `alice@example.com` → `user.0001@sanitized.local`) that preserve token boundaries so the model's tokenizer doesn't conflate distinct entries
-- **Bidirectional vault** - consistent pseudonyms across the session (same secret → same substitute) with automatic restoration in both natural-language responses and tool call arguments
+- **Detection** combines three sources, since no one covers what people paste into a chat:
+  - [gitleaks](https://github.com/gitleaks/gitleaks)' rules (bundled, MIT) for about 200 kinds of vendor keys and tokens.
+  - [detect-secrets](https://github.com/Yelp/detect-secrets)' keyword detector for values named as secrets: `"password": "..."`, `api_key = '...'`. This is what catches a human-chosen password.
+  - petsitter's own patterns for unquoted `.env`/YAML lines (`DB_PASSWORD=...`, `password: ...`) and personal details (emails, phones, SSNs, card numbers, IPs).
+
+  Code that only refers to a secret (`password = os.environ["DB_PASSWORD"]`, `token: ${GITHUB_TOKEN}`) is left alone.
+- **Scanned:** user messages and tool results, including content sent as a list of parts.
+- **Stand-ins:** every hidden value gets the same kind of stand-in, and only that exact format is ever swapped back, so nothing else in a reply can be mistaken for one.
+- **Streaming:** the reply still streams, with only one stand-in's length (52 characters) held back.
+- **The detect-secrets library is a dependency.** If it's missing, the extension shows a "!" in the dashboard saying so; until it's installed, quoted passwords get through.
+
+To see it work on tool calls, use the **Table** in **Try it**: put a password in it and ask the model to read it, or copy it to another key.
 
 ```bash
 pet add mine secrets_protector

@@ -149,6 +149,7 @@ Petsitter exposes OpenAI- and Anthropic-compatible endpoints plus management end
 - `POST /api/agents/{id}/register` / `unregister` - Connect or disconnect a tool; `POST /api/agents/{id}/trickset` creates its channel
 - `GET /api/traffic` - Programs, models and channels seen; `POST /api/discovered/forget` drops a discovered program
 - `GET /api/pause` / `POST /api/pause` - Read or set Pause (`{"paused": true}`)
+- `GET /api/compaction` / `POST /api/compaction` - Read or set the compaction technique (`{"technique": "observation_masking"}`, or `"off"`)
 - `POST /readconfig` - Re-read the config files and apply them without restarting
 - `POST /api/shutdown` - Shut down, putting connected tools back
 

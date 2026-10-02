@@ -129,6 +129,7 @@ It targets whichever channel is selected in the sidebar, so switching channels s
 - **[Command line reference](docs/cli.md)** — petsitter's flags and the pet subcommands.
 - **[Community tricks](docs/community.md)** — Installing tricks other people wrote, and publishing your own.
 - **[Proxy behaviour](docs/proxy.md)** — `/use/`, `/ignore/`, `/bypass/`, streaming, the config diagnostic, and the HTTP surface petsitter serves.
+- **[Compaction](docs/compaction.md)** — The automatic compaction techniques, their sources and defaults.
 - **[When things go wrong](docs/troubleshooting.md)** — Known rough edges and how they show up.
 - **[Working on petsitter](docs/development.md)** — Running the tests, and driving petsitter from other code.
 

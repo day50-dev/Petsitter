@@ -248,6 +248,14 @@ tab and pick a conversation. On any message:
 Then send your next message from your tool as usual. Edits apply to that
 conversation only, and a restart drops them.
 
+### Keep long chats under the limit, automatically
+
+Pictures and web searches pile up until a chat no longer fits any model. Pick
+a technique under **Compaction** at the bottom of the sidebar and old tool
+output or screenshots are removed from every request, in every channel. Each
+option is a published technique, linked to its source; see
+[Compaction](compaction.md) for what each one keeps.
+
 ### Log everything, before and after
 
 Install **Traffic Logger** and put it first. Each request adds a line to two
@@ -351,5 +359,6 @@ Everything is forwarded untouched until you press **Resume**.
 - [Channels and routing](tricksets.md) (channels are "tricksets" in config and code)
 - [Model configuration](models.md): more than one model, per-channel models
 - [Proxy behaviour](proxy.md): `/use/`, `/ignore/`, the config diagnostic, the HTTP API
+- [Compaction](compaction.md): the techniques, their sources and defaults
 - [Writing your own extension](writing-tricks.md)
 - [When things go wrong](troubleshooting.md)

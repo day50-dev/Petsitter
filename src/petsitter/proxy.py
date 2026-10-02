@@ -12,7 +12,6 @@ from typing import Any
 
 import httpx
 
-from petsitter.compaction import compact
 from petsitter.context import append_to_system_prompt
 from petsitter.discovered import DiscoveredPrograms
 from petsitter.observability import (
@@ -231,9 +230,6 @@ class ProxyHandler:
         # needing to kill the shared process (which would drop everyone) or
         # wait for each client to restart.
         self.paused = False
-        # Automatic compaction, global: one technique from petsitter.compaction
-        # (or "off"), run after every channel's extensions. Kept in config.json.
-        self.compaction = "off"
         # What traffic has actually come through, in memory only: which apps
         # (X-Title) and models asked, and which tricksets each request landed
         # in. The dashboard uses it to say a rule is live ("12 requests") and
@@ -543,18 +539,6 @@ class ProxyHandler:
             trace_event("pre_hook", trick, changed=result is not context or before != len(result),
                         before=before, after=len(result))
         return result
-
-    def _compact(self, messages: list) -> list:
-        """The global compaction technique, if one is chosen."""
-        try:
-            out, removed = compact(messages, self.compaction)
-        except Exception:
-            get_logger().exception("%scompaction %s failed; sending uncompacted", request_tag(), self.compaction)
-            return messages
-        if removed:
-            get_logger().info("%scompaction %s: %d removed", request_tag(), self.compaction, removed)
-            trace_event("compaction", technique=self.compaction, removed=removed)
-        return out
 
     def _apply_post_hooks(self, context: list, tricks: list[Trick] | None = None) -> list:
         if tricks is None:
@@ -1044,7 +1028,6 @@ class ProxyHandler:
                 messages = [{"role": "system", "content": new_system_prompt}] + messages
 
             messages = self._apply_pre_hooks(messages, payload, tricks)
-            messages = self._compact(messages)
 
         if upstream_request_url:
             upstream_payload = build_upstream_payload(
@@ -1497,7 +1480,6 @@ class ProxyHandler:
 
         shadow["messages"] = messages
         messages = self._apply_pre_hooks(messages, shadow, tricks)
-        messages = self._compact(messages)
 
         req.messages = messages
         req.shadow = shadow

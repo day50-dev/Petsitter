@@ -338,6 +338,8 @@ Edit the conversation the model sees, either side of it, from its **Live** tab:
 
 Recent conversations show as chats, you on the right and the model on the left, with a size bar for the whole conversation and a bar for each message's share of it. Every message, yours or the model's, has **edit**, **remove**, **remove images** and **revert**; the model's newest reply is editable as soon as it comes back. Your tool keeps resending the original, and petsitter swaps in your version on every request. Edits apply only to the conversation they were made in and are kept in memory, for the 30 most recent conversations (a restart drops them). Put it first in the channel.
 
+**Compaction**, below the conversation list, does the cutting automatically on every request in the channel. Pick one published technique: *Observation masking* ([The Complexity Trap](https://arxiv.org/abs/2508.21433)), *clear_tool_uses_20250919* ([Anthropic context editing](https://platform.claude.com/docs/en/build-with-claude/context-editing)) or *only_n_most_recent_images* ([Anthropic's computer-use demo](https://github.com/anthropics/claude-quickstarts/blob/main/computer-use-demo/computer_use_demo/loop.py)). What it changed is marked in the chat. Details and defaults: [Compaction](compaction.md).
+
 ```bash
 pet add mine context_editor
 ```

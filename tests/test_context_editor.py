@@ -125,3 +125,64 @@ def test_the_conversation_size_and_what_edits_saved():
     assert before["tokens"] > 10_000 and before["saved"] == 0
     after = t.ui_action({"action": "remove", "conv": conv, "key": rows[2]["key"]})
     assert after["tokens"] < 100 and after["saved"] > 9_900
+
+
+def _tool_convo(rounds):
+    convo = [{"role": "user", "content": "read the files"}]
+    for i in range(rounds):
+        convo += [
+            {"role": "assistant", "content": None, "tool_calls": [
+                {"id": f"c{i}", "type": "function", "function": {"name": "read_file", "arguments": f'{{"n": {i}}}'}}]},
+            {"role": "tool", "tool_call_id": f"c{i}", "content": f"file {i}\n" + "line of the file\n" * 20},
+        ]
+    return convo
+
+
+def test_compaction_off_by_default():
+    t = ContextEditorTrick()
+    convo = _tool_convo(15)
+    assert run(t, convo) == convo
+
+
+def test_compaction_runs_the_chosen_technique_and_is_saved():
+    t = ContextEditorTrick()
+    reply = t.ui_action({"action": "set_compaction", "technique": "observation_masking"})
+    assert reply["save_config"] == {"compaction": "observation_masking"}
+    out = run(t, _tool_convo(15))
+    tools = [m["content"] for m in out if m["role"] == "tool"]
+    assert tools[:5] == ["Old environment output: (21 lines omitted)"] * 5
+    assert tools[5].startswith("file 5\n")
+
+
+def test_compacted_messages_are_marked_with_their_original():
+    t = ContextEditorTrick()
+    t.ui_action({"action": "set_compaction", "technique": "observation_masking"})
+    run(t, _tool_convo(15))
+    d = t.ui_action({"action": "conversations"})
+    assert d["compaction"] == "observation_masking" and "observation_masking" in d["techniques"]
+    detail = t.ui_action({"action": "detail", "conv": d["conversations"][0]["conv"]})
+    marked = [r for r in detail["messages"] if r["compacted"]]
+    assert len(marked) == 5
+    assert marked[0]["text"].startswith("Old environment output") and marked[0]["original"].startswith("file 0\n")
+    assert detail["compacted"] > 0 and detail["technique"] == "Observation masking"
+
+
+def test_compaction_rejects_unknown_techniques():
+    t = ContextEditorTrick()
+    assert "error" in t.ui_action({"action": "set_compaction", "technique": "summarize"})
+    assert t.compaction == "off"
+
+
+def test_the_list_size_counts_the_reply_as_soon_as_it_comes_back():
+    t = ContextEditorTrick()
+    token = start_request_meta(request_id="r", payload={}, x_title="Open WebUI", tools=[])
+    try:
+        t.pre_hook([{"role": "user", "content": "hi"}], {})
+        before = t.ui_action({"action": "conversations"})["conversations"][0]["tokens"]
+        t.post_hook([{"role": "user", "content": "hi"}, {"role": "assistant", "content": "x" * 400}])
+    finally:
+        reset_request_meta(token)
+    listed = t.ui_action({"action": "conversations"})["conversations"][0]
+    detail = t.ui_action({"action": "detail", "conv": listed["conv"]})
+    assert listed["tokens"] > before + 90
+    assert listed["tokens"] == detail["tokens"]       # same figure the chat shows

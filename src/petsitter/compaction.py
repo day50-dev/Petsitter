@@ -1,18 +1,17 @@
-"""Automatic context compaction: one published technique, chosen globally.
+"""Automatic context compaction for Context Editor: published techniques.
 
 Each technique here is one specific method from one specific source, run as
 that source describes it, with its published defaults. None of them reads what
 the messages say; they go by role, position and size, so they cost nothing to
 run on every request.
 
-Techniques run on the OpenAI-shaped messages after the channel's extensions,
-just before the request goes upstream. ``TECHNIQUES`` is what the dashboard
-lists; docs/compaction.md has the sources and dates.
+They work on OpenAI-shaped messages. ``TECHNIQUES`` is what Context Editor's
+Live page lists; docs/compaction.md has the sources and dates.
 """
 
 import json
 
-# What the dashboard shows: id -> (name, source link). Order is the order shown.
+# What the Live page shows: id -> name, source, link. Order is the order shown.
 TECHNIQUES = {
     "observation_masking": {
         "name": "Observation masking",
@@ -170,7 +169,8 @@ def only_n_most_recent_images(messages: list, images_to_keep: int = IMAGES_KEEP,
                 removed += 1
                 continue
             kept.append(p)
-        out[i] = {**out[i], "content": kept}
+        if len(kept) != len(out[i]["content"]):
+            out[i] = {**out[i], "content": kept}
     return out, removed
 
 

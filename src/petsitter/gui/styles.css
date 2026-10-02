@@ -2193,15 +2193,6 @@ body.rail-collapsed .chan-count { position: absolute; top: 0; right: 0; font-siz
 .chan-warn b { color: #ffd08a; }
 /* Help sits at the bottom of the rail */
 .chan.chan-help { margin-top: auto; }
-/* Compaction sits just above Help */
-.chan-compact { margin-top: auto; padding: 12px 0 6px; border-top: 1px solid #1e2a3a; }
-.chan-compact + .chan-help { margin-top: 0; }
-.cmp-opt { display: flex; align-items: center; gap: 6px; padding: 3px 8px; font-size: 12px; min-width: 0; }
-.cmp-opt input { margin: 0; flex: none; accent-color: #8ab4ff; }
-.cmp-opt label { color: #c8d6e5; cursor: pointer; }
-.cmp-opt a { color: #8ab4ff; text-decoration: underline; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-body.rail-collapsed .chan-compact { display: none; }
-body.rail-collapsed .chan-compact + .chan-help { margin-top: auto; }
 .help-lead { margin: 0 0 14px; font-size: 14px; color: #a4b8d4; }
 .help-lead b { color: #c8d6e5; }
 

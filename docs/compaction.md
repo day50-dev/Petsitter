@@ -2,16 +2,19 @@
 
 Pictures, web searches and file reads stay in a conversation long after
 they've done their job, and every turn sends them again. A chat client can
-reach the limit of any model this way. Compaction removes them automatically.
+reach the limit of any model this way. Compaction, part of
+[Context Editor](tricks.md#context-editor), removes them automatically.
 
-Pick one technique under **Compaction** in the sidebar. It applies to every
-request, in every channel, and is saved in `config.json` (`"compaction"`).
+Open Context Editor's **Live** tab and pick one technique under **Compaction**,
+below the conversation list. It applies to every request in that channel and is
+saved as the extension's `compaction` setting. What it changed is marked in the
+chat, with the original underneath.
 
 Each option is one published technique from one source, run as the source
 describes it, with its published defaults. None of them reads what the
 messages say: they go by role, position and size, so they cost nothing per
-request. They run after the channel's extensions, just before the request goes
-upstream, so Context Editor and the others see the conversation as your tool
+request. They run in Context Editor's `pre_hook`, after your own edits. Put
+Context Editor first in the channel, so it sees the conversation as your tool
 sent it.
 
 Techniques are listed with the date of their source, so the list can be

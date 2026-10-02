@@ -388,7 +388,6 @@ def reload_config(handler: "ProxyHandler") -> dict:
     modelset_data = cfg.get("modelset") or {}
     if isinstance(modelset_data, dict):
         configure_modelset(modelset_data)
-    handler.compaction = cfg.get("compaction") or "off"
 
     model_url = cfg.get("model_url", "")
     model_name = cfg.get("model_name", "")
@@ -630,7 +629,6 @@ def create_app(
     # the user's folder. Channels are live by default now, so examples are
     # opt-in instead: Help -> Install Examples, and they arrive turned off.
     cfg = load_config()
-    handler.compaction = cfg.get("compaction") or "off"
     if not cfg.get("first_run"):
         cfg["first_run"] = True
         save_config(cfg)
@@ -802,28 +800,6 @@ def create_app(
         pause_notify()
         return JSONResponse({"paused": handler.paused})
     app.add_route("/api/pause", set_pause_state, methods=["POST"])
-
-    # ----- compaction: one global technique (petsitter.compaction) -----
-    async def get_compaction(request: Request) -> Response:
-        from petsitter.compaction import TECHNIQUES
-        return JSONResponse({"technique": handler.compaction, "techniques": TECHNIQUES})
-    app.add_route("/api/compaction", get_compaction, methods=["GET"])
-
-    async def set_compaction(request: Request) -> Response:
-        from petsitter.compaction import TECHNIQUES
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
-        technique = str(body.get("technique") or "off")
-        if technique != "off" and technique not in TECHNIQUES:
-            return JSONResponse({"error": f"unknown technique {technique!r}"}, status_code=400)
-        handler.compaction = technique
-        cfg = load_config()
-        cfg["compaction"] = technique
-        save_config(cfg)
-        return JSONResponse({"technique": handler.compaction})
-    app.add_route("/api/compaction", set_compaction, methods=["POST"])
 
     # ----- /bypass: skip petsitter processing for one tool -----
     # Point a tool at http://host:port/bypass/v1 and its requests go straight

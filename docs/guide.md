@@ -250,11 +250,11 @@ conversation only, and a restart drops them.
 
 ### Keep long chats under the limit, automatically
 
-Pictures and web searches pile up until a chat no longer fits any model. Pick
-a technique under **Compaction** at the bottom of the sidebar and old tool
-output or screenshots are removed from every request, in every channel. Each
-option is a published technique, linked to its source; see
-[Compaction](compaction.md) for what each one keeps.
+Pictures and web searches pile up until a chat no longer fits any model. In
+**Context Editor**'s Live tab, pick a technique under **Compaction**, below the
+conversation list, and old tool output or screenshots are removed from every
+request in the channel. Each option is a published technique, linked to its
+source; see [Compaction](compaction.md) for what each one keeps.
 
 ### Log everything, before and after
 

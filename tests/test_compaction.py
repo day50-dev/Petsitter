@@ -1,14 +1,10 @@
-"""Tests for the global compaction techniques (petsitter.compaction)."""
+"""Tests for the compaction techniques Context Editor offers (petsitter.compaction)."""
 
 import json
-
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from petsitter import compaction
 from petsitter.compaction import (clear_tool_uses, compact, observation_masking,
                                   only_n_most_recent_images)
-from petsitter.proxy import ProxyHandler
 
 
 def _round(i: int, output: str = "line\nline\nline", name: str = "read_file", images: int = 0) -> list:
@@ -136,38 +132,3 @@ def test_off_and_unknown():
 def test_every_listed_technique_runs():
     for technique in compaction.TECHNIQUES:
         compact(_conversation(20, images=1), technique)
-
-
-@pytest.mark.asyncio
-async def test_handler_sends_compacted_messages():
-    handler = ProxyHandler(model_url="http://upstream.test/v1", model_name="m", api_key="")
-    handler.compaction = "observation_masking"
-    response = MagicMock(status_code=200, content=b"{}")
-    response.json.return_value = {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
-    client = AsyncMock()
-    client.post = AsyncMock(return_value=response)
-    client.__aenter__ = AsyncMock(return_value=client)
-    client.__aexit__ = AsyncMock(return_value=None)
-    with patch("httpx.AsyncClient", return_value=client):
-        await handler.chat_completions({"messages": _conversation(12)[1:], "model": "m"},
-                                       upstream_request_url="http://upstream.test/v1/chat/completions")
-    sent = client.post.call_args.kwargs["json"]["messages"]
-    assert _tool_contents(sent)[:2] == ["Old environment output: (3 lines omitted)"] * 2
-
-
-@pytest.mark.asyncio
-async def test_api_sets_and_persists(tmp_path, monkeypatch):
-    from httpx import ASGITransport, AsyncClient
-    from petsitter import server
-    monkeypatch.setattr(server, "CONFIG_DIR", tmp_path)
-    monkeypatch.setattr(server, "CONFIG_PATH", tmp_path / "config.json")
-    monkeypatch.setattr(server, "TRICKSETS_DIR", tmp_path / "tricksets")
-    app = server.create_app(model_url="", model_name=None, api_key="", trick_paths=[])
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        got = (await c.get("/api/compaction")).json()
-        assert got["technique"] == "off"
-        assert list(got["techniques"]) == list(compaction.TECHNIQUES)
-        r = await c.post("/api/compaction", json={"technique": "only_n_most_recent_images"})
-        assert r.json()["technique"] == "only_n_most_recent_images"
-        assert (await c.post("/api/compaction", json={"technique": "bogus"})).status_code == 400
-    assert json.loads((tmp_path / "config.json").read_text())["compaction"] == "only_n_most_recent_images"

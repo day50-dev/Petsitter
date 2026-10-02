@@ -14,6 +14,9 @@ in it:
 Your tool never sees the change: it keeps resending the original, and petsitter
 swaps in your version on every request.
 
+It can also do the second job by itself: pick a **Compaction** technique and
+old tool output or screenshots are removed from every request automatically.
+
 ## How to use
 
 Install it and open its **Live** tab. Recent conversations are listed on the
@@ -29,6 +32,14 @@ with each message's rough size. On any message:
 Then send your next message from your tool as usual. Edited messages are marked,
 and the original is a click away.
 
+**Compaction**, at the bottom of the conversation list, runs one published
+technique on every request in the channel: *Observation masking* (The
+Complexity Trap), *clear_tool_uses_20250919* (Anthropic context editing) or
+*only_n_most_recent_images* (Anthropic's computer-use demo). Each name links to
+its source. What it changed is marked in the chat like an edit. See
+[Compaction](https://github.com/day50-dev/Petsitter/blob/main/docs/compaction.md)
+for what each one keeps.
+
 Put it **first** in the channel, so what you edit is what your tool sent.
 
 ## How it works
@@ -39,6 +50,9 @@ Put it **first** in the channel, so what you edit is what your tool sent.
   request, since the client resends the original each time.
 - Edits apply only to the conversation they were made in. They're kept in
   memory, for the 30 most recent conversations, and a restart drops them.
+- Compaction runs after your edits, in the same `pre_hook`, on what's about to
+  be sent. It goes by role, position and size only, so it costs nothing. The
+  choice is saved as the `compaction` setting.
 - The Live tab gets a small event per request; a conversation's messages are
   fetched when you open it (`ui_action({"action": "detail", ...})`).
 """
@@ -49,6 +63,7 @@ import threading
 import time
 from collections import OrderedDict
 
+from petsitter.compaction import TECHNIQUES, compact
 from petsitter.observability import current_user_agent, request_meta
 from petsitter.trick import Trick
 
@@ -156,6 +171,7 @@ class ContextEditorTrick(Trick):
     ui_page = "context_editor.html"
 
     def __init__(self):
+        self.compaction = "off"   # a key of petsitter.compaction.TECHNIQUES, or "off"
         self._lock = threading.Lock()
         # conversation -> {"who", "first", "seen", "messages": [...], "edits": {key: edit}}
         self._convs: OrderedDict[str, dict] = OrderedDict()
@@ -189,6 +205,8 @@ class ContextEditorTrick(Trick):
                     n = 1 + sum(1 for item in snapshot if item["key"].split(":")[0] == fp)
                     snapshot.append({"key": f"{fp}:{n}", "original": dict(reply), "latest": True})
                     conv["messages"] = snapshot
+                    # the list's size counts the reply now, not when the chat is next opened
+                    conv["chars"] = conv.get("chars", 0) + len(json.dumps(reply.get("content"), default=str))
                 self.publish({"event": "context", "conv": key, "reply": True, "ts": time.time()})
         except Exception:
             pass
@@ -203,9 +221,11 @@ class ContextEditorTrick(Trick):
             while len(self._convs) > KEEP_CONVERSATIONS:
                 self._convs.popitem(last=False)
             edits = conv["edits"]
+            where = []        # out index -> snapshot index
             for msg in context:
                 if not isinstance(msg, dict):
                     out.append(msg)
+                    where.append(None)
                     continue
                 fp = _fingerprint(msg)
                 n = counts[fp] = counts.get(fp, 0) + 1
@@ -214,12 +234,20 @@ class ContextEditorTrick(Trick):
                 new = apply_edit(msg, edit) if edit else msg
                 edited += bool(edit)
                 out.append(new)
+                where.append(len(snapshot))
                 snapshot.append({"key": mkey, "original": msg})
             first = next((_text(m.get("content")).strip().split("\n")[0][:120]
                           for m in context if isinstance(m, dict) and m.get("role") == "user"), "")
+        technique = getattr(self, "compaction", None) or "off"
+        compacted, removed = compact(out, technique)
+        if removed:
+            for i, m in enumerate(compacted):
+                if m is not out[i] and where[i] is not None:
+                    snapshot[where[i]]["compacted"] = m
+            out = compacted
         size = sum(len(json.dumps(m.get("content"), default=str)) for m in out if isinstance(m, dict))
         with self._lock:
-            conv.update(who=who, first=first, seen=time.time(), messages=snapshot, tokens=round(size / 4))
+            conv.update(who=who, first=first, seen=time.time(), messages=snapshot, chars=size)
         self.publish({"event": "context", "conv": key, "who": who, "first": first,
                       "messages": len(out), "tokens": round(size / 4), "edited": edited, "ts": time.time()})
         if edited:
@@ -237,9 +265,17 @@ class ContextEditorTrick(Trick):
                 return {"conversations": [
                     {"conv": k, "who": c.get("who", ""), "first": c.get("first", ""),
                      "messages": len(c.get("messages", [])), "edited": len(c["edits"]),
-                     "tokens": c.get("tokens", 0),
+                     "tokens": round(c.get("chars", 0) / 4),
                      "seen": c.get("seen", 0)}
-                    for k, c in reversed(self._convs.items()) if c.get("messages")]}
+                    for k, c in reversed(self._convs.items()) if c.get("messages")],
+                    "compaction": getattr(self, "compaction", None) or "off",
+                    "techniques": TECHNIQUES}
+        if action == "set_compaction":
+            technique = str(data.get("technique") or "off")
+            if technique != "off" and technique not in TECHNIQUES:
+                return {"error": f"unknown technique {technique!r}"}
+            self.compaction = technique
+            return {"compaction": technique, "save_config": {"compaction": technique}}
         if action == "detail":
             return self._detail(str(data.get("conv", "")))
         if action in ("replace", "remove", "drop_images", "revert"):
@@ -255,16 +291,22 @@ class ContextEditorTrick(Trick):
                 return {"gone": True}
             messages, edits = list(conv.get("messages", [])), dict(conv["edits"])
         rows = []
+        edited_chars = 0
         for item in messages:
             msg, mkey = item["original"], item["key"]
             edit = edits.get(mkey)
             shown = apply_edit(msg, edit) if edit else msg
+            edited_chars += len(json.dumps(shown.get("content"), default=str))
+            compacted = item.get("compacted")
+            if compacted is not None:
+                shown = compacted
             rows.append({
                 "key": mkey,
                 "latest": bool(item.get("latest")),
                 "role": msg.get("role", "?"),
                 "text": _text(shown.get("content"))[:MAX_TEXT],
-                "original": _text(msg.get("content"))[:MAX_TEXT] if edit else None,
+                "original": _text(msg.get("content"))[:MAX_TEXT] if edit or compacted is not None else None,
+                "compacted": compacted is not None,
                 "images": _images(shown.get("content")),
                 "had_images": len(_images(msg.get("content"))),
                 "tool_calls": [{"name": (c.get("function") or {}).get("name", ""),
@@ -279,10 +321,12 @@ class ContextEditorTrick(Trick):
         sent = sum(r["chars"] for r in rows)
         with self._lock:
             if key in self._convs:
-                self._convs[key]["tokens"] = round(sent / 4)   # the list shows the size after edits too
+                self._convs[key]["chars"] = sent   # the list shows the size after edits too
         original = sum(len(json.dumps(item["original"].get("content"), default=str)) for item in messages)
+        technique = TECHNIQUES.get(getattr(self, "compaction", None) or "", {}).get("name", "")
         return {"conv": key, "who": conv.get("who", ""), "messages": rows,
-                "tokens": round(sent / 4), "saved": max(0, round((original - sent) / 4))}
+                "tokens": round(sent / 4), "saved": max(0, round((original - edited_chars) / 4)),
+                "compacted": max(0, round((edited_chars - sent) / 4)), "technique": technique}
 
     def _edit(self, key: str, mkey: str, action: str, data: dict) -> dict:
         with self._lock:

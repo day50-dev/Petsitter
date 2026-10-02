@@ -60,7 +60,7 @@ Available Tricks list instead.
  * [Reference Check](#reference-check) - Challenge answers that cite no valid reference from a retrieval tool
  * [Recommender List](#recommender-list) - Make the model pick software from your preferred list
  * [Export It](#export-it) - Export conversation as llcat-compatible JSON
- * [Traffic Logger](#traffic-logger) - Log every request/response as timestamped JSONL to a file
+ * [Traffic Logger](#traffic-logger) - Log every request and reply as JSONL, outbound and inbound in separate files
 
 ---
 
@@ -542,13 +542,16 @@ The corollary is worth keeping in mind: the residual errors that survive this ch
 
 [tricks/logger.py](tricks/logger.py)
 
-Appends one timestamped JSON line to a JSONL file for every request and every response that passes through the trick — the debugging view into whatever harness is misbehaving. Point it at a file, reproduce the problem, and you have the full traffic in both directions: payloads, tools, and messages on the way out; the message list and model answer on the way back.
+Appends one timestamped JSON line per request, and one per reply, that passes through the trick — the debugging view into whatever harness is misbehaving. Reproduce the problem and you have the full traffic in both directions, one file each:
+
+- `outbound.jsonl`: payloads, tools and messages on the way to the model
+- `inbound.jsonl`: the message list and the model's answer on the way back
 
 ```bash
-pet add mine logger            # writes ~/.cache/petsitter/traffic.jsonl
+pet add mine logger            # writes ~/.cache/petsitter/traffic/{outbound,inbound}.jsonl
 ```
 
-Each request produces two records:
+Each request produces one record in each file:
 
 ```jsonl
 {"timestamp":"2026-08-29T12:00:00.000+00:00","trick":"LoggerTrick","event":"request","direction":"out","request_id":"ab12cd34","x_title":"opencode*","model":"qwen3:8b","stream":false,"tools":[],"payload":{"model":"qwen3:8b","messages":[{"role":"user","content":"hello"}]},"messages":[{"role":"user","content":"hello"}]}
@@ -559,6 +562,14 @@ Records come straight off the hooks:
 
 - **`request`** fires in `pre_hook` and carries the full payload and message list heading up — whatever the tricks before it have already done to the conversation.
 - **`response`** fires in `post_hook` with the message list including the model's answer.
+
+Both records carry the same `request_id`, the ID petsitter gives a request on arrival and keeps until its reply goes back. That makes each file easy to `jq` on its own, and the two easy to join:
+
+```bash
+cd ~/.cache/petsitter/traffic
+jq -c '{request_id, model, last: .messages[-1].content}' outbound.jsonl
+jq -s 'group_by(.request_id)' outbound.jsonl inbound.jsonl
+```
 
 The trick is passive — both hooks return the context untouched, so nothing it logs changes what the model sees.
 
@@ -575,7 +586,7 @@ A trick that short-circuits the pipeline (a prompt-keyword handler, or a `post_h
 
 | Field | Default | What it does |
 |---|---|---|
-| `path` | `~/.cache/petsitter/traffic.jsonl` | Where the JSONL file is written. A directory path (or one ending in `/`) writes `traffic.jsonl` inside it. Parent directories are created on demand. |
+| `path` | `~/.cache/petsitter/traffic/` | The folder `outbound.jsonl` and `inbound.jsonl` are written in, created on demand. A path to a `.jsonl` file (an older setting) puts the two beside it: `traffic.jsonl` becomes `traffic.outbound.jsonl` and `traffic.inbound.jsonl`. |
 
 
 

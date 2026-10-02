@@ -57,9 +57,24 @@ OWN_PATTERNS: list[tuple[re.Pattern, str]] = [
     # password: x. "=" with no spaces (shell) or ": " (YAML), which keeps
     # Python's `password = getpass()` out. Skips $VARS, quotes (the keyword
     # detector has those), YAML block markers and type annotations.
+    # The value runs to the end of the line (YAML: "password: two words"),
+    # less a trailing " # comment".
     (re.compile(rf"(?im)^[ \t]*(?:export[ \t]+)?{_CREDENTIAL_KEY}(?:=|:[ \t]+)"
                 r"(?![$\"'|>!&*{\[])(?!(?:str|int|bool|float|bytes|None|null|true|false|Optional)\b)"
-                r"(?P<v>[^\s#\"']+)"), "credential"),
+                r"(?P<v>[^\s#\"'](?:[^\n#]*[^\s#])?)(?=[ \t]*(?:#|$))"), "credential"),
+    # A JSON-style quoted key holding a quoted string: {"db_password": "two
+    # words"}. detect-secrets catches this too; this way it's caught even
+    # without it. Escaped quotes in the value are kept; ${VARS} are skipped.
+    (re.compile(rf'(?i)"{_CREDENTIAL_KEY}"\s*:\s*"(?!\$\{{)(?P<v>(?:[^"\\\n]|\\.)+)"'), "credential"),
+    # The name and the value as sibling fields: {"key": "password", "value":
+    # "..."}, Kubernetes' {"name": "DB_PASSWORD", "value": "..."}, either order,
+    # and the same in YAML (name: DB_PASSWORD / value: ...).
+    (re.compile(rf'(?i)"(?:key|name|field|var|variable|setting)"\s*:\s*"{_CREDENTIAL_KEY}"\s*,\s*'
+                r'"(?:value|val|data)"\s*:\s*"(?!\$\{)(?P<v>(?:[^"\\\n]|\\.)+)"'), "credential"),
+    (re.compile(rf'(?i)"(?:value|val|data)"\s*:\s*"(?!\$\{{)(?P<v>(?:[^"\\\n]|\\.)+)"\s*,\s*'
+                rf'"(?:key|name|field|var|variable|setting)"\s*:\s*"{_CREDENTIAL_KEY}"'), "credential"),
+    (re.compile(rf"(?im)^[ \t]*-?[ \t]*(?:key|name):[ \t]*[\"']?{_CREDENTIAL_KEY}[\"']?[ \t]*\n"
+                r"[ \t]*value:[ \t]*[\"']?(?![$|>])(?P<v>[^\s#\"'](?:[^\n#\"']*[^\s#\"'])?)"), "credential"),
     # vendor formats gitleaks has no rule for, or whose rule Python can't compile
     (re.compile(r"sk-proj-[A-Za-z0-9_-]{20,}"), "openai_proj_key"),
     (re.compile(r"(?<![\w-])sk-(?!proj-|ant-)[A-Za-z0-9]{20,}"), "openai_key"),
@@ -205,8 +220,8 @@ def _ds_setup() -> bool:
                 {"name": "KeywordDetector"}, {"name": "BasicAuthDetector"}]})
             _ds_ready = True
         except Exception as e:   # not installed, or an API change
-            log.warning("secrets: detect-secrets unavailable (%s); passwords by name are "
-                        "only caught in .env/YAML form. pip install detect-secrets", e)
+            log.warning("secrets: detect-secrets unavailable (%s); passwords in code aren't "
+                        "caught. pip install detect-secrets", e)
             _ds_ready = False
     return _ds_ready
 
@@ -218,9 +233,10 @@ def problems() -> list[str]:
     with _ds_lock:
         ok = _ds_setup()
     if not ok:
-        out.append("detect-secrets isn't installed, so passwords and secrets are only caught "
-                   "in .env and YAML form, not in JSON or code. Install it with "
-                   "`pip install detect-secrets` and restart petsitter.")
+        out.append("detect-secrets isn't installed, so passwords and secrets in code "
+                   "(`api_key = '...'`) and some config formats aren't caught; JSON, .env and "
+                   "YAML still are. Install it with `pip install detect-secrets` and restart "
+                   "petsitter.")
     if _rules is None:
         _rules = _load_gitleaks()
     if not _rules[0]:

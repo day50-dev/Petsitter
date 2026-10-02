@@ -53,7 +53,7 @@ def test_tricks_and_the_traffic_logger_keep_the_arrival_id(tmp_path, monkeypatch
             return context
 
     log = LoggerTrick()
-    log.path = str(tmp_path / "traffic.jsonl")
+    log.path = str(tmp_path)
     handler = ProxyHandler(model_url="http://upstream", model_name="m", tricks=[log, Peek()])
 
     token = set_request_id("edge1234")
@@ -62,7 +62,8 @@ def test_tricks_and_the_traffic_logger_keep_the_arrival_id(tmp_path, monkeypatch
     finally:
         reset_request_id(token)
 
-    records = [json.loads(l) for l in (tmp_path / "traffic.jsonl").read_text().splitlines()]
+    records = [json.loads(l) for f in ("outbound.jsonl", "inbound.jsonl")
+               for l in (tmp_path / f).read_text().splitlines()]
     assert [r["event"] for r in records] == ["request", "response"]
     assert {r["request_id"] for r in records} == {"edge1234"}
     assert seen == ["edge1234"]

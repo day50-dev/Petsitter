@@ -168,12 +168,12 @@ def test_keyword_report_not_doubled_when_trick_reports():
 
 def test_traffic_logger_reports_once_per_exchange(tmp_path):
     from petsitter.tricks.logger import LoggerTrick
-    t = LoggerTrick(path=str(tmp_path / "t.jsonl"))
+    t = LoggerTrick(path=str(tmp_path))
     ctx = [{"role": "user", "content": "hi"}]
     t.pre_hook(ctx, {})
     t.post_hook(ctx + [{"role": "assistant", "content": "yo"}])
     msgs = [e["message"] for _, e in t.live_feed.since(0)]
-    assert msgs == [f"Logged a request to {tmp_path / 't.jsonl'}"]     # one line per exchange
+    assert msgs == [f"Logged a request to {tmp_path}"]     # one line per exchange
 
 
 def test_problems_reach_the_dashboard():

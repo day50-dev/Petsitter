@@ -184,13 +184,13 @@ them (the extension's **Settings** button). Values arrive as attributes on
 ```python
 class LoggerTrick(Trick):
     config_fields = [
-        {"key": "path", "label": "JSONL log file", "type": "path",
-         "default": "~/.cache/petsitter/traffic.jsonl",
-         "description": "Where to append one line per request."},
+        {"key": "path", "label": "Log folder", "type": "path",
+         "default": "~/.cache/petsitter/traffic",
+         "description": "Where to write the log files."},
     ]
 
     def pre_hook(self, context, params):
-        path = getattr(self, "path", None) or "~/.cache/petsitter/traffic.jsonl"
+        path = getattr(self, "path", None) or "~/.cache/petsitter/traffic"
         ...
 ```
 

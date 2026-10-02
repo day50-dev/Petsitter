@@ -118,6 +118,14 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
 
     async def gui_page(request: Request) -> Response:
         content = (gui_dir / "index.html").read_text()
+        # The stylesheet is a separate file the browser caches on its own, so
+        # name it by its modification time: a changed file is a new URL.
+        css = gui_dir / "styles.css"
+        try:
+            content = content.replace('href="/static/styles.css"',
+                                      f'href="/static/styles.css?v={int(css.stat().st_mtime)}"', 1)
+        except OSError:
+            pass
         return Response(content=content, media_type="text/html", headers=NO_STORE)
     app.add_route("/gui", gui_page, methods=["GET"])
     app.add_route("/", gui_page, methods=["GET"])

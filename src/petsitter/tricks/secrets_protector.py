@@ -84,6 +84,35 @@ _MARKER_RE = re.compile(
 )
 
 
+# A detected value at least this long is hidden wherever it shows up (in
+# history the client resends, in escaped JSON), not just where a detector
+# finds it. Shorter ones are too likely to be ordinary words.
+MIN_SWAP_ANYWHERE = 6
+
+_JSON_UNESCAPE = re.compile(r'\\(["\\/nt])')
+
+
+def _unescaped_views(text: str, depth: int = 3):
+    """text with JSON string escapes undone, once per level of nesting."""
+    for _ in range(depth):
+        view = _JSON_UNESCAPE.sub(lambda m: {"n": "\n", "t": "\t"}.get(m.group(1), m.group(1)), text)
+        if view == text:
+            return
+        yield view
+        text = view
+
+
+def _escaped_forms(value: str, depth: int = 3) -> list[str]:
+    """value as it appears plainly and inside one, two, three JSON strings."""
+    forms = [value]
+    for _ in range(depth):
+        nxt = json.dumps(forms[-1])[1:-1]
+        if nxt == forms[-1]:
+            break
+        forms.append(nxt)
+    return forms
+
+
 class SecretsProtectorTrick(Trick):
     """Protect secrets by pseudonymizing them before reaching the model."""
 
@@ -94,6 +123,8 @@ class SecretsProtectorTrick(Trick):
     strip_prompt_keyword = False
 
     def __init__(self):
+        # Which of those were found by a detector rather than marked by hand.
+        self._detected: set[str] = set()
         # Every hidden value, marked by hand or detected: stand-in -> original. The stand-in is an HMAC of
         # the value, so the same secret gets the same stand-in on every resend
         # of the history without the stand-in revealing anything about it.
@@ -142,11 +173,12 @@ class SecretsProtectorTrick(Trick):
         real values reappear on the way up and have to be swapped out again.
         """
         for marker, original in sorted(self._marked.items(), key=lambda kv: len(kv[1]), reverse=True):
-            forms = [original]
-            escaped = json.dumps(original)[1:-1]
-            if escaped != original:
-                forms.append(escaped)
-            for form in forms:
+            # A short detected value ("test", "admin") would turn every
+            # occurrence of a common word into a stand-in, so those are only
+            # hidden where a detector finds them. Hand-marked ones always are.
+            if marker in self._detected and len(original) < MIN_SWAP_ANYWHERE:
+                continue
+            for form in _escaped_forms(original):
                 if form in text:
                     text = text.replace(form, marker)
         return text
@@ -179,6 +211,7 @@ class SecretsProtectorTrick(Trick):
         marker = self._marker(original)
         if marker not in self._marked:
             self._announce_hidden(secret_type, marker)
+            self._detected.add(marker)
         self._marked[marker] = original
         return marker
 
@@ -189,13 +222,30 @@ class SecretsProtectorTrick(Trick):
         return secret_scan.problems()
 
     def _sanitize(self, text: str) -> str:
+        out = self._sanitize_spans(text)
+        # JSON inside a JSON string (a tool returning an encoded object, a
+        # config in a tool call's arguments) has its quotes escaped, which no
+        # detector recognizes: {\"password\":\"...\"}. Look again at the
+        # unescaped text, and hide what turns up wherever it appears.
+        if "\\" in text:
+            found = False
+            for view in _unescaped_views(text):
+                for _, _, value, kind in self._find_spans(view):
+                    if len(value) >= MIN_SWAP_ANYWHERE and not _MARKER_RE.fullmatch(value):
+                        self._pseudonym(value, kind)
+                        found = True
+            if found:
+                out = self._hide_marked(out)
+        return out
+
+    def _sanitize_spans(self, text: str) -> str:
         if _MARKER_RE.search(text):
             parts = _MARKER_RE.split(text)
             markers = _MARKER_RE.findall(text)
-            out = [self._sanitize(parts[0])]
+            out = [self._sanitize_spans(parts[0])]
             for marker, part in zip(markers, parts[1:]):
                 out.append(marker)
-                out.append(self._sanitize(part))
+                out.append(self._sanitize_spans(part))
             return "".join(out)
         spans = self._find_spans(text)
         if not spans:

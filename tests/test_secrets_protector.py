@@ -1,5 +1,7 @@
 """Tests for SecretsProtectorTrick."""
 
+import json
+
 import pytest
 
 from petsitter.tricks.secrets_protector import SecretsProtectorTrick
@@ -29,6 +31,14 @@ class TestSecretsProtectorTrick:
         ("DB_PASSWORD=hunter2xyz", "hunter2xyz"),
         ("export API_TOKEN=tok_9f8e7d", "tok_9f8e7d"),
         ("db:\n  password: s3cretValue\n", "s3cretValue"),
+        ("password: What color is a banana", "color is a banana"),
+        ("DB_PASSWORD=hunter2xyz  # prod", "hunter2xyz"),
+        ('{"password":"What color is a banana"}', "color is a banana"),
+        # the name and the value as sibling fields (a get_value() result, k8s env)
+        ('{\n  "key": "password",\n  "value": "what-color-is-a-banana"\n}', "what-color-is-a-banana"),
+        ('{"value": "what-color-is-a-banana", "key": "password"}', "what-color-is-a-banana"),
+        ('[{"name": "DB_PASSWORD", "value": "s3cr3tpw"}]', "s3cr3tpw"),
+        ("env:\n  - name: DB_PASSWORD\n    value: s3cr3tpw\n", "s3cr3tpw"),
         # vendor keys (gitleaks' rules, and ours)
         ('token = "ghp_abcdefghijklmnopqrstuvwxyz0123456789"', "ghp_abcdefghijklmnopqrstuvwxyz0123456789"),
         # assembled here so the source holds no token-shaped literal (push protection)
@@ -55,6 +65,11 @@ class TestSecretsProtectorTrick:
         'self.api_key = config.get("api_key")',
         'password: str = field(default="")',
         "token: ${GITHUB_TOKEN}",
+        '{"token": "${GITHUB_TOKEN}"}',
+        '{"max_tokens": "4096"}',
+        '{"key": "theme", "value": "dark"}',
+        '[{"name": "LOG_LEVEL", "value": "debug"}]',
+        '{"name": "API_TOKEN", "value": "${API_TOKEN}"}',
         "const tokenizer = new Tokenizer(vocabulary_size)",
         'sha256 = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"',
         "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
@@ -281,3 +296,52 @@ class TestToolCalls:
         seen = trick.pre_hook(resent, {})
         assert "magical9bjyX" not in seen[-2]["tool_calls"][0]["function"]["arguments"]
         assert stand_in in seen[-2]["tool_calls"][0]["function"]["arguments"]
+
+
+@pytest.mark.parametrize("text, value", [
+    ('{"password":"What color is a banana"}', "color is a banana"),
+    ('{\n  "emporia_password": "the-first-us-president"\n}', "the-first-us-president"),
+    ('{"db_password": "a \\"quoted\\" one"}', "quoted"),
+    ("password: What color is a banana", "color is a banana"),
+])
+def test_named_passwords_are_caught_without_detect_secrets(monkeypatch, text, value):
+    """JSON, .env and YAML don't depend on the optional detector."""
+    import petsitter.secret_scan as ss
+    monkeypatch.setattr(ss, "_ds_ready", False)
+    monkeypatch.setattr(ss, "_cache", type(ss._cache)())
+    out = SecretsProtectorTrick()._sanitize(text)
+    assert value not in out and STAND_IN.search(out)
+
+
+class TestEscapedJson:
+    """Secrets inside JSON that's inside a JSON string, as tool results often are."""
+
+    # A get_value() result whose value is itself a JSON object (from a real export).
+    RESULT = '{\n  "key": "password",\n  "value": "{\\"password\\":\\"What color is a banana\\"}"\n}'
+
+    @pytest.mark.parametrize("detect_secrets", [True, False])
+    def test_escaped_json_in_a_tool_result(self, monkeypatch, detect_secrets):
+        import petsitter.secret_scan as ss
+        if not detect_secrets:
+            monkeypatch.setattr(ss, "_ds_ready", False)
+            monkeypatch.setattr(ss, "_cache", type(ss._cache)())
+        trick = SecretsProtectorTrick()
+        ctx = trick.pre_hook([{"role": "tool", "tool_call_id": "c", "content": self.RESULT}], {})
+        out = ctx[0]["content"]
+        assert "banana" not in out and STAND_IN.search(out)
+        json.loads(out)   # still valid JSON
+        assert trick._restore(out) == self.RESULT
+
+    def test_twice_escaped(self):
+        inner = json.dumps({"api_key": "s3cr3t-value-123"})
+        twice = json.dumps({"payload": json.dumps({"config": inner})})
+        out = SecretsProtectorTrick()._sanitize(twice)
+        assert "s3cr3t-value-123" not in out and STAND_IN.search(out)
+
+    def test_short_detected_values_are_not_swapped_everywhere(self):
+        """password: test hides that value, not every "test" in the conversation."""
+        trick = SecretsProtectorTrick()
+        ctx = trick.pre_hook([{"role": "user", "content": "password: test"},
+                              {"role": "assistant", "content": "I ran the test suite."}], {})
+        assert "test" not in ctx[0]["content"]
+        assert ctx[1]["content"] == "I ran the test suite."

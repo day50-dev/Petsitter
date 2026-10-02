@@ -144,13 +144,14 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
     app.add_route("/docs", docs_page, methods=["GET"])
 
     async def help_page(request: Request) -> Response:
-        # Installed, the README is copied into the package (pyproject's
-        # force-include); run from a checkout (./petsitter), it's at the repo root.
+        # The Help page is the user guide. Installed, it's copied into the
+        # package (pyproject's force-include); run from a checkout
+        # (./petsitter), it's docs/guide.md.
         here = Path(__file__).resolve().parent
-        for readme in (here / "README.md", here.parent.parent / "README.md"):
-            if readme.is_file():
-                return Response(content=readme.read_text(encoding="utf-8"), media_type="text/plain")
-        return Response(content="petsitter's README wasn't found.", media_type="text/plain", status_code=404)
+        for guide in (here / "guide.md", here.parent.parent / "docs" / "guide.md"):
+            if guide.is_file():
+                return Response(content=guide.read_text(encoding="utf-8"), media_type="text/plain")
+        return Response(content="petsitter's guide wasn't found.", media_type="text/plain", status_code=404)
     app.add_route("/api/help", help_page, methods=["GET"])
 
     async def gui_info(request: Request) -> Response:

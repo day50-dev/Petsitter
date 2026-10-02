@@ -49,8 +49,8 @@ test = [
 packages = ["src/petsitter"]
 
 [tool.hatch.build.targets.wheel.force-include]
-# The Help tab serves this at runtime, and it lives outside the package.
-"README.md" = "petsitter/README.md"
+# The Help tab serves the guide at runtime, and it lives outside the package.
+"docs/guide.md" = "petsitter/guide.md"
 
 [tool.hatch.build.targets.sdist]
 include = [

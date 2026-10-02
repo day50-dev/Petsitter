@@ -229,7 +229,7 @@ def test_playground_passes_its_tools_and_tool_turns():
     assert r.json()["tool_calls"][0]["function"]["name"] == "get_table"
 
 
-def test_help_serves_the_readme_from_a_checkout():
+def test_help_serves_the_guide_from_a_checkout():
     client = _client(Trick())
     r = client.get("/api/help")
-    assert r.status_code == 200 and "petsitter" in r.text.lower()
+    assert r.status_code == 200 and r.text.startswith("# User guide")

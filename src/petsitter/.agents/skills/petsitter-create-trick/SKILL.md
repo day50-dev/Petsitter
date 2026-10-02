@@ -14,20 +14,24 @@ A trick hooks into the request pipeline at up to five points, all optional:
 
 | Hook | When it runs | Purpose |
 |------|-------------|---------|
-| `handle_prompt_keyword(request)` | When the user types `(keyword: ...)` | Answer or act on an inline command, before the model is called |
+| `handle_prompt_keyword(request, messages, payload)` | When the user types `(keyword: ...)` | Answer or act on an inline command, before the model is called |
 | `system_prompt(to_add)` | Once per request, before the model call | Add instructions to the system prompt |
 | `pre_hook(context, params)` | After the system prompt, before the model | Change messages, add or remove tools |
 | `post_hook(context)` | After the model responds | Validate, retry, detect tool calls, rewrite or just observe the reply |
 | `info(capabilities)` | When building the response | Declare what the trick adds |
 
-Each hook runs for every trick in the channel, in channel order.
+Each hook runs for every trick in the channel, in channel order (tricks
+activated by `keywords` run after the always-on ones).
 
 Beyond the hooks, a trick can:
 
 - **Have settings** (`config_fields`): the dashboard builds a form, and values
   arrive as attributes on `self`.
 - **Show what it does**: `self.report("...")` writes to its Live tab in the
-  dashboard, or ship a custom page (`ui_page`).
+  dashboard, or ship a custom page (`ui_page`) that can also change its
+  settings (`ui_action` returning `{"save_config": {...}}`).
+- **Use more models** (`required_models`, `optional_models`): shown on the
+  extension's page so people know what to set up in Models.
 - **Say how much of a streamed reply it needs** (`needs_window`), so replies
   stream instead of being held when they can.
 - **Report a broken setup** (`problems()`): the dashboard shows a "!" with your
@@ -76,6 +80,8 @@ Install it. Nothing to type; it works on every reply in the channel.
 
 File names are `snake_case.py`, class names `PascalCaseTrick`. A file must
 contain exactly one `Trick` subclass. Helper functions and other classes are fine.
+The class is instantiated with no arguments, so any `__init__` needs defaults
+(it doesn't have to call `super().__init__()`).
 
 ## Gotchas
 
@@ -86,8 +92,9 @@ contain exactly one `Trick` subclass. Helper functions and other classes are fin
 - **`needs_window`** matters for any trick with a `post_hook`:
   - `-1` (the default) holds the whole reply until it's complete. Right for
     anything that validates or retries.
-  - `0` means the trick only looks. The reply streams, and the `post_hook`
-    runs afterwards; whatever it changes is ignored.
+  - `0` means the trick only looks, so it must not change anything. When the
+    reply streams, the `post_hook` runs after it's sent and changes are
+    ignored; when it's held whole, it runs in order with the others.
   - `N` streams the reply with the last N characters held back. The
     `post_hook` is then run on each stretch as it passes, so it must be
     *local* (right on any part of the reply) and *idempotent* (changes
@@ -103,15 +110,20 @@ contain exactly one `Trick` subclass. Helper functions and other classes are fin
 - `post_hook` gets the context with the reply as `context[-1]`. It isn't
   given `params`; use `request_meta()`.
 - `info` gets the capabilities accumulated so far. Add keys, never remove them.
-- `callmodel()` (async) and `callmodel_sync()` make follow-up model calls.
-  Both return the context with the new reply appended.
+- Hooks are synchronous: make follow-up model calls with `callmodel_sync()`
+  (it returns the context with the new reply appended, and takes `tools=`).
+  `callmodel()` is async and can't be awaited from a hook.
 - Keep hooks fast. They run on every request, often on long conversations.
 - Never `report()` or `publish()` something you wouldn't show on screen
   (secrets, full prompts of other people).
 - `keywords = [...]` makes a trick run only when one of the words is in the
-  user's message (the word is removed first). `prompt_keyword = "x"` is
-  different: the user types `(x: request)` and `handle_prompt_keyword` gets
-  `request`.
+  user's latest message (whole word, any case; the word is removed first).
+  `prompt_keyword = "x"` is different: the user types `(x: request)` and
+  `handle_prompt_keyword(request, messages, payload)` is called. Accept all
+  three arguments; the framework passes them positionally. People can rename
+  the keyword per channel in the extension's Settings.
+- A setting cleared in the dashboard arrives as `""`, not the default: read
+  it as `getattr(self, "key", None) or DEFAULT`.
 
 ## Loading it
 
@@ -129,7 +141,8 @@ POST /api/tricks/load {"path": "path/to/my_trick.py", "trickset": "_default"}
 ```
 
 A trick can be loaded before the models it needs (`required_models`) are set
-up. That's only checked when a request actually uses it.
+up. Nothing checks them up front: `get_model_config(key)` raises `KeyError`
+when the trick asks for one that isn't there.
 
 ## Testing
 
@@ -138,7 +151,9 @@ up. That's only checked when a request actually uses it.
   `request_meta()` in `start_request_meta()` / `reset_request_meta(token)`.
 - **In the dashboard:** open the channel, click the extension, and use
   **Try it**. Each reply shows a pill per extension, lit when it changed
-  something. The extension's **Live** tab shows its `report()`s.
+  something. The extension's **Live** tab shows its `report()`s. Try it sends
+  its own system prompt first (a test-harness note so models don't refuse
+  fake credentials); your `system_prompt` is appended to it.
 - **Tool calls:** Try it has a **Table** the model can use through
   `get_table()`, `get_value(key)` and `set_value(key, value)`. Put values in
   it and ask the model to read or change them. That exercises a trick on tool
@@ -156,4 +171,8 @@ up. That's only checked when a request actually uses it.
   - `secrets_protector.py`: prompt keyword, windowed `post_hook`, tool calls,
     `problems()`, custom Live page.
   - `logger.py`: settings, `needs_window = 0`, `request_id`.
-  - `tool_monitor.py`: a custom Live page.
+  - `tool_monitor.py` (Tool Dashboard): a custom Live page whose switches are
+    saved as settings via `save_config`; pipeline `subscribe()`.
+  - `context_editor.py`: rewrites the history in `pre_hook` on every request.
+  - `politeify.py`: an optional model (`optional_models`).
+  - `exportit.py`: `transformed_messages()` in a prompt keyword handler.

@@ -77,7 +77,7 @@ A trick has five optional request hooks (the four below, plus
 
 **When:** Called once per request, before any messages are sent to the model.
 
-**Purpose:** Append instructions to the system prompt. This is how you "prime" the model to behave a certain way.
+**Purpose:** Append instructions to the system prompt. This is how you "prime" the model to behave a certain way. Return `""` to leave it unchanged.
 
 **Example:**
 ```python
@@ -103,7 +103,11 @@ class SwapHarnessTrick(Trick):
 
 **Parameters:**
 - `context`: List of message dicts (`[{"role": "user", "content": "..."}]`)
-- `params`: Request parameters including `tools`, `temperature`, etc.
+- `params`: The request body (`tools`, `temperature`, ...). Mutate `params["tools"]` to change what the model is offered.
+
+The client resends the whole history every request, so a trick that changes
+earlier messages does it again in every `pre_hook` (Context Editor works this
+way).
 
 A message's `content` is usually a string, but it can also be `None` (an
 assistant turn that only calls tools) or a list of parts
@@ -147,9 +151,12 @@ def post_hook(self, context: list) -> list:
             attempts -= 1
             if attempts == 0:
                 break
-            context = callmodel(context, "That wasn't valid JSON. Try again.")
+            context = callmodel_sync(context, "That wasn't valid JSON. Try again.")
     return context
 ```
+
+Hooks are synchronous, so follow-up calls use `callmodel_sync` (see
+[Calling a model](#calling-a-model)).
 
 **Example (Tool call detection):**
 ```python
@@ -160,6 +167,9 @@ def post_hook(self, context: list) -> list:
         context[-1]["content"] = None
     return context
 ```
+
+When the reply ends up with `tool_calls`, petsitter sets `finish_reason` to
+`"tool_calls"`.
 
 ### `info(capabilities: dict) -> dict`
 
@@ -196,9 +206,48 @@ class LoggerTrick(Trick):
 
 Each field has a `key` (the attribute name) and `label`, and optionally a
 `description`, a `type` (`"text"`, `"number"`, `"boolean"` or `"path"`), a
-`default`, and `required`. Override `configure(config)` (calling
+`default`, and `required`. `"path"` is shown as a text box. Nothing may be
+stored yet, and a field cleared in the dashboard arrives as `""`, so fall back
+with `or` as above. Override `configure(config)` (calling
 `super().configure(config)`) to react when a value changes. The values in use
 are shown on the extension's page and on its Live tab.
+
+## Calling a model
+
+Hooks are synchronous; `callmodel_sync` makes a follow-up call from one:
+
+```python
+from petsitter.trick import callmodel_sync, get_model_config
+
+ctx = callmodel_sync(context, "Check your answer.")   # context + the new reply
+reply = ctx[-1]
+```
+
+It appends the message (if given) as a user turn and returns a new list with
+the reply added. It takes `model_url`, `model_name`, `api_key` and `tools` (the
+reply may then carry `tool_calls`); without a model it uses the one petsitter
+was started with. It raises on HTTP errors and times out after 60 seconds.
+`callmodel` is the async version, for async code only.
+
+A trick that uses other models says so: `required_models` for ones it needs,
+`optional_models` for ones it uses if they're set up and otherwise does
+without. Both are shown on the extension's page. Look one up with
+`get_model_config(key)`, which raises `KeyError` if it isn't set up:
+
+```python
+class MyTrick(Trick):
+    optional_models = ["rephraser"]   # as Politeify does
+
+    def _model(self):
+        try:
+            return get_model_config("rephraser")
+        except KeyError:
+            return get_model_config("default")
+```
+
+Pass the result as `model_url=cfg["url"], model_name=cfg["model"] or "",
+api_key=cfg["key"] or ""` (`model` and `key` can be `False`, meaning
+passthrough).
 
 ## Live page
 
@@ -257,11 +306,22 @@ fetch("action", {method: "POST", headers: {"Content-Type": "application/json"},
   so opening the tab after using your tool still shows what happened.
 - For a single-file trick, override `ui_html()` and return the HTML as a string.
 - The page runs with the dashboard's own access, same as your trick's Python.
+- `ui_action` gets the POSTed JSON (or `None`); what it returns is the
+  response, `{"ok": true}` for `None`. The standard page sends
+  `{"action": "clear"}` and `{"action": "settings"}`.
+- A page can change the extension's settings: return
+  `{"save_config": {"key": value}}` from `ui_action`. The server merges it into
+  the extension's stored settings, calls `configure()`, saves the channel, and
+  removes `save_config` from the reply (adding `save_error` if saving failed).
+  Tool Dashboard's per-tool switches are saved this way, as its
+  `blocked_tools` setting.
 - Never publish anything you wouldn't show on screen. Secrets Protector publishes
   what kind of secret it hid and the stand-in, never the value.
-- Examples: `tricks/tool_monitor.py` + `tool_monitor.html` (a full viewer, with a
-  built-in demo) and `tricks/secrets_protector.py` + `secrets_protector.html`
-  (a small activity log).
+- Examples: `tricks/tool_monitor.py` + `tool_monitor.html` (Tool Dashboard: a
+  full viewer with a built-in demo and switches saved via `save_config`),
+  `tricks/context_editor.py` + `context_editor.html` (edits conversations
+  through `ui_action`) and `tricks/secrets_protector.py` +
+  `secrets_protector.html` (a small activity log).
 
 ## The request ID
 
@@ -301,7 +361,7 @@ A reply streams to the client as the model writes it. A trick with a
 | `needs_window` | Meaning | Examples |
 |---|---|---|
 | `-1` (default) | The whole reply. It's held until complete. | Code Validator, JSON mode |
-| `0` | None. The `post_hook` only looks, and runs once the reply has been sent, on the reassembled reply. What it changes is ignored. | Traffic Logger, Tool Monitor |
+| `0` | None. The `post_hook` only looks and must change nothing. When the reply streams, it runs once the reply has been sent, on the reassembled reply, and changes are ignored; when the reply is held whole (not streamed, or another trick needs `-1`), it runs in order with the others. | Traffic Logger, Tool Dashboard, Context Editor |
 | `N` | The last `N` characters. The reply streams with only those held back. | No em-dash (`1`), Secrets Protector (`52`, the length of one stand-in) |
 
 The channel uses the largest window among its tricks, and `-1` wins outright.
@@ -309,7 +369,10 @@ With a window of `N`, the held-back tail plus the newly arrived text goes throug
 the rewriting `post_hook`s as an ordinary assistant message. Everything but the
 last `N` characters of the result is sent. So anything a trick looks for that is
 at most `N` characters long is always seen whole before any of it is sent. Tool
-calls are held to the end and reach the `post_hook` whole.
+calls are held to the end and reach the `post_hook` whole. (They're rebuilt from
+the stream by `petsitter.proxy.add_tool_call_pieces`: a piece with a name starts
+a new call, names are never appended, and `index` is ignored. Use it if you
+rebuild streamed tool calls yourself.)
 
 A trick with a window must meet two conditions:
 
@@ -352,16 +415,30 @@ The proxy fills it in before any hook runs:
 | Key | Value |
 |---|---|
 | `request_id` | Short correlation id — the same one that prefixes this request's log lines |
-| `payload` | The full incoming request body |
+| `payload` | The full incoming request body (on `/v1/messages`, converted to the OpenAI shape) |
+| `x_title` | The client's `X-Title` header |
 | `tools` | `payload["tools"]`, or `[]` |
 | `model` | The requested model string |
 | `stream` | Whether the client asked for a stream |
+| `api` | `"anthropic"` on `/v1/messages`; absent otherwise |
 
 Tricks are free to add their own keys, and should, whenever they need to carry something from one hook to another within a single request.
 
 **Do not use instance attributes for per-request state.** A trick object is shared across every concurrent request in its trickset, so a `self._something` written in `pre_hook` can be overwritten by a different request before `post_hook` reads it. Reserve instance attributes for configuration and for state that is deliberately long-lived — caches, counters, tallies.
 
 Outside a request — in a lifecycle hook, or a direct call from a test — `request_meta()` returns an inert empty dict, so reads are safe and writes are discarded.
+
+### Watching the pipeline
+
+Hooks only see their own slice of a request. A trick that reports on the whole
+pipeline (what the tricks ahead of it changed, which went dormant) subscribes
+with `petsitter.observability.subscribe(callback)`, conventionally in
+`startup()`, and calls `unsubscribe(callback)` in `shutdown()`. The callback gets
+one dict per event (`stage`, `trick`, `request_id`, ...) on the request's own
+task, so it must be quick. A trick should also say what a viewer couldn't
+otherwise infer, such as why it removed a tool:
+`trace_event("gate", self, withheld=dropped, reason="...")`. Both cost nothing
+while nothing is watching. Tool Dashboard uses both.
 
 ## Testing
 
@@ -370,7 +447,10 @@ Outside a request — in a lifecycle hook, or a direct call from a test — `req
   `request_meta()` in `start_request_meta()` / `reset_request_meta(token)`.
 - **Try it.** In the dashboard, open the channel and click **Try it**. Every
   reply shows a pill per extension, lit when it changed something, and the
-  extension's **Live** tab shows what it `report()`ed.
+  extension's **Live** tab shows what it `report()`ed. Try it sends its own
+  system prompt first, a note that this is a test harness with nothing real in
+  it, so models don't refuse the fake credentials people test with; your
+  `system_prompt` is appended to it.
 - **Tool calls.** Try it has a **Table** the model can use through three
   tools: `get_table()`, `get_value(key)` and `set_value(key, value)`. The
   panel runs them itself. Put values in the table and ask the model to read or
@@ -407,7 +487,7 @@ def install(self):
 
 ### `startup()`
 
-Called when the first concurrent request starts using this trick (the internal run counter goes 0→1). Use for per-session initialization. It open connections and preloads models:
+Called when the first concurrent request starts using this trick (the internal run counter goes 0→1). Use for per-session initialization, such as opening connections or preloading models:
 
 ```python
 def startup(self):
@@ -416,7 +496,7 @@ def startup(self):
 
 ### `shutdown()`
 
-Called when the last concurrent request finishes using this trick (run counter goes 1→0), or during server shutdown for all active tricks. Use for per-session cleanup. It closes connections and release resources:
+Called when the last concurrent request finishes using this trick (run counter goes 1→0), or during server shutdown for all active tricks. Use for per-session cleanup, such as closing connections and releasing resources:
 
 ```python
 def shutdown(self):
@@ -439,7 +519,7 @@ The startup/shutdown hooks use a reference counter so multiple concurrent reques
 
 ### Activation
 
-Set `keywords` on your trick class to activate only when the user includes that word in their message - the keyword is stripped before the model sees it. See [`tricks/multiround.py`](tricks/multiround.py) for a working example.
+Set `keywords` on your trick class to activate only when the user includes that word in their latest message (as a whole word, any case) - the keyword is stripped before the model sees it. Keyword-activated tricks run after the channel's always-on ones. See [`tricks/multiround.py`](../src/petsitter/tricks/multiround.py) for a working example.
 
 ```bash
 # Trick fires when "multiround" is present
@@ -460,7 +540,7 @@ The syntax is forgiving - a registered keyword can be triggered any of these way
 - `(swapharness: opencode/claude.md)` - parenthesized with a request
 - `(swapharness:opencode/claude.md)` - the space after the colon is optional
 - `(swapharness:)` or `(swapharness)` - empty request (e.g. list the harness tree)
-- just `swapharness` - a bare keyword alone in a message means an empty request
+- just `swapharness` - a bare keyword alone in a message (trailing `.`, `,`, `!` or `?` allowed) means an empty request
 
 This is separate from trick [keyword activation](#activation) - keywords activate or deactivate tricks for the current request, while **prompt keywords** are commands to petsitter that bypass the model entirely.
 
@@ -473,17 +553,25 @@ class MyCommandTrick(Trick):
     prompt_keyword = "mycommand"
     __brief__ = "Handles (mycommand: ...) inline requests"
 
-    def handle_prompt_keyword(self, request: str) -> dict | None:
+    def handle_prompt_keyword(self, request: str, messages: list | None = None,
+                              payload: dict | None = None) -> dict | None:
         return {"role": "assistant", "content": f"You asked: {request}"}
 ```
 
-The method receives the text after `mycommand: ` and can return:
+The framework calls it with three positional arguments, so the signature must
+accept all of them: the text after `mycommand: `, the conversation as the tool
+sent it (pattern removed), and the request body. It can return:
 - A message dict - injected as the model response (bypasses the upstream call)
 - `None` - the pattern is stripped but the normal pipeline continues
 
+If the handler doesn't `report()` anything, the extension's Live tab gets
+`Ran (mycommand: ...)`.
+
 ### Notes
 
-- Execution goes in order of the prompt reference. Unrecognized prompt keywords are passed through and surface as a non-critical error in the response along with the rest of the response
+- Only the latest user message fires handlers; older turns are just cleaned of registered patterns. Several keywords in one message run in the order typed, and the first handler to return a message answers the request.
+- Unrecognized prompt keywords are removed from the message too, and a note in the system prompt tells the model they were ignored.
+- A prompt keyword works whichever channel the request goes to. People can rename it per channel in the extension's Settings; the renamed keyword reaches the same handler.
 - The pattern `(<keyword>: <request>)` properly handles nested parentheses by tracking a depth counter.
 - A second, sed-style form `(<keyword>=<D><request><D>)` takes the request verbatim between a delimiter `D` of the user's choosing, for requests with unbalanced parentheses or significant whitespace: `(secret=|ab)c|)`. One optional space is allowed on either side of `=`. This form only counts when it names a registered keyword, so code like `f(x = 'a')` is left alone.
 - Set `strip_prompt_keyword = False` on a trick to have the framework leave its pattern where the user typed it, on every turn, for the trick's own `pre_hook` to rewrite in place (secrets_protector does this). `handle_prompt_keyword` isn't called for it, and `petsitter.trick.find_prompt_keyword_patterns` gives the trick the same parser the framework uses.

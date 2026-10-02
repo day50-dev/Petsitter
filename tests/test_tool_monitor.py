@@ -204,3 +204,91 @@ def test_a_subscriber_emitting_events_does_not_recurse():
     finally:
         unsubscribe(echo)
     assert seen == ["pre_hook"]
+
+
+class TestCallOutput:
+    """Tool results: a preview on the Live tab, the whole thing for download."""
+
+    def _turn(self, out):
+        return [
+            {"role": "user", "content": "go"},
+            {"role": "assistant", "content": None, "tool_calls": [
+                {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": '{"path": "a"}'}}]},
+            {"role": "tool", "tool_call_id": "c1", "name": "read_file", "content": out},
+        ]
+
+    def _results(self, trick):
+        return [e for _, e in trick.live_feed.since(0) if e.get("event") == "request"][-1]["results"]
+
+    def test_output_preview_and_full_payload(self):
+        from petsitter.tricks.tool_monitor import RESULT_PREVIEW_LIMIT, ToolMonitorTrick
+        t = ToolMonitorTrick(socket_path="/nonexistent/sock")
+        big = "x" * (RESULT_PREVIEW_LIMIT + 500)
+        t.pre_hook(self._turn(big), {})
+        [r] = self._results(t)
+        assert r["tool_call_id"] == "c1" and r["bytes"] == len(big)
+        assert len(r["preview"]) == RESULT_PREVIEW_LIMIT and r["truncated"] is True
+        assert t.ui_action({"action": "payload", "id": "c1"})["result"] == big
+        assert t.ui_action({"action": "payload", "id": "nope"}) == {"gone": True, "keep": 300}
+
+    def test_results_go_out_once(self):
+        from petsitter.tricks.tool_monitor import ToolMonitorTrick
+        t = ToolMonitorTrick(socket_path="/nonexistent/sock")
+        t.pre_hook(self._turn("hello"), {})
+        t.pre_hook(self._turn("hello") + [{"role": "user", "content": "next"}], {})   # history resent
+        assert self._results(t) == []
+
+    def test_fired_call_arguments_kept_in_full(self):
+        from petsitter.observability import reset_request_meta, start_request_meta
+        from petsitter.tricks.tool_monitor import ARGUMENTS_LIMIT, ToolMonitorTrick
+        t = ToolMonitorTrick(socket_path="/nonexistent/sock")
+        token = start_request_meta(request_id="r1", payload={"tools": []}, tools=[])
+        try:
+            t.pre_hook([{"role": "user", "content": "go"}], {"tools": []})
+            args = '{"text": "' + "y" * (ARGUMENTS_LIMIT + 100) + '"}'
+            t.post_hook([{"role": "assistant", "content": None, "tool_calls": [
+                {"id": "c9", "type": "function", "function": {"name": "write_file", "arguments": args}}]}])
+        finally:
+            reset_request_meta(token)
+        assert t.ui_action({"action": "payload", "id": "c9"})["arguments"] == args
+
+
+class TestSwitchingToolsOff:
+    TOOLS = [{"type": "function", "function": {"name": n, "parameters": {"type": "object"}}}
+             for n in ("read_file", "Bash", "search")]
+
+    def test_a_switched_off_tool_is_not_offered(self):
+        from petsitter.observability import reset_request_meta, start_request_meta
+        from petsitter.tricks.tool_monitor import ToolMonitorTrick
+        t = ToolMonitorTrick(socket_path="/nonexistent/sock")
+        assert t.ui_action({"action": "block", "name": "Bash", "blocked": True})["save_config"] == {"blocked_tools": "Bash"}
+        params = {"tools": list(self.TOOLS)}
+        token = start_request_meta(request_id="r", payload=params, tools=params["tools"])
+        try:
+            t.pre_hook([{"role": "user", "content": "go"}], params)
+        finally:
+            reset_request_meta(token)
+        assert [x["function"]["name"] for x in params["tools"]] == ["read_file", "search"]
+        t.ui_action({"action": "block", "name": "Bash", "blocked": False})
+        assert t.ui_action({"action": "blocked"}) == {"blocked": []}
+
+    def test_the_live_tab_switch_is_saved_with_the_channel(self, tmp_path):
+        import json
+        from starlette.applications import Starlette
+        from starlette.testclient import TestClient
+        from petsitter.gui_routes import register_gui_routes
+        from petsitter.proxy import ProxyHandler
+        from petsitter.tricks.tool_monitor import ToolMonitorTrick
+        t = ToolMonitorTrick(socket_path="/nonexistent/sock")
+        handler = ProxyHandler("http://unused", "m", tricks=[t])
+        ts = handler.tricksets["_default"]
+        ts.trick_ids = ["tm1"]
+        ts.trick_paths = ["tricks/tool_monitor.py"]
+        ts.file_path = str(tmp_path / "_default.json")
+        app = Starlette()
+        register_gui_routes(app, handler, api_key="")
+        r = TestClient(app).post("/api/tricks/ui/tm1/action", json={"action": "block", "name": "Bash"})
+        assert r.json() == {"blocked": ["Bash"]}             # the save request isn't passed back
+        saved = json.loads((tmp_path / "_default.json").read_text())
+        assert "Bash" in json.dumps(saved)
+        assert t.blocked_tools == "Bash"

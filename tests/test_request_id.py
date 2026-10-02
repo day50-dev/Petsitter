@@ -68,3 +68,26 @@ def test_tricks_and_the_traffic_logger_keep_the_arrival_id(tmp_path, monkeypatch
     assert {r["request_id"] for r in records} == {"edge1234"}
     assert seen == ["edge1234"]
     assert Trick().request_id == ""   # outside a request
+
+
+def test_ignore_prefix_drops_one_segment():
+    seen = []
+
+    async def app(scope, receive, send):
+        seen.append(scope["path"])
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    async def call(path):
+        async def receive():
+            return {"type": "http.request", "body": b""}
+
+        async def send(_):
+            pass
+        await _NormalizeV1Path(app)({"type": "http", "path": path, "headers": []}, receive, send)
+
+    for path in ("/ignore/openrouter.ai/v1/chat/completions", "/ignore/openrouter.ai/chat/completions",
+                 "/ignore/openrouter.ai/use/api.openai.com/v1/models", "/v1/models"):
+        asyncio.run(call(path))
+    assert seen == ["/v1/chat/completions", "/v1/chat/completions",
+                    "/use/api.openai.com/v1/models", "/v1/models"]

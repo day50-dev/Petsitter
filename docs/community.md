@@ -8,18 +8,20 @@ Installing tricks other people wrote, and publishing your own.
 
 ## Community Tricks
 
-Tricks are shareable. Anyone can publish one, and they show up in everyone's dashboard within the hour, in the **Available Tricks** list on the Tricks tab, next to your local ones.
+Tricks are shareable. Anyone can publish one, and they show up in everyone's dashboard within the hour, in the list of available extensions on the Extensions tab, next to your local ones.
 
 **There is no registry server.** The index is a static `index.json` in [day50-dev/tricks](https://github.com/day50-dev/tricks), rebuilt hourly by a GitHub Action that crawls public repos carrying the topic `petsitter-trick`. No accounts, no approval queue, nothing to keep running.
 
 ### Installing
 
-From the dashboard, hit **Install** on any community entry. It downloads, verifies the checksum, and adds it to the selected trickset. Or from the CLI:
+From the dashboard, hit **Install** on any community entry. It downloads, verifies the checksum, and adds it to the selected channel. Or from the CLI:
 
 ```bash
 pet search tool                  # search the index
 pet cat dana/ollama-ctx          # read the source first
 pet install dana/ollama-ctx --trickset opencode
+pet installed                    # what you have
+pet uninstall dana/ollama-ctx
 ```
 
 Installed tricks land at `<config>/tricks/<owner>/<slug>/<version>.py`, and tricksets refer to them with a `pkg:` spec rather than a path:
@@ -37,6 +39,10 @@ Installed tricks land at `<config>/tricks/<owner>/<slug>/<version>.py`, and tric
 The `pkg:` form is what makes a trickset portable. The same JSON works on another machine, where a `/home/you/...` path would not. Omit `@version` and the newest installed version is used.
 
 Point at a different index (a private one for your org, say) with `PET_REGISTRY_INDEX`, either an `https://` or a `file://` URL. The index is cached for an hour; a stale cache is preferred to an error, so the list still works offline.
+
+### One file only
+
+Publishing and installing move a single `.py`. A trick that needs data files, extra Python dependencies, shared modules or its own `.html` page can't be published this way yet. [NEXT_VERSION.md](../NEXT_VERSION.md) describes the plan: extensions as ordinary Python packages (wheels, found through entry points).
 
 ### Publishing
 
@@ -71,7 +77,7 @@ Names can't collide between authors, because your GitHub login is the namespace,
 
 To update, bump `__version__` and push. To unpublish, delete the repo or drop the topic. Anyone who already installed it keeps their copy, since the file is on their disk.
 
-`featured.json` in the index repo controls which tricks appear before you click **Show N more community tricks**. It's promotion, not permission: nothing is ever kept out of the index for being unfeatured.
+`featured.json` in the index repo controls which tricks appear before you click **Show N more from the community**. It's promotion, not permission: nothing is ever kept out of the index for being unfeatured.
 
-> A trick is Python that runs inside petsitter with your API keys, the same trust model as any pip package. `pet cat` and the dashboard's **Read** button exist because a trick is one short file, a good deal more reviewable than the average dependency.
+> A trick is Python that runs inside petsitter, the same trust model as any pip package. `pet cat` and the **Source code** tab on an extension's page show it before you install.
 

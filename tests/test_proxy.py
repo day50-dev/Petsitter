@@ -1031,16 +1031,19 @@ class TestToolCallFragments:
         assert json.loads(out[0]["function"]["arguments"]) == {"path": "a.py", "text": "hi"}
         assert json.loads(out[1]["function"]["arguments"]) == {"cmd": "ls"}
 
-    def test_by_index_when_present(self):
+    def test_index_is_ignored(self):
+        """Upstreams fill index with anything (a timestamp, the same number for
+        every call): a name starts a call, the pieces after it continue it."""
         from petsitter.proxy import merge_tool_call_fragments as merge
         frags = [
-            {"index": 0, "id": "a", "function": {"name": "f", "arguments": '{"x":'}},
-            {"index": 1, "id": "b", "function": {"name": "g", "arguments": '{"y":'}},
-            {"index": 0, "function": {"arguments": " 1}"}},
-            {"index": 1, "function": {"arguments": " 2}"}},
+            {"index": 1790000000, "id": "a", "function": {"name": "f", "arguments": '{"x":'}},
+            {"index": 1790000003, "function": {"arguments": " 1}"}},
+            {"index": 1790000000, "id": "b", "function": {"name": "g", "arguments": '{"y":'}},
+            {"index": 7, "function": {"arguments": " 2}"}},
         ]
         out = merge(frags)
-        assert [(c["function"]["name"], c["function"]["arguments"]) for c in out] == [("f", '{"x": 1}'), ("g", '{"y": 2}')]
+        assert [(c["id"], c["function"]["name"], c["function"]["arguments"]) for c in out] == \
+            [("a", "f", '{"x": 1}'), ("b", "g", '{"y": 2}')]
 
     def test_whole_calls_untouched(self):
         from petsitter.proxy import merge_tool_call_fragments as merge

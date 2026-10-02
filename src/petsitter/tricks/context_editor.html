@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Context Editor</title>
+<!-- Context Editor's Live page: recent conversations as chats, with every
+     message editable. Edits go to the extension through "action"; "events"
+     says when a conversation has new traffic. -->
+<style>
+  :root {
+    --bg: #0f0f1a; --panel: #16162a; --panel2: #12122a; --border: #1e2a3a; --text: #c8d6e5;
+    --dim: #5a7a8a; --muted: #8a9ab0; --title: #8ab4ff; --ok: #6bff8a; --edit: #f0c96b; --you: #1a2a4d;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); display: flex; flex-direction: column;
+         font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: center; gap: 14px; padding: 10px 16px; flex-wrap: wrap;
+           background: var(--panel); border-bottom: 1px solid var(--border); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); flex: none; }
+  .dot.live { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+  h1 { font-size: 14px; margin: 0; color: var(--title); font-weight: 600; }
+  .sub { color: var(--dim); font-size: 12px; }
+  .main { flex: 1; min-height: 0; display: grid; grid-template-columns: 270px minmax(0, 1fr); }
+  .convs { border-right: 1px solid var(--border); overflow-y: auto; }
+  .conv { padding: 9px 14px; border-bottom: 1px solid #141a26; cursor: pointer; }
+  .conv:hover { background: #1a1a33; }
+  .conv.sel { background: var(--you); }
+  .conv .who { font-size: 12px; color: var(--title); display: flex; gap: 8px; }
+  .conv .who .n { margin-left: auto; color: var(--dim); }
+  .conv .first { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .conv .ed { color: var(--edit); font-size: 11px; }
+  .chat-wrap { display: flex; flex-direction: column; min-height: 0; }
+  .size { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; padding: 9px 18px;
+          border-bottom: 1px solid var(--border); background: var(--panel2); font-size: 12px; color: var(--dim); }
+  .size b { font-size: 18px; color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .size .saved { color: var(--ok); }
+  .size[hidden] { display: none; }
+  .chat { flex: 1; overflow-y: auto; padding: 14px 18px 40px; }
+  .empty { color: var(--dim); padding: 40px 18px; max-width: 560px; line-height: 1.6; }
+  .empty b { color: var(--text); }
+  .msg { display: flex; flex-direction: column; margin: 0 0 12px; width: 78%; align-items: flex-start; }
+  .msg.user { margin-left: auto; align-items: flex-end; }
+  .msg.user .meta { flex-direction: row; }
+  .msg.system, .msg.tool { width: 100%; }
+  .msg.system .bubble, .msg.tool .bubble { align-self: stretch; }
+  .meta { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--dim); margin: 0 4px 3px; flex-wrap: wrap; }
+  .meta .role { text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+  .meta .badge { color: var(--edit); }
+  .meta .latest { color: var(--ok); }
+  .meta { width: 100%; }
+  .acts { display: inline-flex; gap: 4px; opacity: .55; transition: opacity .1s; }
+  .msg:hover .acts, .msg.editing .acts { opacity: 1; }
+  .meta .tok { color: var(--muted); font-variant-numeric: tabular-nums; }
+  /* this message's share of the whole conversation */
+  .share { flex: 1; min-width: 60px; display: flex; align-items: center; gap: 6px; }
+  .share .track { flex: 1; height: 6px; border-radius: 3px; background: #141a26; overflow: hidden; }
+  .share .fill { display: block; height: 100%; border-radius: 3px; background: #3a6aa8; min-width: 2px; }
+  .share.big .fill { background: var(--edit); }
+  .share.huge .fill { background: #ff7a7a; }
+  .share .pct { min-width: 30px; text-align: right; font-variant-numeric: tabular-nums; }
+  .acts button { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 4px;
+                 font: inherit; font-size: 11px; padding: 0 7px; cursor: pointer; }
+  .acts button:hover { border-color: var(--title); color: var(--text); }
+  .bubble { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 8px 12px;
+            white-space: pre-wrap; overflow-wrap: anywhere; }
+  .msg.user .bubble { background: var(--you); border-color: #26406e; }
+  .msg.system .bubble { background: var(--panel2); color: var(--muted); font-size: 13px; border-radius: 6px; }
+  .msg.tool .bubble { background: var(--panel2); color: var(--muted); border-radius: 6px;
+                      font: 12px/1.45 ui-monospace, "SF Mono", Consolas, monospace; }
+  /* replaced: unmistakable, and says the model sees this version */
+  .msg.edited .bubble { border: 1px dashed var(--edit); background: rgba(240, 201, 107, .07); }
+  .msg.user.edited .bubble { background: linear-gradient(rgba(240, 201, 107, .08), rgba(240, 201, 107, .08)), var(--you); }
+  .edit-tag { display: block; font-size: 11px; font-weight: 600; color: var(--edit); margin-bottom: 4px;
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; white-space: normal; }
+  .edit-tag span { font-weight: 400; color: #b89a52; }
+  .note { font-style: italic; color: var(--edit); }
+  .bubble.clip { max-height: 16em; overflow: hidden; position: relative; }
+  .more { background: none; border: none; color: var(--title); font: inherit; font-size: 12px; cursor: pointer; padding: 2px 4px; }
+  .calls, .imgs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .chip { font: 11.5px ui-monospace, "SF Mono", Consolas, monospace; color: var(--muted); background: #0d1320;
+          border: 1px solid var(--border); border-radius: 4px; padding: 1px 7px; max-width: 100%;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .orig-label { display: block; font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #8a7a52; }
+  .orig { margin-top: 6px; font-size: 12px; color: var(--dim); white-space: pre-wrap; border-left: 2px solid #6b5a2a;
+          padding-left: 8px; max-height: 12em; overflow: auto; }
+  textarea { width: 100%; min-height: 6em; background: #0d1320; color: var(--text); border: 1px solid var(--title);
+             border-radius: 8px; padding: 8px 10px; font: inherit; resize: vertical; }
+  .edit-row { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; }
+  .edit-row button { background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 5px;
+                     font: inherit; font-size: 12px; padding: 3px 12px; cursor: pointer; }
+  .edit-row button.save { border-color: var(--title); color: var(--title); }
+  ::-webkit-scrollbar { width: 14px; height: 14px; }
+  ::-webkit-scrollbar-track { background: #0f0f23; border-left: 1px solid #1e2a3a; }
+  ::-webkit-scrollbar-thumb { background: #34465a; border-radius: 7px; border: 2px solid #0f0f23; border-left-width: 3px; min-height: 40px; }
+  ::-webkit-scrollbar-thumb:hover { background: #4a6a8a; }
+  @supports not selector(::-webkit-scrollbar) { * { scrollbar-color: #34465a #0f0f23; } }
+  @media (max-width: 700px) {
+    .main { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+    .convs { max-height: 30vh; border-right: none; border-bottom: 1px solid var(--border); }
+    .msg { width: 100%; }
+    .acts { opacity: 1; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="dot"></span>
+  <h1>Context Editor</h1>
+  <span class="sub" id="sub">Edit any message; the model sees your version from the next request on.</span>
+</header>
+<div class="main">
+  <div class="convs" id="convs"></div>
+  <div class="chat-wrap">
+    <div class="size" id="size" hidden></div>
+    <div class="chat" id="chat"></div>
+  </div>
+</div>
+<script>
+const ROLE = {user: "you", assistant: "model", tool: "tool output", system: "instructions"};
+// hiddenOriginals: edited messages whose original you've collapsed (shown by default)
+let selected = null, rows = [], editing = null, shown = new Set(), hiddenOriginals = new Set();
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+}
+function tokens(chars) { const t = Math.round(chars / 4); return t >= 1000 ? (t / 1000).toFixed(1) + "k tok" : t + " tok"; }
+function kb(chars) { return chars >= 1024 ? (chars / 1024).toFixed(0) + " KB" : chars + " B"; }
+
+async function act(body) {
+  const r = await fetch("action", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  return r.json();
+}
+
+async function loadConvs() {
+  const d = await act({action: "conversations"});
+  const list = d.conversations || [];
+  if (!selected && list.length) selected = list[0].conv;
+  document.getElementById("convs").innerHTML = list.length ? list.map(c =>
+    `<div class="conv${c.conv === selected ? " sel" : ""}" data-conv="${esc(c.conv)}">` +
+    `<div class="who"><span>${esc(c.who || "unknown program")}</span><span class="n">${tokens(c.tokens * 4)} · ${c.messages} msgs</span></div>` +
+    `<div class="first">${esc(c.first || "(no text)")}</div>` +
+    (c.edited ? `<div class="ed">${c.edited} edited</div>` : "") + `</div>`).join("")
+    : "";
+  document.querySelectorAll(".conv").forEach(el => el.onclick = () => { selected = el.dataset.conv; editing = null; loadConvs(); loadDetail(); });
+  if (!list.length) {
+    document.getElementById("chat").innerHTML = '<div class="empty"><b>No conversations yet.</b><br><br>Use your AI tool as normal ' +
+      '(or send a message from <b>Try it</b>) and each conversation shows up here. Then edit any message: ' +
+      'change a refusal into an agreement, or remove images and tool output the model is done with.</div>';
+  }
+}
+
+async function loadDetail() {
+  if (!selected) return;
+  const d = await act({action: "detail", conv: selected});
+  if (d.gone) { selected = null; return loadConvs(); }
+  showDetail(d);
+}
+
+// The chat and the size bar, from a detail reply (loading one, or an edit).
+function showDetail(d) {
+  rows = d.messages || [];
+  const size = document.getElementById("size");
+  size.hidden = false;
+  size.innerHTML = `<span>context sent to the model</span><b>~${tokens(d.tokens * 4)}</b>` +
+    `<span>${rows.length} messages</span>` +
+    (d.saved ? `<span class="saved">~${tokens(d.saved * 4)} saved by your edits</span>` : "");
+  renderChat();
+}
+
+let totalChars = 1;
+function renderChat() {
+  totalChars = Math.max(1, rows.reduce((n, r) => n + (r.chars || 0), 0));
+  const chat = document.getElementById("chat");
+  const atBottom = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 60;
+  chat.innerHTML = rows.map(renderMsg).join("");
+  chat.querySelectorAll("[data-act]").forEach(b => b.onclick = () => onAct(b.dataset.act, b.dataset.key));
+  const ta = chat.querySelector("textarea");
+  if (ta) ta.focus();
+  if (atBottom && !editing) chat.scrollTop = chat.scrollHeight;
+}
+
+function renderMsg(m) {
+  const role = m.role in ROLE ? m.role : "assistant";
+  const kind = m.edit ? m.edit.kind : "";
+  const badge = kind === "replace" ? "edited" : kind === "remove" ? "removed" : kind === "drop_images" ? "images removed" : "";
+  const acts = [];
+  if (editing !== m.key) {
+    acts.push(`<button data-act="edit" data-key="${esc(m.key)}" title="Rewrite this message">edit</button>`);
+    if (kind !== "remove") acts.push(`<button data-act="remove" data-key="${esc(m.key)}" title="Replace it with a short note">remove</button>`);
+    if (m.images.length) acts.push(`<button data-act="drop_images" data-key="${esc(m.key)}" title="Drop the images, keep the text">remove images</button>`);
+    if (m.edit) acts.push(`<button data-act="revert" data-key="${esc(m.key)}" title="Put the original back">revert</button>`);
+    if (m.original !== null) acts.push(`<button data-act="original" data-key="${esc(m.key)}">${hiddenOriginals.has(m.key) ? "show" : "hide"} original</button>`);
+  }
+  let body;
+  if (editing === m.key) {
+    body = `<textarea id="edit-text">${esc(m.text)}</textarea><div class="edit-row">` +
+      `<button data-act="cancel" data-key="${esc(m.key)}">cancel</button>` +
+      `<button class="save" data-act="save" data-key="${esc(m.key)}">save</button></div>`;
+  } else {
+    const long = (m.text || "").length > 1200 && !shown.has(m.key);
+    const tag = kind === "replace" ? `<span class="edit-tag">✎ replaced <span>· the model sees this version</span></span>`
+      : kind === "remove" ? `<span class="edit-tag">✂ removed <span>· the model sees this note instead</span></span>`
+      : kind === "drop_images" ? `<span class="edit-tag">images removed <span>· the model sees a note in their place</span></span>` : "";
+    // A note petsitter put in (removed message, removed images) reads as its own words.
+    let text = esc(m.text);
+    if (kind === "remove") text = `<span class="note">${text}</span>`;
+    if (kind === "drop_images" && m.edit.note !== undefined) {
+      const note = esc(m.edit.note || "(The user shared an image here; it has been dealt with.)");
+      text = text.endsWith(note) ? text.slice(0, -note.length) + `<span class="note">${note}</span>` : text;
+    }
+    body = ((m.text || tag) ? `<div class="bubble${long ? " clip" : ""}">${tag}${text}</div>` : "") +
+      (long ? `<button class="more" data-act="more" data-key="${esc(m.key)}">show all</button>` : "");
+  }
+  const calls = m.tool_calls.length ? `<div class="calls">${m.tool_calls.map(c =>
+    `<span class="chip" title="${esc(c.arguments)}">→ ${esc(c.name)}(${esc(c.arguments)})</span>`).join("")}</div>` : "";
+  const imgs = m.images.length ? `<div class="imgs">${m.images.map(n => `<span class="chip">image · ${kb(n)}</span>`).join("")}</div>` : "";
+  const orig = m.original !== null && !hiddenOriginals.has(m.key) ? `<div class="orig"><span class="orig-label">original</span>${esc(m.original)}</div>` : "";
+  const share = (m.chars || 0) / totalChars;
+  const pct = share >= 0.01 ? Math.round(share * 100) + "%" : "<1%";
+  const bar = `<span class="share${share > 0.5 ? " huge" : share > 0.25 ? " big" : ""}" title="${pct} of everything sent to the model">` +
+    `<span class="track"><i class="fill" style="width:${(share * 100).toFixed(1)}%"></i></span><span class="pct">${pct}</span></span>`;
+  return `<div class="msg ${role}${m.edit ? " edited" : ""}${editing === m.key ? " editing" : ""}">` +
+    `<div class="meta"><span class="acts">${acts.join("")}</span>` +
+    `<span class="role">${esc(ROLE[role] || role)}</span><span class="tok">~${tokens(m.chars)}</span>` +
+    (badge ? `<span class="badge">${badge}</span>` : "") +
+    (m.latest ? `<span class="latest" title="Just came back. An edit applies when your tool sends its next message.">latest reply</span>` : "") +
+    bar + `</div>` +
+    body + calls + imgs + orig + `</div>`;
+}
+
+async function onAct(what, key) {
+  if (what === "edit") { editing = key; return renderChat(); }
+  if (what === "cancel") { editing = null; return renderChat(); }
+  if (what === "more") { shown.add(key); return renderChat(); }
+  if (what === "original") { hiddenOriginals.has(key) ? hiddenOriginals.delete(key) : hiddenOriginals.add(key); return renderChat(); }
+  let body = {action: what, conv: selected, key};
+  if (what === "save") body = {action: "replace", conv: selected, key, text: document.getElementById("edit-text").value};
+  editing = null;
+  const d = await act(body);
+  if (d.messages) showDetail(d);
+  loadConvs();
+}
+
+let pending = null;
+function refreshSoon(conv) {
+  clearTimeout(pending);
+  pending = setTimeout(() => { loadConvs(); if (!editing && (!conv || conv === selected)) loadDetail(); }, 300);
+}
+
+const source = new EventSource("events");
+source.onopen = () => document.getElementById("dot").classList.add("live");
+source.onerror = () => document.getElementById("dot").classList.remove("live");
+source.onmessage = m => { try { const e = JSON.parse(m.data); if (e.event === "context") refreshSoon(e.conv); } catch (_) {} };
+loadConvs().then(loadDetail);
+</script>
+</body>
+</html>

@@ -13,7 +13,10 @@ Detected automatically:
   `"password": "..."`, `api_key = '...'`, `DB_PASSWORD=...`, `secret: ...`
 - about 200 kinds of vendor keys and tokens (OpenAI, Anthropic, AWS, GitHub,
   Slack, Stripe, Google...), database URLs and private keys
-- emails, phone numbers, SSNs, card numbers and IP addresses
+- emails, phone numbers, SSNs and card numbers
+
+IP addresses are left alone: whether one is local or public, which subnet and
+which machine it is, are what make it useful, and a stand-in loses all of that.
 
 Code that only *refers* to a secret (`password = os.environ["DB_PASSWORD"]`,
 `token: ${GITHUB_TOKEN}`) is left alone.
@@ -59,7 +62,7 @@ directly before a `)`.
   arguments (JSON-escaped there). Only the stand-in format is swapped back,
   so nothing else in the reply can be mistaken for one.
 - The personal-detail patterns are broad: a 10-digit number reads as a phone
-  number and a dotted version string like `1.2.3.4` as an IP address.
+  number.
 """
 
 import hashlib
@@ -327,7 +330,7 @@ class SecretsProtectorTrick(Trick):
         "bearer_token": "a bearer token", "slack_token": "a Slack token",
         "database_url": "a database URL", "private_key": "a private key",
         "email": "an email address", "phone": "a phone number",
-        "ssn": "a Social Security number", "ip_address": "an IP address",
+        "ssn": "a Social Security number",
         "credit_card": "a card number", "marked": "a value you marked",
         "credential": "a password or secret",
     }

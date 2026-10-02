@@ -328,3 +328,50 @@ def test_chat_finds_an_api_without_v1_and_remembers(monkeypatch, stream):
     finally:
         trick_mod._API_ROOTS.clear()
         configure_modelset({})
+
+
+def test_parallel_calls_sharing_an_index_stay_separate():
+    """Five parallel search_web calls that all say index 0 (some upstreams do):
+    each named piece starts a call, so they don't glue into
+    "search_websearch_web..." with their arguments run together."""
+    from petsitter.proxy import add_tool_call_pieces, merge_tool_call_fragments
+    pieces = []
+    for q in ["a", "b", "c", "d", "e"]:
+        pieces.append({"index": 0, "id": f"call_{q}", "type": "function",
+                       "function": {"name": "search_web", "arguments": ""}})
+        pieces.append({"index": 0, "function": {"arguments": '{"query": '}})
+        pieces.append({"index": 0, "function": {"arguments": f'"{q}"}}'}})
+    calls = []
+    add_tool_call_pieces(calls, pieces)
+    assert [c["function"]["name"] for c in calls] == ["search_web"] * 5
+    assert [json.loads(c["function"]["arguments"])["query"] for c in calls] == list("abcde")
+    assert [c["id"] for c in calls] == [f"call_{q}" for q in "abcde"]
+    assert merge_tool_call_fragments(pieces) == calls        # the non-streaming repair agrees
+
+
+def test_chat_stream_window_keeps_parallel_calls_apart(monkeypatch):
+    def ch(delta, finish=None):
+        return "data: " + json.dumps({"id": "c1", "object": "chat.completion.chunk", "created": 1, "model": "m",
+                                      "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}) + "\n\n"
+    body = ch({"role": "assistant"})
+    for q in "abc":
+        body += ch({"tool_calls": [{"index": 0, "id": f"call_{q}", "type": "function",
+                                    "function": {"name": "search_web", "arguments": ""}}]})
+        body += ch({"tool_calls": [{"index": 0, "function": {"arguments": f'{{"query": "{q}"}}'}}]})
+    body += ch({}, "tool_calls") + "data: [DONE]\n\n"
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(proxy_mod.httpx, "AsyncClient", lambda *a, **kw: real(
+        *a, transport=httpx.MockTransport(lambda r: httpx.Response(200, text=body,
+                                          headers={"content-type": "text/event-stream"})), **kw))
+    handler = ProxyHandler(model_url="http://upstream", model_name="m", tricks=[Swapper()])
+
+    async def go():
+        return [c async for c in handler.chat_completions_stream(
+            {"model": "m", "stream": True, "messages": [{"role": "user", "content": "search"}]})]
+    out = asyncio.run(go())
+    deltas = [json.loads(l[6:])["choices"][0]["delta"] for l in out if l.startswith("data: {")]
+    calls = [tc for d in deltas for tc in d.get("tool_calls", [])]
+    assert [c["function"]["name"] for c in calls] == ["search_web"] * 3
+    assert [c["index"] for c in calls] == [0, 1, 2]          # re-numbered for the client
+    assert [json.loads(c["function"]["arguments"])["query"] for c in calls] == list("abc")

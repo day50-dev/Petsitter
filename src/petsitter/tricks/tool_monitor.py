@@ -1,4 +1,4 @@
-"""Streams a live feed of which tools your AI tool offered the model, which ones other tricks hid, and which ones the model actually called.
+"""Shows every tool your AI tool offers the model and every call it makes, with the output, and lets you switch any tool off.
 
 Agents hand the model a list of tools on every request, and some tricks narrow
 that list step by step to walk the model through a process. When a tool call
@@ -8,8 +8,13 @@ viewer draws it.
 
 ## How to use
 
-Install it, then open its **Live** tab and use your AI tool as normal. Every
-request shows up there as it happens. No AI tool connected yet? Press **demo**
+Install it, then open its **Live** tab and use your AI tool as normal.
+Each tool has a switch: turn one off and the model isn't offered it any more,
+from the next request on, even a tool built into your AI tool. Turned-off tools
+show as withheld by Tool Dashboard; the setting lasts across restarts. Every
+request shows up there as it happens. Click a tool to see each of its calls:
+the arguments, what the tool returned (the first 2,000 characters), and a
+**download** button that saves the call's full arguments and output as JSON. No AI tool connected yet? Press **demo**
 on the Live tab to watch made-up traffic.
 
 Put this extension **first** in the channel, so its "offered" list is what your
@@ -22,8 +27,9 @@ listen on.
 
 ## How it works
 
-- Two datagrams per request: `request` from `pre_hook` (offered tools, pending
-  tool results, conversation key) and `response` from `post_hook` (final tool
+- Two datagrams per request: `request` from `pre_hook` (offered tools, tool
+  results not sent before, each with a preview of up to 2,000 characters,
+  conversation key) and `response` from `post_hook` (final tool
   list, `withheld`, `added`, `fired` calls with arguments, `by_trick`, `notes`).
 - Attribution: `startup()` subscribes to pipeline events. After each trick's
   `pre_hook` the live tool list is re-sampled, so a change is credited to the
@@ -37,16 +43,20 @@ listen on.
   descriptions and are marked `truncated`. Swap `_emit` to use another transport.
 - The conversation key hashes `x_title` plus the first user message, to stitch a
   tool call and its result (separate requests) together.
+- The full arguments and output of the last 300 calls are kept in memory, by
+  call id, for the Live tab's download (`ui_action({"action": "payload",
+  "id": ...})`).
 """
 
 import hashlib
 import json
 import socket
 import threading
+from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from petsitter.observability import LOG_DIR, request_meta, subscribe, unsubscribe
+from petsitter.observability import LOG_DIR, request_meta, subscribe, trace_event, unsubscribe
 from petsitter.trick import Trick
 
 DEFAULT_SOCKET_PATH = LOG_DIR / "toolmon.sock"
@@ -57,6 +67,10 @@ DESCRIPTION_LIMIT = 200
 # Generous: this is what the viewer expands into when you click a fired call.
 # 400 chars was too short to show a real tool invocation's arguments.
 ARGUMENTS_LIMIT = 4000
+# A tool's output, as shown on the Live tab: enough to read, not a whole file.
+RESULT_PREVIEW_LIMIT = 2000
+# Calls whose full arguments and output are kept for the Live tab's download.
+KEEP_PAYLOADS = 300
 MAX_ATTRIBUTIONS = 40
 MAX_NOTES = 40
 
@@ -115,18 +129,28 @@ def _conversation_key(messages: list, x_title: str) -> str:
     return digest.hexdigest()[:8]
 
 
+def _result_text(content) -> str:
+    """A tool result's text, whatever shape its content came in."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(str(p.get("text", "")) if isinstance(p, dict) else str(p) for p in content)
+    return "" if content is None else json.dumps(content, default=str)
+
+
 def _pending_results(messages: list) -> list[dict]:
-    """Tool results sitting in the inbound messages, i.e. last turn's answers."""
+    """Tool results sitting in the inbound messages, i.e. last turn's answers,
+    each with its full text under "text"."""
     results = []
     for message in messages or []:
         if not isinstance(message, dict) or message.get("role") != "tool":
             continue
-        content = str(message.get("content", ""))
+        text = _result_text(message.get("content"))
         results.append({
             "name": message.get("name", ""),
             "tool_call_id": message.get("tool_call_id", ""),
-            "bytes": len(content),
-            "preview": content[:DESCRIPTION_LIMIT].replace("\n", " "),
+            "bytes": len(text),
+            "text": text,
         })
     return results
 
@@ -134,8 +158,8 @@ def _pending_results(messages: list) -> list[dict]:
 class ToolMonitorTrick(Trick):
     """Publishes which tools were offered, withheld, added, and invoked."""
 
-    __brief__ = "Shows live which tools were offered, hidden, and called"
-    __display_name__ = "Tool Monitor"
+    __brief__ = "Shows the tools offered and called, with their output, and switches any tool off"
+    __display_name__ = "Tool Dashboard"
     __category__ = "Diagnostics"
     needs_window = 0   # only looks at replies, so they can stream
     ui_page = "tool_monitor.html"
@@ -150,6 +174,17 @@ class ToolMonitorTrick(Trick):
             ),
             "type": "path",
             "default": str(DEFAULT_SOCKET_PATH),
+        },
+        {
+            "key": "blocked_tools",
+            "label": "Switched-off tools",
+            "description": (
+                "Tools the model isn't offered, comma-separated. The switches on "
+                "the Live tab set this; tools are removed here, at this "
+                "extension's place in the channel."
+            ),
+            "type": "text",
+            "default": "",
         },
         {
             "key": "include_schemas",
@@ -167,8 +202,15 @@ class ToolMonitorTrick(Trick):
     def __init__(self, socket_path: str = "", include_schemas: bool = False):
         self.socket_path = socket_path or str(DEFAULT_SOCKET_PATH)
         self.include_schemas = include_schemas
+        self.blocked_tools = ""
         self._sock = None
         self._lock = threading.Lock()
+        # Full arguments and output of recent calls, by call id, for the Live
+        # tab's download. Events only carry a preview of each.
+        self._payloads: "OrderedDict[str, dict]" = OrderedDict()
+        # Results already sent to the Live tab: the client resends the whole
+        # history every request, so only new ones go out.
+        self._sent_results: "OrderedDict[str, None]" = OrderedDict()
 
     def configure(self, config: dict) -> None:
         super().configure(config)
@@ -245,6 +287,15 @@ class ToolMonitorTrick(Trick):
         meta["toolmon_offered"] = _tool_names(incoming)
         meta["toolmon_seen"] = _tool_names(incoming)
 
+        # Tools switched off on the Live tab: gone from here on in the channel.
+        # (Editing the same dict is what lets the attribution above credit it.)
+        blocked = self._blocked()
+        if blocked and isinstance(params, dict) and params.get("tools"):
+            off = [n for n in _tool_names(params["tools"]) if n in blocked]
+            if off:
+                params["tools"] = [t for t in params["tools"] if _tool_names([t])[0] not in blocked]
+                trace_event("gate", self, withheld=off, reason="switched off in Tool Dashboard")
+
         self._emit({
             "event": "request",
             "request_id": meta.get("request_id", ""),
@@ -254,9 +305,41 @@ class ToolMonitorTrick(Trick):
             "stream": bool(meta.get("stream", payload.get("stream", False))),
             "messages": len(context or []),
             "offered": offered,
-            "results": _pending_results(context),
+            "results": self._new_results(context),
         })
         return context
+
+    def _blocked(self) -> set[str]:
+        return {n.strip() for n in str(getattr(self, "blocked_tools", "") or "").split(",") if n.strip()}
+
+    def _new_results(self, context: list) -> list[dict]:
+        """Tool results not sent before, with a preview of each; the full text
+        is kept for the download."""
+        out = []
+        for r in _pending_results(context):
+            text = r.pop("text")
+            cid = r["tool_call_id"]
+            if cid:
+                self._remember(cid, result=text, result_name=r["name"])
+                with self._lock:
+                    if cid in self._sent_results:
+                        continue
+                    self._sent_results[cid] = None
+                    while len(self._sent_results) > KEEP_PAYLOADS * 10:
+                        self._sent_results.popitem(last=False)
+            r["preview"] = text[:RESULT_PREVIEW_LIMIT]
+            if len(text) > RESULT_PREVIEW_LIMIT:
+                r["truncated"] = True
+            out.append(r)
+        return out
+
+    def _remember(self, call_id: str, **fields) -> None:
+        with self._lock:
+            entry = self._payloads.pop(call_id, None) or {"id": call_id}
+            entry.update(fields)
+            self._payloads[call_id] = entry
+            while len(self._payloads) > KEEP_PAYLOADS:
+                self._payloads.popitem(last=False)
 
     def post_hook(self, context: list) -> list:
         """Compare the final tool list against the baseline; report what fired."""
@@ -278,6 +361,8 @@ class ToolMonitorTrick(Trick):
                     continue
                 function = call.get("function") or {}
                 arguments = str(function.get("arguments", ""))
+                if call.get("id"):
+                    self._remember(call["id"], name=function.get("name", ""), arguments=arguments)
                 entry = {
                     "name": function.get("name", ""),
                     "id": call.get("id", ""),
@@ -324,6 +409,29 @@ class ToolMonitorTrick(Trick):
             self.live_feed.clear()
         elif action == "demo":
             threading.Thread(target=self._demo, daemon=True).start()
+        elif action == "blocked":
+            return {"blocked": sorted(self._blocked())}
+        elif action == "block":
+            # A switch on the Live tab. Saved as the blocked_tools setting, so
+            # it lasts; the server stores whatever "save_config" asks for.
+            names = self._blocked()
+            name = str(data.get("name", "")).strip()
+            if name:
+                if data.get("blocked", True):
+                    names.add(name)
+                else:
+                    names.discard(name)
+            self.blocked_tools = ", ".join(sorted(names))
+            self.report(("Switched off " if data.get("blocked", True) else "Switched on ") + name)
+            return {"blocked": sorted(names), "save_config": {"blocked_tools": self.blocked_tools}}
+        elif action == "payload":
+            # One call in full, for the download: its arguments and its output.
+            with self._lock:
+                entry = self._payloads.get(str(data.get("id", "")))
+                entry = dict(entry) if entry else None
+            if entry is None:
+                return {"gone": True, "keep": KEEP_PAYLOADS}
+            return entry
         return {"ok": True}
 
     DEMO_TOOLS = [
@@ -350,23 +458,33 @@ class ToolMonitorTrick(Trick):
         import time
         names = [n for n, _ in self.DEMO_TOOLS]
         conversation = "demo%04x" % random.getrandbits(16)
+        last = None   # the previous round's call, answered in this round's request
         for phase, allowed in self.DEMO_PHASES * 2:
             rid = "demo%04x" % random.getrandbits(16)
+            results = []
+            if last:
+                out = "\n".join(f"{i:4}  line {i} of src/app.py" for i in range(1, 120))
+                self._remember(last[1], result=out, result_name=last[0])
+                results = [{"name": last[0], "tool_call_id": last[1], "bytes": len(out),
+                            "preview": out[:RESULT_PREVIEW_LIMIT], "truncated": len(out) > RESULT_PREVIEW_LIMIT}]
             self.publish({
                 "v": SCHEMA_VERSION, "ts": _now(), "event": "request",
                 "request_id": rid, "conversation": conversation,
                 "x_title": f"demo/{phase}", "model": "demo-model", "stream": True,
-                "messages": 4, "results": [], "demo": True,
+                "messages": 4, "results": results, "demo": True,
                 "offered": [{"name": n, "description": d} for n, d in self.DEMO_TOOLS],
             })
             time.sleep(0.5)
             withheld = [n for n in names if n not in allowed]
             fired = random.sample(allowed, k=1)
+            call_id = "call_%04x" % random.getrandbits(16)
+            self._remember(call_id, name=fired[0], arguments=json.dumps({"path": "src/app.py"}))
+            last = (fired[0], call_id)
             self.publish({
                 "v": SCHEMA_VERSION, "ts": _now(), "event": "response",
                 "request_id": rid, "conversation": conversation, "model": "demo-model",
                 "offered": names, "final": allowed, "withheld": withheld, "added": [],
-                "fired": [{"name": n, "id": "call_%04x" % random.getrandbits(16),
+                "fired": [{"name": n, "id": call_id,
                            "arguments": json.dumps({"path": "src/app.py"})} for n in fired],
                 "by_trick": [{"trick": "PhaseGateTrick", "withheld": withheld, "added": []}],
                 "notes": [{"stage": "gate", "trick": "PhaseGateTrick", "reason": f"phase={phase}"}],

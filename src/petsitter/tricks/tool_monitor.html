@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>toolwatch</title>
+<title>Tool Dashboard</title>
 <style>
 :root {
   --bg: #0f0f1a; --panel: #16162a; --border: #1e2a3a; --text: #c8d6e5;
@@ -70,6 +70,14 @@ main {
 .tool-row .name mark { background: none; color: var(--added); font-weight: 700; }
 .tool-row .strip { display: flex; gap: 1px; font-size: 11px; letter-spacing: -1px; color: var(--dim); }
 .tool-row .num { min-width: 40px; text-align: right; font-weight: 600; }
+.tool-row.blocked .name { text-decoration: line-through; color: var(--dim); }
+/* on/off: whether the model is offered this tool at all */
+.sw { flex: none; width: 26px; height: 14px; border-radius: 7px; border: none; padding: 0; margin-left: 8px;
+      position: relative; cursor: pointer; background: #1a5a2a; }
+.sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%;
+             background: var(--fired); transition: transform .12s; transform: translateX(12px); }
+.sw.off { background: #3a1a1a; }
+.sw.off::after { background: #8a5a5a; transform: none; }
 .glyph.fired, .num.fired, .strip .c-fired { color: var(--fired); }
 .glyph.withheld, .num.withheld, .strip .c-withheld { color: var(--withheld); }
 .glyph.added, .strip .c-added { color: var(--added); }
@@ -97,6 +105,13 @@ main {
 }
 .history-args.raw { white-space: pre-wrap; word-break: break-all; }
 .trunc-flag { color: var(--added); font-size: 11px; }
+.call-output { margin: 0 0 12px 24px; }
+.call-output .out-head { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--dim); margin: 0 0 4px; }
+.call-output pre { margin: 0; max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+  font: 12px ui-monospace, "SF Mono", Consolas, monospace; color: var(--text); background: #0d1320;
+  border: 1px solid var(--border); border-left: 2px solid var(--fired); padding: 6px 10px; border-radius: 4px; }
+.call-output.pending .out-head { font-style: italic; }
+.dl-btn { margin-left: auto; font: inherit; font-size: 11px; padding: 1px 8px; cursor: pointer; }
 .jt-row { padding: 1px 0; }
 .jt-children {
   margin-left: 13px; padding-left: 9px; border-left: 1px solid var(--border);
@@ -144,7 +159,7 @@ footer {
 
 <header>
 <span class="dot" id="live-dot"></span>
-<h1>toolwatch</h1>
+<h1>Tool Dashboard</h1>
 <span class="stat">requests<b id="s-requests">0</b></span>
 <span class="stat">tools<b id="s-tools">0</b></span>
 <span class="stat fired">fired<b id="s-fired">0</b></span>
@@ -199,6 +214,7 @@ const MAX_HISTORY = 200;
 const MAX_REQUESTS = 400;
 
 const store = {
+  results: new Map(),    // tool call id -> its output: {name, preview, bytes, truncated}
   tools: new Map(),      // name -> tool record, in first-seen order
   requests: new Map(),   // id -> summary, in first-seen order
   events: 0, firedTotal: 0, withheldTotal: 0, lastEventAt: 0,
@@ -242,17 +258,22 @@ function applyEvent(event) {
       names.push(name);
     }
     request.offered = names;
+    for (const r of event.results || []) {
+      if (r && r.tool_call_id) store.results.set(r.tool_call_id, r);
+    }
+    while (store.results.size > MAX_HISTORY * 5) store.results.delete(store.results.keys().next().value);
   } else if (event.event === "response") {
     request.done = true;
     const offered = (event.offered && event.offered.length) ? event.offered : request.offered;
     const withheld = new Set(event.withheld || []);
     const added = event.added || [];
 
+    // Every call, parallel ones included: five search_web calls are five.
     const firedArgs = new Map();
     for (const call of event.fired || []) {
-      if (call && call.name && !firedArgs.has(call.name)) {
-        firedArgs.set(call.name, {args: call.arguments || "", truncated: !!call.arguments_truncated});
-      }
+      if (!call || !call.name) continue;
+      if (!firedArgs.has(call.name)) firedArgs.set(call.name, []);
+      firedArgs.get(call.name).push({id: call.id || "", args: call.arguments || "", truncated: !!call.arguments_truncated});
     }
 
     const blamed = new Map(), reasons = new Map();
@@ -263,7 +284,7 @@ function applyEvent(event) {
       if (note.reason && note.trick) reasons.set(note.trick, note.reason);
     }
 
-    request.fired = firedArgs.size;
+    request.fired = [...firedArgs.values()].reduce((n, calls) => n + calls.length, 0);
     request.withheld = withheld.size;
 
     const names = offered.concat(added.filter(n => !offered.includes(n)));
@@ -279,8 +300,7 @@ function applyEvent(event) {
       const fa = firedArgs.get(name);
       t.history.unshift({
         request_id: rid, at: Date.now(), state, by,
-        reason: reasons.get(by) || "", args: fa ? fa.args : "",
-        argsTruncated: fa ? fa.truncated : false, x_title: request.x_title,
+        reason: reasons.get(by) || "", calls: fa || [], x_title: request.x_title,
       });
       if (t.history.length > MAX_HISTORY) t.history.length = MAX_HISTORY;
       if (state === "fired") store.firedTotal += 1;
@@ -328,7 +348,7 @@ function collapseUnused(history) {
 
 // -- UI state -----------------------------------------------------------
 
-const ui = {selected: null, order: "seen", query: "", filtering: false, follow: true, raw: false, folded: new Set(), collapsedPaths: new Set()};  // fired calls open as a tree; a click folds one
+const ui = {blocked: new Set(), canBlock: false, selected: null, order: "seen", query: "", filtering: false, follow: true, raw: false, folded: new Set(), collapsedPaths: new Set()};  // fired calls open as a tree; a click folds one
 
 // -- argument tree --------------------------------------------------------
 //
@@ -380,6 +400,40 @@ function renderTree(value, path, entryKey) {
   return `${toggle}<span class="jt-punct">${open}</span>` +
     `<div class="jt-children">${children}</div>` +
     `<span class="jt-punct">${close}</span>`;
+}
+
+// A call's output, from the tool result that came back in a later request.
+function renderOutput(call, name) {
+  const dl = call.id ? `<button class="dl-btn" data-id="${esc(call.id)}" data-name="${esc(name)}" title="Save this call's full arguments and output as JSON">⤓ download</button>` : "";
+  const r = call.id ? store.results.get(call.id) : null;
+  if (!r) {
+    return `<div class="call-output pending"><div class="out-head">no output yet: it arrives with the next request${dl}</div></div>`;
+  }
+  const size = r.bytes >= 1024 ? (r.bytes / 1024).toFixed(1) + " KB" : r.bytes + " bytes";
+  const shown = r.truncated ? `, showing the first ${(r.preview || "").length.toLocaleString()} characters` : "";
+  return `<div class="call-output"><div class="out-head">output · ${size}${shown}${dl}</div><pre>${esc(r.preview || "")}</pre></div>`;
+}
+
+// The full call, as petsitter kept it: arguments and output, nothing cut.
+async function downloadPayload(id, name, btn) {
+  const label = btn.textContent;
+  try {
+    const r = await fetch("action", {method: "POST", headers: {"Content-Type": "application/json"},
+                                     body: JSON.stringify({action: "payload", id})});
+    const d = await r.json();
+    if (d.gone) { btn.textContent = "no longer kept"; setTimeout(() => btn.textContent = label, 2000); return; }
+    let args = d.arguments;
+    try { args = JSON.parse(d.arguments); } catch (_) {}
+    const blob = new Blob([JSON.stringify({id: d.id, name: d.name || name, arguments: args, output: d.result ?? null}, null, 2)],
+                          {type: "application/json"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `toolcall-${(d.name || name || "call").replace(/[^\w.-]+/g, "_")}-${id.replace(/[^\w.-]+/g, "_")}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  } catch (e) {
+    btn.textContent = "failed"; setTimeout(() => btn.textContent = label, 2000);
+  }
 }
 
 function renderArgsBlock(entryKey, raw, truncated) {
@@ -477,10 +531,20 @@ function renderToolList(tools) {
       }).reverse().join("");
       right = `<span class="strip">${cells}</span>`;
     }
-    return `<div class="tool-row${sel}" data-name="${esc(t.name)}">` +
+    const off = ui.blocked.has(t.name);
+    const sw = ui.canBlock
+      ? `<button class="sw${off ? " off" : ""}" data-tool="${esc(t.name)}" title="${off ? "Switched off: the model isn't offered this tool. Click to offer it again." : "Offered to the model. Click to stop offering it."}" aria-label="${off ? "Switch on" : "Switch off"} ${esc(t.name)}"></button>`
+      : "";
+    return `<div class="tool-row${sel}${off ? " blocked" : ""}" data-name="${esc(t.name)}">` +
       `<span class="glyph ${g.cls}">${g.glyph}</span>` +
-      `<span class="name">${highlight(t.name, ui.filtering ? "" : ui.query)}</span>${right}</div>`;
+      `<span class="name">${highlight(t.name, ui.filtering ? "" : ui.query)}</span>${right}${sw}</div>`;
   }).join("");
+  list.querySelectorAll(".sw").forEach(btn => {
+    btn.addEventListener("click", ev => {
+      ev.stopPropagation();
+      setBlocked(btn.dataset.tool, !ui.blocked.has(btn.dataset.tool));
+    });
+  });
   list.querySelectorAll(".tool-row").forEach(row => {
     row.addEventListener("click", () => {
       ui.selected = row.dataset.name;
@@ -490,6 +554,27 @@ function renderToolList(tools) {
     });
   });
 }
+
+// Switch a tool off (or back on). Petsitter removes it from what the model is
+// offered, from the next request on, and remembers the choice.
+async function setBlocked(name, blocked) {
+  try {
+    const r = await fetch("action", {method: "POST", headers: {"Content-Type": "application/json"},
+                                     body: JSON.stringify({action: "block", name, blocked})});
+    const d = await r.json();
+    if (Array.isArray(d.blocked)) { ui.blocked = new Set(d.blocked); render(); }
+  } catch (_) {}
+}
+
+async function loadBlocked() {
+  try {
+    const r = await fetch("action", {method: "POST", headers: {"Content-Type": "application/json"},
+                                     body: JSON.stringify({action: "blocked"})});
+    const d = await r.json();
+    if (Array.isArray(d.blocked)) { ui.blocked = new Set(d.blocked); ui.canBlock = true; render(); }
+  } catch (_) {}   // the standalone viewer has no switches
+}
+loadBlocked();
 
 function renderDetail(t) {
   document.getElementById("detail-title").textContent = t ? t.name : "tool";
@@ -521,24 +606,30 @@ function renderDetail(t) {
     const e = row.entry;
     const s = STATES[e.state];
     const key = e.request_id + ":" + e.at;
-    const expandable = e.state === "fired" && !!e.args;
+    const calls = e.calls || [];
+    const expandable = e.state === "fired" && calls.length > 0;
     let detail;
-    if (e.state === "fired") detail = e.args || s.label;
+    if (e.state === "fired") detail = calls.length > 1 ? `${calls.length} calls` : ((calls[0] && calls[0].args) || s.label);
     else if (e.state === "withheld" && e.by) detail = "withheld by " + e.by + (e.reason ? "  (" + e.reason + ")" : "");
     else detail = s.label;
     const dim = e.state === "unused" || e.state === "withheld" ? " dim" : "";
     const expCls = expandable ? " expandable" : "";
     const isOpen = expandable && !ui.folded.has(key);
     const caret = expandable ? (isOpen ? "▾ " : "▸ ") : "";
-    const trunc = e.argsTruncated ? ' <span class="trunc-flag" title="truncated before it reached this viewer">⚠ truncated</span>' : "";
+    const trunc = calls.some(c => c.truncated) ? ' <span class="trunc-flag" title="truncated before it reached this viewer">⚠ truncated</span>' : "";
     let out = `<div class="history-row${dim}${expCls}" data-key="${esc(key)}"><span class="glyph ${s.cls}" style="min-width:14px">${s.glyph}</span>` +
       `<span class="rid">${esc(e.request_id.slice(0, 8))}</span><span class="detail">${caret}${esc(detail)}${trunc}</span></div>`;
     if (isOpen) {
-      out += renderArgsBlock(key, e.args, e.argsTruncated);
+      calls.forEach((c, i) => {
+        out += renderArgsBlock(key + ":" + i, c.args, c.truncated) + renderOutput(c, t.name);
+      });
     }
     return out;
   }).join("");
   body.innerHTML = html;
+  body.querySelectorAll(".dl-btn").forEach(btn => {
+    btn.addEventListener("click", ev => { ev.stopPropagation(); downloadPayload(btn.dataset.id, btn.dataset.name, btn); });
+  });
   body.querySelectorAll(".history-row.expandable").forEach(row => {
     row.addEventListener("click", () => {
       const key = row.dataset.key;

@@ -12,7 +12,8 @@ No one detector covers what people paste into a chat, so this combines:
 - our own patterns: unquoted `.env` and YAML lines (`DB_PASSWORD=...`,
   `password: ...`), which detect-secrets only reads when it knows the file
   type, a few vendor formats, and personal details (email, phone, SSN, card
-  number, IP address).
+  number). Not IP addresses: an address carries meaning (local or public,
+  which subnet, which machine) that a stand-in would destroy.
 
 gitleaks' generic-api-key rule is left out: it flags any random-looking value
 after words like "key" or "auth", which snags hashes and encoded data; the
@@ -90,7 +91,6 @@ OWN_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"), "email"),
     (re.compile(r"\b\d{3}[-.]?\d{3}[-.]?\d{4}\b"), "phone"),
     (re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), "ssn"),
-    (re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"), "ip_address"),
     (re.compile(r"\b(?:\d{4}[-\s]?){3}\d{4}\b"), "credit_card"),
 ]
 

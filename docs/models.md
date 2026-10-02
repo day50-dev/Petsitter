@@ -9,47 +9,49 @@ Naming upstream models so tricks can reach more than one.
 ## Set your provider
 
 Petsitter is a proxy to your provider. This is where you set where the traffic
-goes: pick a provider, paste your key, pick a model.
+goes: pick a provider, paste your key, pick a model. It's the **Simple** view of
+the Models page, and step 1 on Start here.
 
-The list of models comes from the provider itself, so it is never out of date.
-Type to filter it, or press refresh to ask the provider again.
+The provider list is a built-in catalog: pay-per-token APIs (OpenAI, Mistral,
+xAI, DeepSeek, Groq, Cerebras and more), gateways (OpenRouter, Together,
+Fireworks), and local servers (Ollama, LM Studio, llama.cpp, vLLM). The catalog
+holds endpoints only. The list of models comes from the provider itself, so it
+is never out of date. Type to filter it, or press refresh to ask the provider
+again.
 
-Picking a model fills the `url`, `model` and `key` fields, but saves nothing.
-A wrong model is free to undo, and the list folds up after a pick. Touch the
-model box again and it comes back.
+Picking a model saves it as your `default` model (`url`, `model` and `key`),
+and the list folds up. Touch the model box again and it comes back.
 
 Reload the page and the panel shows what you already have set: the provider,
 the key (marked "saved", never re-shown), and the model.
 
-The same panel shows on the Start Here tab until a provider is set, since
-nothing can flow through petsitter without one.
-
 An endpoint petsitter doesn't recognise (self-hosted, hand-written) still works.
 Pick "Something else" and a base-URL box appears, pre-filled with what the role
-already had. The bare `url` / `model` / `key` fields underneath still work on
-their own.
+already had. The **Advanced** view has the bare `url` / `model` / `key` fields
+for every role.
+
+A base URL can be written with or without `/v1`. Without it, petsitter tries
+`<url>/v1` first, then `<url>`, and remembers whichever answered.
 
 Fetched models also show as suggestions on every role's model field. The field
 stays free text, so a gateway with a partial list can't lock you out of a model
 it didn't mention.
 
-Your key goes to the provider, to fetch the list, and into your config when you
-save. Nowhere else. Fetching the list saves nothing, so a key you're just trying
-out never lands on disk.
+Fetching the list saves nothing; your key is only written to your config when
+you pick a model.
 
 ### Providers listed as "models only"
 
 Anthropic, Google Gemini and GitHub Models are listed so you can see their
-current models, but requests can't be routed straight to them: petsitter appends
-`/v1/chat/completions` to whatever base URL you give it, and these three don't
-serve chat at that path. A gateway such as OpenRouter reaches all three over an
-OpenAI-compatible endpoint.
+current models, but requests can't be routed straight to them: they don't
+serve OpenAI-style chat where petsitter looks for it. A gateway such as
+OpenRouter reaches all three over an OpenAI-compatible endpoint.
 
 ---
 
 ## Model Configs
 
-A model config JSON file lets you run multi-model tricks like [Kennel](tricks.md#kennel) that need different models for different subtasks. Each key maps to a `{url, model, key}` object:
+The `modelset` in `config.json` lets you run multi-model tricks like [Kennel](tricks.md#kennel) that need different models for different subtasks. Each key maps to a `{url, model, key}` object:
 
 ```json
 {
@@ -69,14 +71,24 @@ A model config JSON file lets you run multi-model tricks like [Kennel](tricks.md
 }
 ```
 
-The `"default"` key sets the primary model, the one used when a trick doesn't ask for a specific role. Tricks declare what keys they need - for example, KennelTrick requires `["default", "thinker", "toolcall"]`. If a key is missing, petsitter prints a helpful error with the expected format.
+The `"default"` key sets the primary model, the one used when a trick doesn't ask for a specific role.
+
+Tricks declare the keys they use: `required_models` for ones they can't work without, `optional_models` for ones they use when set and do without otherwise. The dashboard lists them under **Models** on each extension's page.
+
+| Extension | Required | Optional |
+|-----------|----------|----------|
+| Kennel | `thinker`, `toolcall` | |
+| Multi-Model Consultant | `consultant` | |
+| Politeify | | `rephraser` (falls back to `default`) |
+
+If a required key is missing, the trick fails with an error listing the keys that are set.
 
 The `model` and `key` fields accept:
 - A string - use as the model name / API key in upstream requests.
 - `false` (boolean) - passthrough, don't set the field at all.
 - `""` (empty string) - explicitly clear the value.
 
-Edit these from the Models tab, or with `pet model`:
+Edit these from the Models page (**Advanced**), or with `pet model`:
 
 ```bash
 pet model                                  # show every role as JSON
@@ -100,11 +112,6 @@ pet --import model <trickset>                  # scope the swap to one trickset
 entries from stdin (exactly what `pet model _default` prints) and replaces that
 scope's modelset wholesale.
 
-
-
 Add `--trickset <name>` to scope a role to one trickset instead of the global
-config; those overrides live in the trickset's `models` field and win while
-that trickset's tricks are running.
-
-
-
+config; those overrides live in the trickset's `models` field. In the
+dashboard they're under **Models for this channel** on the channel's Settings tab.

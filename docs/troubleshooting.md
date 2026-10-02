@@ -23,9 +23,11 @@ trick = CodeValidatorTrick(max_attempts=5)
 ```
 
 
-### Network failures are not retried
+### Network failures are mostly not retried
 
-`callmodel` and `callmodel_sync` make a single HTTP request to the upstream - no retry, no backoff. If the upstream is down, the error propagates as a 502 to the client. Add retry at the client level or wrap `callmodel` in your own `try`/`except` inside the trick. Errors are surfaced cleanly and thus easy to deal with.
+The request to the model is retried on a 502 (up to 3 attempts, with a short backoff), since a broker upstream often recovers within a second. Nothing else is retried: other errors and unreachable hosts go straight back to the client, and the Connecting page shows a "!" with the failure.
+
+`callmodel` and `callmodel_sync` make a single HTTP request - no retry, no backoff. If it fails, the error propagates and the request fails. Wrap `callmodel` in your own `try`/`except` inside the trick if you need more.
 
 ### Tool calls are client-driven
 
@@ -35,3 +37,10 @@ When a trick produces `tool_calls` in the response, petsitter returns them to yo
 
 If a sub-model call in Kennel fails (e.g., the thinker model is unreachable), the exception propagates and the request fails. Kennel has no fallback - if you need resilience, wrap individual `callmodel_sync` calls in your own `try`/`except`.
 
+### Secrets Protector without `detect-secrets`
+
+Secrets Protector uses the `detect-secrets` package (a petsitter dependency). If it's missing, the extension and its channel show a "!": passwords and secrets in code aren't caught, though JSON, .env and YAML still are. Install it into the same environment as petsitter (`pip install detect-secrets`) and restart.
+
+### Tools left pointed at a dead petsitter
+
+Petsitter puts connected tools' configs back when it exits, including on Ctrl-C, `kill` and a closed terminal. A `kill -9`, an OOM kill or a crash skips that; run `pet agents restore` to put them back.

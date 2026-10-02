@@ -23,7 +23,7 @@ Once something is sitting in the middle, a few things become possible:
 - **You can help a model along.** Some models are shaky at tool calling, or hand
   back JSON that doesn't quite parse. Petsitter can smooth that over in the
   middle, so you don't have to change your tools or go find a bigger model.
-  *([see how](docs/tricks.md#tool-calling))*
+  *([see how](docs/tricks.md#tool-call))*
 
 - **You can keep private things private.** API keys and personal details can be
   taken out before anything leaves your machine. *([see how](docs/tricks.md#secrets-protector))*
@@ -62,9 +62,9 @@ Petsitter intercepts every request/response pair and runs it through a pipeline 
 
 Tricks also have lifecycle hooks (`install`, `startup`, `shutdown`, `uninstall`) for managing resources across their lifetime.
 
-A trick can be as simple as appending a sentence to the system prompt, or as involved as routing subtasks to three different models in parallel. There's a GUI at `/` with tabs for managing tricksets and their tricks (Tricks / Models / Agents), a live activity log (Logs), and per-trickset logging configuration (Settings).
+A trick can be as simple as appending a sentence to the system prompt, or as involved as routing subtasks to three different models in parallel. There's a dashboard at `/`, where tricks are called extensions and tricksets are called channels. Its sidebar has Start here, Connecting, Agents, Models, your channels, and Help; each channel has tabs for its extensions (Extensions), a live activity log (Logs), and its logging configuration (Settings).
 
-The Tricks tab lists your local `tricks/*.py` alongside [community tricks](docs/community.md#community-tricks) published by other people, and the speech-bubble button in the header opens a [Try It panel](#try-it) that sends a message through the pipeline so you can watch which tricks fire.
+The Extensions tab lists the bundled extensions alongside [community tricks](docs/community.md#community-tricks) published by other people, and the speech-bubble button in the header opens a [Try It panel](#try-it) that sends a message through the pipeline so you can watch which tricks fire.
 
 You can also edit tricks, reorder them, disable, add new ones, and filter them:
 <img alt="2026-07-04_15-13" src="https://github.com/user-attachments/assets/c623f29a-8724-4fdb-bc6d-a76c3022183a" />
@@ -73,7 +73,7 @@ You can also edit tricks, reorder them, disable, add new ones, and filter them:
 *Petsitter* is part of the [DAY50](https://github.com/day50-dev/) suite of open-source tools for local AI workflows and constructing better agents.
 
 The core goals of Petsitter are:
-- **No model changes required** - Works with any OpenAI-compatible endpoint
+- **No model changes required** - Works with any OpenAI-compatible endpoint, and Anthropic's Messages API
 - **Pluggable architecture** - Write your own tricks in Python. (Skills are included in `.agents`)
 - **Transparent to your app** - Point your existing code at petsitter instead of the model
 - **Mix and match** - Combine multiple tricks for compound effects
@@ -100,26 +100,27 @@ petsitter -c another_petsitter_config.conf.json -l localhost:8080
 
 Configure the upstream model, tricksets, and modelset via the dashboard at `http://localhost:8080` or the `pet` CLI — everything is persisted to the config file, so a plain `petsitter` starts the same way next time. `pet` accepts the same `-c` flag (before the subcommand, e.g. `pet -c another_petsitter_config.conf.json ls`) so both tools can target the same config area.
 
-Either way, now you can point your AI applications to `http://localhost:8080/v1` and you're going through the petsitter middleware.
+Either way, now you can point your AI applications to `http://localhost:8080/v1` (with or without the `/v1`) and you're going through the petsitter middleware. To keep your tool's own provider, key and model and just add your extensions, use `http://localhost:8080/use/<provider>` instead, e.g. `/use/anthropic.com` or `/use/openai.com/v1` ([more](docs/proxy.md)).
 
 ## Try It
 
-The speech-bubble button in the header opens a conversation panel docked over the dashboard. Type a message and it goes through `chat_completions()` exactly as a real client's would: same trickset matching, same keyword gating, same hooks, same upstream. It is not a simulation.
+The speech-bubble button in the header opens a conversation panel docked over the dashboard. Type a message and it goes through `chat_completions()` exactly as a real client's would, pinned to the selected channel: same keyword gating, same hooks, same upstream. It is not a simulation.
 
 What comes back with each reply:
 
 - **A pill per trick.** Bright means it changed something, and the tooltip lists the stages it ran (`Ran: system_prompt, post_hook`). Dim means it was loaded but did nothing.
 - **Why a trick stayed quiet.** A keyword-gated trick that didn't fire reads `Did not fire, needs keyword: banana`.
 - **Timing and tokens**, next to the trickset that handled it.
-- **The rows light up.** Tricks that actually did something pulse in the Loaded Tricks list, so you can watch a reorder or a config change take effect.
+- **The rows light up.** Tricks that actually did something pulse in the Installed list, so you can watch a reorder or a config change take effect.
 
 Drag the panel by its header to move it, drag its corner to resize, and `⇲` snaps it back to the bottom right. Whether it's open, where it sits, and the conversation itself are all remembered across refreshes.
 
-It targets whichever trickset is selected in the pill bar, so switching tricksets switches what you're testing.
+It targets whichever channel is selected in the sidebar, so switching channels switches what you're testing.
 
 
 ## Documentation
 
+- **[Guide](docs/guide.md)** — A walkthrough from install to advanced uses.
 - **[What each bundled trick does](docs/tricks.md)** — The tricks that ship with petsitter, what each one is for, and how to turn it on.
 - **[Writing your own trick](docs/writing-tricks.md)** — The four hooks, the data each one gets, and the lifecycle around them.
 - **[Tricksets and routing](docs/tricksets.md)** — Grouping tricks, and deciding which requests they apply to.
@@ -127,7 +128,7 @@ It targets whichever trickset is selected in the pill bar, so switching trickset
 - **[Model configuration](docs/models.md)** — Naming upstream models so tricks can reach more than one.
 - **[Command line reference](docs/cli.md)** — petsitter's flags and the pet subcommands.
 - **[Community tricks](docs/community.md)** — Installing tricks other people wrote, and publishing your own.
-- **[Proxy behaviour](docs/proxy.md)** — Host override, the config diagnostic, and the HTTP surface petsitter serves.
+- **[Proxy behaviour](docs/proxy.md)** — `/use/`, `/ignore/`, `/bypass/`, streaming, the config diagnostic, and the HTTP surface petsitter serves.
 - **[When things go wrong](docs/troubleshooting.md)** — Known rough edges and how they show up.
 - **[Working on petsitter](docs/development.md)** — Running the tests, and driving petsitter from other code.
 

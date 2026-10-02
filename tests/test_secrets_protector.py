@@ -52,7 +52,6 @@ class TestSecretsProtectorTrick:
         ("Call me at 555-123-4567", "555-123-4567"),
         ("My SSN is 123-45-6789", "123-45-6789"),
         ("Card: 4111-1111-1111-1111", "4111-1111-1111-1111"),
-        ("Server at 192.168.1.1", "192.168.1.1"),
     ])
     def test_hides(self, text, value):
         assert hides(text, value)
@@ -65,6 +64,7 @@ class TestSecretsProtectorTrick:
         'self.api_key = config.get("api_key")',
         'password: str = field(default="")',
         "token: ${GITHUB_TOKEN}",
+        "Server at 192.168.1.1, gateway 10.0.0.1/24",
         '{"token": "${GITHUB_TOKEN}"}',
         '{"max_tokens": "4096"}',
         '{"key": "theme", "value": "dark"}',

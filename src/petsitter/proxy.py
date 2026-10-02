@@ -149,43 +149,46 @@ def _wants_all(trick) -> bool:
         return True
 
 
+def add_tool_call_pieces(calls: list, pieces) -> None:
+    """Add streamed tool-call pieces to calls, the list being built.
+
+    A piece that carries a name starts a new call; the name is set, never
+    appended. A piece without one continues the call before it, adding its
+    arguments. An id is kept from whichever piece has one. ``index`` is
+    ignored: upstreams fill it with anything (the same number for every call,
+    or a timestamp), and going by it glued parallel calls into one
+    ("search_websearch_web..." with their arguments run together).
+    """
+    for tc in pieces or []:
+        if not isinstance(tc, dict):
+            continue
+        fn = tc.get("function") or {}
+        if fn.get("name") or not calls:
+            calls.append({"id": tc.get("id") or "", "type": "function",
+                          "function": {"name": fn.get("name") or "", "arguments": ""}})
+        call = calls[-1]
+        if tc.get("id") and not call["id"]:
+            call["id"] = tc["id"]
+        piece = fn.get("arguments")
+        if piece is not None:
+            call["function"]["arguments"] += piece if isinstance(piece, str) else json.dumps(piece)
+
+
 def merge_tool_call_fragments(tool_calls):
     """Stitch streamed tool-call fragments back into whole calls.
 
     Some upstreams build a non-streamed reply by concatenating stream chunks
     without merging them, so one call arrives as several entries: the first
     with the name and empty arguments, the rest with no name and a piece of
-    the arguments each. Fragments are joined by ``index`` when they have one;
-    otherwise a nameless entry continues the call before it. Whole calls pass
-    through untouched.
+    the arguments each. A named entry starts a call and a nameless one
+    continues it (see add_tool_call_pieces); whole calls pass through untouched.
     """
     if not isinstance(tool_calls, list) or len(tool_calls) < 2:
         return tool_calls
+    if all(isinstance(tc, dict) and (tc.get("function") or {}).get("name") for tc in tool_calls):
+        return tool_calls   # whole calls, each with its name: nothing to stitch
     merged: list[dict] = []
-    by_index: dict = {}
-    for tc in tool_calls:
-        if not isinstance(tc, dict):
-            merged.append(tc)
-            continue
-        fn = tc.get("function") or {}
-        idx = tc.get("index")
-        target = by_index.get(idx) if idx is not None else None
-        if target is None and not fn.get("name") and merged and isinstance(merged[-1], dict):
-            target = merged[-1]
-        if target is None:
-            call = {**tc, "function": {**fn, "arguments": fn.get("arguments") or ""}}
-            merged.append(call)
-            if idx is not None:
-                by_index[idx] = call
-            continue
-        tfn = target.setdefault("function", {})
-        piece = fn.get("arguments")
-        if isinstance(piece, str):
-            tfn["arguments"] = (tfn.get("arguments") or "") + piece
-        if fn.get("name") and not tfn.get("name"):
-            tfn["name"] = fn["name"]
-        if tc.get("id") and not target.get("id"):
-            target["id"] = tc["id"]
+    add_tool_call_pieces(merged, tool_calls)
     return merged
 
 
@@ -1256,17 +1259,8 @@ class ProxyHandler:
         # what was sent, for the observers
         reply: dict[str, Any] = {"role": "assistant", "content": ""}
         reasoning = ""
-        calls: dict[int, dict] = {}
+        calls: list[dict] = []
         finish = None
-
-        def add_calls(into: dict, deltas) -> None:
-            for tc in deltas or []:
-                slot = into.setdefault(tc.get("index", len(into)),
-                                       {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
-                slot["id"] = tc.get("id") or slot["id"]
-                fn = tc.get("function") or {}
-                slot["function"]["name"] += fn.get("name") or ""
-                slot["function"]["arguments"] += fn.get("arguments") or ""
 
         def sent(obj) -> str:
             nonlocal reasoning, finish
@@ -1280,13 +1274,13 @@ class ProxyHandler:
                 reply["content"] += delta["content"]
             if isinstance(delta.get("reasoning_content"), str):
                 reasoning += delta["reasoning_content"]
-            add_calls(calls, delta.get("tool_calls"))
+            add_tool_call_pieces(calls, delta.get("tool_calls"))
             return f"data: {json.dumps(obj)}\n\n"
 
         # windowed only: the chunk shape to copy, tool calls and the finish
         # chunk (plus anything after it, like usage) held for the end
         template: dict = {}
-        held_calls: dict[int, dict] = {}
+        held_calls: list[dict] = []
         held_end: list[dict] = []
 
         def chunk(delta: dict, finish_reason=None) -> dict:
@@ -1354,7 +1348,7 @@ class ProxyHandler:
                         choice = choices[0]
                         delta = choice.get("delta") or {}
                         text = delta.pop("content", None)
-                        add_calls(held_calls, delta.pop("tool_calls", None))
+                        add_tool_call_pieces(held_calls, delta.pop("tool_calls", None))
                         out = win.feed(text) if isinstance(text, str) else ""
                         if choice.get("finish_reason"):
                             if out or delta:
@@ -1374,7 +1368,7 @@ class ProxyHandler:
             finally:
                 await resp_cm.__aexit__(None, None, None)
         if win is not None:
-            tail, final_calls = win.finish([held_calls[i] for i in sorted(held_calls)] or None)
+            tail, final_calls = win.finish(held_calls or None)
             for t in rewriters:
                 trace_event("post_hook", t, windowed=True)
             if tail:
@@ -1387,7 +1381,7 @@ class ProxyHandler:
             for obj in held_end:
                 yield sent(obj)
         if calls:
-            reply["tool_calls"] = [calls[i] for i in sorted(calls)]
+            reply["tool_calls"] = calls
         if reasoning:
             reply["reasoning_content"] = reasoning
         self._run_observers(req, observers, reply)

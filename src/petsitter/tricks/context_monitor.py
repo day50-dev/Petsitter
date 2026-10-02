@@ -34,7 +34,7 @@ extensions change it.
   (`ui_action({"action": "detail", "id": ...})`), so a long session doesn't
   hold hundreds of megabytes of context in memory.
 - A conversation is identified by the program plus its first user message, the
-  same heuristic Tool Monitor uses.
+  same heuristic Tool Dashboard uses.
 - Messages carry no timestamps, so each one is shown with the time petsitter
   first saw it: a new message arrives in the request right after it was
   written. Messages from before the monitor was running get the time of the

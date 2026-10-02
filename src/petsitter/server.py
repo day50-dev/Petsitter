@@ -73,6 +73,9 @@ class LogCaptureHandler(logging.Handler):
 _log_capture: LogCaptureHandler | None = None
 _agent_manager: AgentManager | None = None
 
+# The host petsitter listens on (from --listen), for the dashboard to tell
+# whether other machines can reach it.
+LISTEN_HOST = ""
 CONFIG_DIR = Path.home() / ".config" / "petsitter"
 CONFIG_PATH = CONFIG_DIR / "config.json"
 TRICKSETS_DIR = CONFIG_DIR / "tricksets"
@@ -87,6 +90,7 @@ _SOURCE_TRICKSETS = Path(__file__).resolve().parent / "tricksets"
 DEFAULT_TRICKS = ["tricks/context_monitor.py", "tricks/tool_monitor.py",
                   "tricks/secrets_protector.py", "tricks/exportit.py"]
 
+_IGNORE_PATH_RE = re.compile(r"^/ignore/[^/]+(/.*)?$")
 _PROXY_HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*(?::\d+)?$")
 
 
@@ -521,6 +525,14 @@ class _NormalizeV1Path:
             ua = next((v for k, v in raw if k == b"user-agent"), b"")
             set_user_agent(ua.decode("latin-1", "replace"))
             set_request_headers((k.decode("latin-1", "replace"), v.decode("latin-1", "replace")) for k, v in raw)
+            # /ignore/<anything>/... is the same as ...: the segment is there only
+            # to be seen in the URL. Open WebUI sends its X-Title only when the
+            # URL contains "openrouter.ai", so .../ignore/openrouter.ai/v1 gets
+            # it identified while still using petsitter's own model.
+            ig = _IGNORE_PATH_RE.match(scope.get("path", ""))
+            if ig:
+                path = ig.group(1) or "/"
+                scope = dict(scope, path=path, raw_path=path.encode())
             m = _API_PATH_RE.match(scope.get("path", ""))
             if m:
                 # The request's ID, from the moment it arrives until its reply
@@ -1259,7 +1271,7 @@ def cli(config_arg: str | None, listen_on: str, no_browser: bool) -> None:
     \b
         petsitter -c another_petsitter_config.conf.json -l localhost:8080
     """
-    global CONFIG_DIR, CONFIG_PATH, TRICKSETS_DIR, BACKUPS_DIR
+    global CONFIG_DIR, CONFIG_PATH, TRICKSETS_DIR, BACKUPS_DIR, LISTEN_HOST
 
     if config_arg:
         p = Path(config_arg).expanduser().resolve()
@@ -1304,6 +1316,7 @@ def cli(config_arg: str | None, listen_on: str, no_browser: bool) -> None:
     else:
         host = listen_on
         port = 8080
+    LISTEN_HOST = host
 
     app = create_app(
         model_url, model_name, api_key,

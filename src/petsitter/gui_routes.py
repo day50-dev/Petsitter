@@ -3,6 +3,7 @@
 import asyncio
 import time
 import json
+import socket
 import re
 from pathlib import Path
 from typing import Any
@@ -104,6 +105,11 @@ def _introspect_trick_file(path: Path) -> dict:
     return info
 
 
+def _server_mod():
+    from petsitter import server
+    return server
+
+
 def register_gui_routes(app, handler, api_key, config_path: str | None = None):
     global _log_capture, _config_path
     from petsitter.server import _log_capture as server_log_capture
@@ -152,6 +158,10 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
         matched = provider_for_url(handler.model_url) if handler.model_url else None
         return JSONResponse({
             "listen_on": f"{request.url.hostname}:{request.url.port}",
+            # What petsitter actually listens on, and this machine's name, so
+            # the Connecting page can say whether (and how) others reach it.
+            "listen_host": _server_mod().LISTEN_HOST,
+            "hostname": socket.gethostname(),
             "model_url": handler.model_url,
             "model_name": handler.model_name,
             "version": _get_version(),
@@ -385,6 +395,24 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
             reply = trick.ui_action(data)
         except Exception as e:
             return JSONResponse({"error": f"{type(e).__name__}: {e}"}, status_code=500)
+        # A Live page can change the extension's settings: a reply carrying
+        # "save_config" is stored with its channel, like the Settings dialog.
+        if isinstance(reply, dict) and isinstance(reply.get("save_config"), dict):
+            changes = reply.pop("save_config")
+            tid = request.path_params.get("tid", "")
+            for ts in handler.tricksets.values():
+                if tid in ts.trick_ids:
+                    cfg = ts.trick_configs.setdefault(tid, {})
+                    cfg.update(changes)
+                    trick.configure(dict(cfg))
+                    try:
+                        if not ts.file_path:
+                            from petsitter.proxy import _tricksets_dir
+                            ts.file_path = str(_tricksets_dir() / f"{ts.name}.json")
+                        ts.save()
+                    except Exception as e:
+                        reply["save_error"] = str(e)
+                    break
         return JSONResponse(reply if reply is not None else {"ok": True})
     app.add_route("/api/tricks/ui/{tid}/action", gui_trick_ui_action, methods=["POST"])
 

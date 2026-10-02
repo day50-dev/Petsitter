@@ -25,8 +25,17 @@ class <Name>Trick(Trick):
     # Optional: run only when one of these words is in the user's message.
     # keywords = ["<keyword>"]
 
+    # Optional: an inline command, (<keyword>: request). See handle_prompt_keyword.
+    # prompt_keyword = "<keyword>"
+
+    # Optional: other models. Shown on the extension's page. Look them up with
+    # petsitter.trick.get_model_config(key), which raises KeyError if not set up.
+    # required_models = ["default", "<needed>"]
+    # optional_models = ["<used if set up, else default>"]
+
     # Optional: settings. The dashboard shows a form; values arrive as
     # attributes on self. Types: "text", "number", "boolean", "path".
+    # Read them as getattr(self, "limit", None) or 3: unset or cleared ("").
     # config_fields = [
     #     {"key": "limit", "label": "Limit", "type": "number", "default": 3,
     #      "description": "<help text shown under the field>"},
@@ -38,6 +47,15 @@ class <Name>Trick(Trick):
     # be right on any stretch of it and change nothing if run again).
     needs_window = -1
 
+    # The framework creates this with no arguments. An __init__ needs defaults.
+
+    # def handle_prompt_keyword(self, request: str, messages: list | None = None,
+    #                           payload: dict | None = None) -> dict | None:
+    #     """<what (<keyword>: request) does>"""
+    #     # Return {"role": "assistant", "content": "..."} to answer without the
+    #     # model, or None to carry on with the pattern removed.
+    #     return None
+
     def system_prompt(self, to_add: str) -> str:
         """<what instructions this adds to the system prompt>"""
         # Return "" to leave unchanged; return a string to append
@@ -48,6 +66,7 @@ class <Name>Trick(Trick):
         # Mutate params["tools"] to change the tools the model sees.
         # A message's content may be a str, None, or a list of parts.
         # Per-request state goes in request_meta(), never on self.
+        # Follow-up model calls: callmodel_sync (hooks are synchronous).
         return context
 
     def post_hook(self, context: list) -> list:
@@ -66,3 +85,9 @@ class <Name>Trick(Trick):
     # The dashboard shows a "!" on the extension and its channel.
     # def problems(self) -> list[str]:
     #     return []
+
+    # Optional: a Live page of your own, instead of the standard report log.
+    # ui_page = "<name>.html" (a file next to this one). Its POSTs to "action"
+    # reach ui_action; return {"save_config": {...}} there to save settings.
+    # def ui_action(self, data):
+    #     return super().ui_action(data)

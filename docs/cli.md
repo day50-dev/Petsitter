@@ -10,9 +10,12 @@ petsitter's flags and the pet subcommands.
 
 | Option | Short | Description |
 |--------|-------|-------------|
-| `--config` | `-c` | Path to a config file (e.g., `another_petsitter_config.conf.json`) or a config directory. Defaults to `$PET_CONFIG_DIR` if set, else `~/.config/petsitter`. Tricksets live in `<base>/tricksets`. |
-| `--listen` | `-l` | Host:port to listen on (default: `localhost:8080`) |
+| `--config` | `-c` | Path to a config file (e.g., `another_petsitter_config.conf.json`) or a config directory (anything without a file extension; its config is `config.json`). Defaults to `$PET_CONFIG_DIR` if set, else `~/.config/petsitter`. Tricksets live in `<base>/tricksets`. |
+| `--listen` | `-l` | Host:port to listen on (default: `localhost:8080`). `0.0.0.0:8080` lets other machines use it |
+| `--no-browser` | | Don't open the dashboard in a browser on startup (it isn't opened over SSH or without a display anyway) |
 | `--version` | `-v` | Show version and exit |
+
+`LOGLEVEL` (e.g. `LOGLEVEL=DEBUG`) sets how much petsitter logs. To pick up config files edited by hand without restarting, `POST /readconfig`.
 
 ### `pet` subcommands
 
@@ -29,5 +32,7 @@ petsitter's flags and the pet subcommands.
 | `pet installed` | List tricks installed from the index |
 | `pet publish <trick>` | Publish a trick to the index |
 | `pet model` | Show or set model config; `pet model _default > f.json` / `cat f.json \| pet --import model` backs up and restores the whole modelset |
-| `pet agents` | List, register, unregister harness agents |
+| `pet agents` | `list`, `register`, `unregister` coding tools; `pet agents restore` puts every tool's config back if petsitter was killed without cleaning up |
+| `pet examples` | Install the example tricksets |
+| `pet status` | Config dir, model, and each trickset's enabled tricks |
 

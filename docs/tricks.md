@@ -29,10 +29,14 @@ Available Tricks list instead.
 
  * [JSON Mode](#json-mode) - Enforce valid JSON output
  * [Code Validator](#code-validator) - Self-healing validation through model self-description
+ * [Multi-Round](#multi-round) - Self-critique and revision, when you ask for it
+ * [No Em-Dash](#no-em-dash) - Replace em-dashes with hyphens
+ * [Politeify](#politeify) - Rewrite rude or shouting messages politely before the model sees them
 
 ### Capability Injection
 
- * [Tool Calling](#tool-calling) - Add tool calling to models without native support
+ * [Tool Call](#tool-call) - Add tool calling to models without native support
+ * [XML Tool](#xml-tool) - XML-style tool calling for small models
  * [Conversational Tool](#conversational-tool) - ANDYBOT persona tool calling for small/older models 
  * [MCP Tools](#mcp-tools) - Inject tools from an mcp.json file into any harness
 
@@ -43,7 +47,9 @@ Available Tricks list instead.
 
 ### Diagnostics
 
+ * [Context Editor](#context-editor) - Edit what the model sees, either side: unstick a refusal, or cut images and tool output that are taking up room
  * [Context Monitor](#context-monitor) - See what your AI tool sends: who sent each request, its system prompt, messages, tools, and their size
+ * [Tool Dashboard](#tool-dashboard) - See the tools offered and called, with their output, and switch any tool off
 
 ### Security
 
@@ -59,14 +65,14 @@ Available Tricks list instead.
  * [Rules File](#rules-file) - Inject a shared AGENTS.md-style rules file into the system prompt
  * [Reference Check](#reference-check) - Challenge answers that cite no valid reference from a retrieval tool
  * [Recommender List](#recommender-list) - Make the model pick software from your preferred list
- * [Export It](#export-it) - Export conversation as llcat-compatible JSON
+ * [Export It](#export-it) - Save the conversation as llcat-compatible JSON, before or after the extensions
  * [Traffic Logger](#traffic-logger) - Log every request as JSONL, before and after the extensions transform it
 
 ---
 
 ### JSON Mode
 
-[tricks/json_mode.py](tricks/json_mode.py)
+[tricks/json_mode.py](../src/petsitter/tricks/json_mode.py)
 
 Enforces valid JSON output by adding formatting instructions to the system prompt, stripping markdown code blocks, and retrying with feedback if the response isn't valid JSON.
 
@@ -76,32 +82,110 @@ pet add mine json_mode
 
 ### Code Validator
 
-[tricks/code_validator.py](tricks/code_validator.py)
+[tricks/code_validator.py](../src/petsitter/tricks/code_validator.py)
 
-After the model proposes a code change, asks it to describe what the change does, compares the description against the original user request, and retries with feedback if they don't match.
+After the model proposes a code change, asks it to describe what the change does, compares the description against the original user request, and retries with feedback if they don't match (up to 3 attempts). It costs two extra model calls per response and runs on every response, code or not, so it fits a trickset used only for code editing.
 
 ```bash
 pet add mine code_validator
 ```
 
-### Tool Calling
+### Multi-Round
 
-[tricks/tool_call.py](tricks/tool_call.py)
+[tricks/multiround.py](../src/petsitter/tricks/multiround.py)
 
-Enables tool calling for models without native support by injecting tool definitions into the prompt, parsing JSONRPC-style tool call responses, and converting them to OpenAI `tool_calls` format.
+Include the word `multiround` in a message and the model answers, critiques its answer, and rewrites it. Only that message is affected, and the word is removed before the model sees it. The reply has both drafts:
+
+```
+<first_pass> ...original answer... </first_pass>
+<revised> ...critiqued and improved answer... </revised>
+```
+
+Known issue: the critique round calls the async `callmodel` without awaiting it, so it currently fails instead of running.
+
+```bash
+pet add mine multiround
+```
+
+### No Em-Dash
+
+[tricks/no_emdash.py](../src/petsitter/tricks/no_emdash.py)
+
+Asks the model not to use em-dashes (U+2014) and replaces any in the reply with `-`. En-dashes and tool call arguments are left alone. Replies still stream, one character held back.
+
+```bash
+pet add mine no_emdash
+```
+
+### Politeify
+
+[tricks/politeify.py](../src/petsitter/tricks/politeify.py)
+
+Rewrites a hostile or sweary message into a polite one before the model sees it, keeping what you asked for and how urgent it is:
+
+```
+You type:        why the hell is this stupid test still failing, fix it
+Model receives:  Could you help me understand why this test is still failing and fix it?
+```
+
+Only messages that might need it are rewritten: ones that hit a word list (outside code blocks) or have three or more ALL-CAPS words in a row. The word list is the LDNOOBW list (`data/profanity-en.txt`, CC BY 4.0) plus common swearing and name-calling it leaves out. Everything else goes through as written.
+
+The rewrite is done by a model named `rephraser` if you add one under Models (an older `politeify` entry also works), otherwise `default`. Any chat model works; an uncensored one keeps the most of your urgency. It's handed a conversation in which it already agreed to send back only a code block holding the rewrite; a reply without a code block is ignored and the message goes as written. Nothing is masked or blocked.
+
+Rewrites are cached (the 200 most recent), so earlier messages your tool resends are swapped without another call. A failed rewrite sends the message unchanged. Each rewrite and failure shows on the Live tab.
+
+```bash
+pet add mine politeify
+pet model rephraser model qwen3:8b --trickset mine    # optional
+```
+
+| Field | Default | What it does |
+|---|---|---|
+| `min_length` | `12` | Messages shorter than this many characters are left alone. |
+
+<a id="tool-calling"></a>
+### Tool Call
+
+[tricks/tool_call.py](../src/petsitter/tricks/tool_call.py)
+
+Enables tool calling for models without native support by injecting tool definitions into the prompt, parsing JSON-RPC-style tool call responses, and converting them to OpenAI `tool_calls` format:
+
+```
+Model writes:  {"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"read_file","arguments":{"path":"app.py"}}}
+Tool receives: tool_calls: [{"type": "function", "function": {"name": "read_file", ...}}]
+```
+
+If the model turns out to return native `tool_calls`, the trick stops adding its instructions.
 
 ```bash
 pet add mine tool_call
 ```
 
+### XML Tool
+
+[tricks/xml_tool.py](../src/petsitter/tricks/xml_tool.py)
+
+A simpler tool-call format for very small models that can't produce reliable JSON. The model writes:
+
+```
+<tool>list_files</tool>
+<args>{"path": "~/mp3"}</args>
+```
+
+and your tool gets a normal `tool_calls` entry. Only tool names and descriptions are put in the system prompt, not parameter schemas. Like Tool Call, it steps aside if the model returns native `tool_calls`. Use it instead of, not alongside, the other tool-calling tricks.
+
+```bash
+pet add mine xml_tool
+```
+
 ### Conversational Tool
 
-[tricks/conversational_tool.py](tricks/conversational_tool.py)
+[tricks/conversational_tool.py](../src/petsitter/tricks/conversational_tool.py)
 
 A conversational approach to tool calling that uses the ANDYBOT persona instead of structured JSON output. The model says `DEAR ANDYBOT, <FUNCTION>` and ANDYBOT collects each parameter through dialogue:
 
 1. Model recognises it needs to call a tool and says `DEAR ANDYBOT, GET_WEATHER`
-2. ANDYBOT asks: *"Can you provide location?"*
+2. ANDYBOT asks: *"ANDYBOT WOULD LIKE TO KNOW: location (required)?"*
 3. Model responds: `Paris`
 4. ANDYBOT builds the tool call and returns it to the application
 
@@ -114,18 +198,18 @@ pet add mine json_mode
 
 ### MCP Tools
 
-[tricks/mcp_tools.py](tricks/mcp_tools.py)
+[tricks/mcp_tools.py](../src/petsitter/tricks/mcp_tools.py)
 
-Injects tools defined in an [mcp.json](https://github.com/sourcey/mcp-schema) file into any harness. Converts MCP tool definitions to OpenAI function-calling format and merges them into `params["tools"]`. Tools with name collisions take precedence over existing tool definitions.
+Injects tools defined in an [mcp.json](https://github.com/sourcey/mcp-schema) file into any harness. Converts MCP tool definitions to OpenAI function-calling format and merges them into `params["tools"]`; an MCP tool replaces a client tool with the same name. Your harness still runs the calls.
 
-Default path: `~/.config/petsitter/mcp.json`. Use the `mcp` prompt keyword to switch files at runtime.
+The file is set with the `mcp_path` setting (default `~/.config/petsitter/mcp.json`).
 
 ```bash
 pet add mine mcp_tools          # reads ~/.config/petsitter/mcp.json
 ```
 
-To point it at a different file, use the `mcp` prompt keyword in a message:
-`(mcp: /path/to/my-tools.json)`.
+To switch files at runtime, use the `mcp` prompt keyword in a message:
+`(mcp: /path/to/my-tools.json)`. `(mcp)` alone shows what's loaded.
 
 The `mcp.json` format follows the [MCP spec](https://modelcontextprotocol.io):
 ```json
@@ -178,7 +262,7 @@ Example `modelset.json`:
 
 #### Kennel
 
-[tricks/kennel.py](tricks/kennel.py) is a reference implementation of the pattern above. It routes cognitive subtasks to three specialized models running in parallel - a **thinker** for chain-of-thought, a **tool-caller** for deciding which tools to invoke, and an **emitter** for generating the final response.
+[tricks/kennel.py](../src/petsitter/tricks/kennel.py) is a reference implementation of the pattern above. It routes cognitive subtasks to three specialized models running in parallel - a **thinker** for chain-of-thought, a **tool-caller** for deciding which tools to invoke, and an **emitter** for generating the final response.
 
 ```bash
 # Pull three small models that together fit on modest hardware (< 6B total)
@@ -210,7 +294,7 @@ Kennel is one architecture; you could write a trick that routes by language, by 
 
 #### Multi-Model Consultant
 
-[tricks/multiconsult.py](tricks/multiconsult.py)
+[tricks/multiconsult.py](../src/petsitter/tricks/multiconsult.py)
 
 Cross-validates responses between two models through iterative refinement and voting. Requires a `default` model and a `consultant` model in the modelset.
 
@@ -243,32 +327,69 @@ Example `modelset.json`:
 }
 ```
 
+### Context Editor
+
+[tricks/context_editor.py](../src/petsitter/tricks/context_editor.py)
+
+Edit the conversation the model sees, either side of it, from its **Live** tab:
+
+- **A refusal sticks.** "I'm not allowed to look at emails" to a reasonable request, and from then on the model reads its own refusal and keeps refusing. Edit that reply to "Sure, happy to help with that" and it carries on as if it had agreed.
+- **The context fills up.** Images and tool output (web searches, file reads) stay in the history after they've done their job, and every turn pays for them again. Remove them and a short note takes their place; a tool output keeps its link to its call.
+
+Recent conversations show as chats, you on the right and the model on the left, with a size bar for the whole conversation and a bar for each message's share of it. Every message, yours or the model's, has **edit**, **remove**, **remove images** and **revert**; the model's newest reply is editable as soon as it comes back. Your tool keeps resending the original, and petsitter swaps in your version on every request. Edits apply only to the conversation they were made in and are kept in memory, for the 30 most recent conversations (a restart drops them). Put it first in the channel.
+
+```bash
+pet add mine context_editor
+```
+
 ### Context Monitor
 
-[tricks/context_monitor.py](tricks/context_monitor.py)
+[tricks/context_monitor.py](../src/petsitter/tricks/context_monitor.py)
 
-Records every request and shows it on its Live tab: where it came from (address, X-Title, User-Agent, channel, model), what the context is made of (system prompt, tool definitions, conversation, tool results, as estimated tokens), how the conversation's size grows and drops when it's compacted, and the full system prompt, tools and messages. It's on by default, first in line, and the third step of Start here opens it.
+See what your tool sends. Records every request and shows it on its Live tab: where it came from (address, X-Title, User-Agent, channel, model), what the context is made of (system prompt, tool definitions, conversation, tool results, as estimated tokens and a share of the whole), how the conversation's size grows and drops when it's compacted, and the full system prompt (flagged when it changed), tools and messages. Sizes are characters / 4. The full text of the last 30 requests is kept.
+
+It's on by default, first in line, and the third step of Start here opens it. Put it first in the channel, so it sees what your tool sent.
 
 ```bash
 pet add mine context_monitor
 ```
 
+### Tool Dashboard
+
+[tricks/tool_monitor.py](../src/petsitter/tricks/tool_monitor.py)
+
+Shows, per request, the tools your tool offered the model, which ones an extension withheld (and which extension), and every call the model made, parallel calls shown separately. Click a tool to see its calls: the arguments, the output (first 2,000 characters), and a **download** of the call's full arguments and output as JSON. **demo** on the Live tab plays made-up traffic.
+
+Each tool has a switch: turn one off and the model isn't offered it from the next request on, even a tool built into your AI tool. The switches set `blocked_tools`, which is saved with the channel.
+
+It's on by default. Put it first in the channel, so its "offered" list is what your tool really sent. The same events also go to a unix socket that `contrib/toolwatch.py` (terminal) and `contrib/toolwatch_web.py` (browser) listen on.
+
+```bash
+pet add mine tool_monitor
+```
+
+| Field | Default | What it does |
+|---|---|---|
+| `blocked_tools` | (empty) | Comma-separated tools the model isn't offered. Set by the Live tab's switches. |
+| `include_schemas` | `false` | Also send each tool's full parameter schema. Events get much larger. |
+| `socket_path` | `~/.cache/petsitter/toolmon.sock` | Unix datagram socket for the terminal and browser viewers. Events are dropped when nothing listens. |
+
 ### Secrets Protector
 
-[tricks/secrets_protector.py](tricks/secrets_protector.py)
+[tricks/secrets_protector.py](../src/petsitter/tricks/secrets_protector.py)
 
 Finds secrets in what your tool sends, swaps each for an opaque stand-in like `__96178c403fd9__d4360d48-...` before the model sees it, and puts the real value back wherever the stand-in comes back: in the reply, and in the arguments of the model's tool calls.
 
 - **Detection** combines three sources, since no one covers what people paste into a chat:
   - [gitleaks](https://github.com/gitleaks/gitleaks)' rules (bundled, MIT) for about 200 kinds of vendor keys and tokens.
   - [detect-secrets](https://github.com/Yelp/detect-secrets)' keyword detector for values named as secrets: `"password": "..."`, `api_key = '...'`. This is what catches a human-chosen password.
-  - petsitter's own patterns for unquoted `.env`/YAML lines (`DB_PASSWORD=...`, `password: ...`) and personal details (emails, phones, SSNs, card numbers, IPs).
+  - petsitter's own patterns for unquoted `.env`/YAML lines (`DB_PASSWORD=...`, `password: ...`), JSON quoted keys (`{"db_password": "two words"}`), name/value pairs (`{"key": "password", "value": "..."}`, Kubernetes' `{"name": "DB_PASSWORD", "value": "..."}`), a few vendor formats, and personal details (emails, phones, SSNs, card numbers). IP addresses are left alone: whether one is local or public, its subnet and which machine it is are what make it useful.
 
-  Code that only refers to a secret (`password = os.environ["DB_PASSWORD"]`, `token: ${GITHUB_TOKEN}`) is left alone.
+  JSON escaped inside a JSON string (`{\"password\":\"...\"}`, a tool returning an encoded object) is unescaped and checked too. Code that only refers to a secret (`password = os.environ["DB_PASSWORD"]`, `token: ${GITHUB_TOKEN}`) is left alone. The personal-detail patterns are broad: a 10-digit number reads as a phone number.
 - **Scanned:** user messages and tool results, including content sent as a list of parts.
 - **Stand-ins:** every hidden value gets the same kind of stand-in, and only that exact format is ever swapped back, so nothing else in a reply can be mistaken for one.
 - **Streaming:** the reply still streams, with only one stand-in's length (52 characters) held back.
-- **The detect-secrets library is a dependency.** If it's missing, the extension shows a "!" in the dashboard saying so; until it's installed, quoted passwords get through.
+- **detect-secrets** is a dependency. If it's missing, the extension shows a "!" in the dashboard; until it's installed, secrets in code (`api_key = '...'`) get through. JSON, `.env` and YAML are still caught.
 
 To see it work on tool calls, use the **Table** in **Try it**: put a password in it and ask the model to read it, or copy it to another key.
 
@@ -292,7 +413,7 @@ Password: (secret=|ab)c( |)
 
 ### Swap Harness
 
-[tricks/swapharness.py](tricks/swapharness.py)
+[tricks/swapharness.py](../src/petsitter/tricks/swapharness.py)
 
 Browses and swaps system prompts from the [system-prompts-and-models-of-ai-tools](https://github.com/x1xhlol/system-prompts-and-models-of-ai-tools) repository. On first use, it clones the repo into `~/.config/petsitter/harnesses/`.
 
@@ -317,7 +438,7 @@ Assistant: ✅ Harness set to Cursor Prompts/Rules for All Models.md (2847 chars
            You are Cursor, an advanced AI coding assistant...
 ```
 
-The selected system prompt is prepended to every subsequent request. Run `(swapharness: install)` to clone the repo, or use the lifecycle CLI:
+The selected prompt is added after your tool's system prompt on every subsequent request. The selection is lost on restart. If the repo isn't cloned yet, the first `(swapharness: )` starts the clone in the background and asks you to try again shortly. Or use the lifecycle CLI:
 
 ```bash
 pet install swapharness             # clone the repo
@@ -328,11 +449,11 @@ pet lifecycle swapharness shutdown  # cleanup session
 
 ### Self-Improver
 
-[tricks/self_improver.py](tricks/self_improver.py)
+[tricks/self_improver.py](../src/petsitter/tricks/self_improver.py)
 
-Watches for the prompt keyword `petsitter` in your messages. When it sees `(petsitter: <request>)`, it strips the tag and spawns an agent loop with the default model. The agent has tools to add, modify, and list trick files - it reads instructions from `.agents/skills/self-improver/SKILL.md` to understand the petsitter trick API and conventions.
+Watches for the prompt keyword `petsitter` in your messages. When it sees `(petsitter: <request>)`, it runs an agent loop (up to 10 model calls) on the default model. The agent has tools to add, modify, and list trick files - it reads instructions from `.agents/skills/self-improver/SKILL.md` to understand the petsitter trick API and conventions. It sees only the request, not the chat, and petsitter replies with the agent's final answer; any other text in the message isn't answered by your normal model, so send the request on its own.
 
-This is a reference implementation for the **prompt keywords** pattern (see below).
+This is a reference implementation for the **prompt keywords** pattern.
 
 ```bash
 pet add mine self_improver
@@ -341,14 +462,12 @@ pet add mine self_improver
 Example usage:
 ```
 User: (petsitter: add a trick that logs every request to a file)
-Model: Creates tricks/request_logger.py and explains how to load it
-User: explain the CAP theorem (petsitter: add a thinking mode)
-Model: Explains CAP theorem (tag stripped, petsitter handled separately)
+Assistant: Creates tricks/request_logger.py and explains how to load it
 ```
 
 ### Export It
 
-[tricks/exportit.py](tricks/exportit.py)
+[tricks/exportit.py](../src/petsitter/tricks/exportit.py)
 
 Exports the conversation history as an [llcat](https://github.com/day50-dev/llcat)-compatible JSON file. The output is the raw message array format used by OpenAI-compatible APIs, making it interoperable with llcat, prompt tools, and anything that speaks the Chat Completions message schema.
 
@@ -372,7 +491,7 @@ Assistant: Conversation exported to `/tmp/petsitter/convo-20260718-143022.json` 
 Note: backup before refactor
 ```
 
-By default the export is the conversation **after** the channel's extensions transformed it, which is what the model would see: rewritten messages, secrets as stand-ins, added system prompts. `(exportit: both)` also saves the **before** side, as your tool sent it, so the two can be compared. Nothing is sent to the model, and extensions that only watch (Traffic Logger, Tool Monitor, Context Monitor) don't record the export.
+By default the export is the conversation **after** the channel's extensions transformed it, which is what the model would see: rewritten messages, secrets as stand-ins, added system prompts. `(exportit: both)` also saves the **before** side, as your tool sent it, so the two can be compared. Any other text after the colon is kept as a note. Files go to `/tmp/petsitter/` (not configurable). Nothing is sent to the model, and extensions that only watch (Traffic Logger, Tool Dashboard, Context Monitor) don't record the export.
 
 The exported JSON is a plain array of messages in OpenAI Chat Completions format:
 
@@ -390,7 +509,7 @@ Tool calls, reasoning (chain-of-thought), and tool results are all preserved in 
 
 ### Rules File
 
-[tricks/rules_file.py](tricks/rules_file.py)
+[tricks/rules_file.py](../src/petsitter/tricks/rules_file.py)
 
 Reads a plain-markdown rules file (AGENTS.md / CLAUDE.md style) and injects its content into the system prompt on every request. Because petsitter sits in front of any tool pointed at it, the same rules file applies across opencode, Claude Code, Codex, etc. - write the rules once and keep every harness consistent.
 
@@ -408,12 +527,12 @@ User: (rules)
 Assistant: Rules loaded from /path/to/rules.md (123 chars)
 ```
 
-Content is cached and reloaded when the path changes, on startup, or on request. With no path configured the trick stays dormant, so requests pass through untouched.
+Content is cached and reloaded when the path changes or on startup, so re-run `(rules: <path>)` after editing the file. With no path configured the trick stays dormant, so requests pass through untouched.
 
 
 ### Recommender List
 
-[tricks/recommender_list.py](tricks/recommender_list.py)
+[tricks/recommender_list.py](../src/petsitter/tricks/recommender_list.py)
 
 Keeps a list of the software you actually want used - your database, your package manager, your HTTP client - and injects it into the system prompt, so when the model reaches for "a database" it reaches for yours instead of whatever was most common in its training data. It also carries a do-not-reach-for side, for the things you have already decided against.
 
@@ -468,7 +587,7 @@ Additions and drops are written back to the file when one is configured, so the 
 
 ### Reference Check
 
-[tricks/reference_check.py](tricks/reference_check.py)
+[tricks/reference_check.py](../src/petsitter/tricks/reference_check.py)
 
 Catches the most common shape of hallucination in a retrieval setup: the model either never consults its reference tool, or consults it, finds nothing useful, and answers from memory anyway — sounding exactly as confident as when it is right.
 
@@ -547,7 +666,7 @@ The corollary is worth keeping in mind: the residual errors that survive this ch
 
 ### Traffic Logger
 
-[tricks/logger.py](tricks/logger.py)
+[tricks/logger.py](../src/petsitter/tricks/logger.py)
 
 Appends one timestamped JSON line per request to each of two files — the debugging view into whatever harness is misbehaving, and into what the extensions did to it:
 

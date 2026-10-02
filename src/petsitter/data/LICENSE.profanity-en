@@ -1,0 +1,10 @@
+profanity-en.txt is the English list from "List of Dirty, Naughty, Obscene,
+and Otherwise Bad Words" (https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words),
+commit 5faf2ba42d7b1c0977169ec3611df25a3c08eb13, unmodified.
+
+Licensed under the Creative Commons Attribution 4.0 International License
+(CC BY 4.0): https://creativecommons.org/licenses/by/4.0/
+Copyright (c) Shutterstock, Inc. and contributors.
+
+Petsitter's Politeify extension uses it only to decide whether a message is
+worth asking a model to rephrase.

@@ -167,14 +167,39 @@ def test_keyword_report_not_doubled_when_trick_reports():
     assert [e["message"] for _, e in t.live_feed.since(0)] == ["did my own thing"]
 
 
-def test_traffic_logger_reports_once_per_exchange(tmp_path):
+def test_traffic_logger_live_tab_has_everything_but_the_content(tmp_path):
+    from petsitter.observability import (reset_request_meta, set_request_headers, set_request_line,
+                                         start_request_meta)
     from petsitter.tricks.logger import LoggerTrick
     t = LoggerTrick(path=str(tmp_path))
-    ctx = [{"role": "user", "content": "hi"}]
-    t.pre_hook(ctx, {})
-    t.post_hook(ctx + [{"role": "assistant", "content": "yo"}])
-    msgs = [e["message"] for _, e in t.live_feed.since(0)]
-    assert msgs == [f"Logged a request to {tmp_path}"]     # one line per exchange
+    ctx = [{"role": "user", "content": "the secret plan"}]
+    params = {"model": "m", "stream": True, "temperature": 0.2, "max_tokens": 50, "messages": ctx,
+              "tools": [{"type": "function", "function": {"name": "web_search"}}]}
+    set_request_line("POST /use/openai.com/v1/chat/completions")
+    set_request_headers([("authorization", "Bearer sk-real-key-1234"), ("x-title", "Open WebUI")])
+    token = start_request_meta(request_id="r1", payload=params, x_title="Open WebUI", tools=params["tools"],
+                               model="m", stream=True)
+    try:
+        t.pre_hook(ctx, params)
+        t.post_hook(ctx + [{"role": "assistant", "content": "ok"}])
+    finally:
+        reset_request_meta(token)
+    [r] = t.ui_action({"action": "requests"})["requests"]
+    assert r["line"] == "POST /use/openai.com/v1/chat/completions"
+    assert ["authorization", "Bearer sk-real-key-1234"] in r["headers"]       # as received, not masked
+    assert r["params"] == {"model": "m", "stream": True, "temperature": 0.2, "max_tokens": 50}
+    assert r["tools"] == ["web_search"] and r["messages"] == 1
+    assert "the secret plan" not in json.dumps(r)                             # no content: that's the disk logs
+    assert r["reply"]["chars"] == 2 and r["reply"]["tool_calls"] == []
+    assert "the secret plan" in (tmp_path / "before.jsonl").read_text()     # which still have it
+
+
+def test_traffic_logger_keeps_the_last_40(tmp_path):
+    from petsitter.tricks.logger import LoggerTrick
+    t = LoggerTrick(path=str(tmp_path))
+    for _ in range(45):
+        t.pre_hook([{"role": "user", "content": "hi"}], {})
+    assert len(t.ui_action({"action": "requests"})["requests"]) == 40
 
 
 def test_problems_reach_the_dashboard():

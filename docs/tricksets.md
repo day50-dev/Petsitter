@@ -72,14 +72,14 @@ curl http://localhost:8080/api/tricksets/available
 
 # Load a trickset
 curl -X POST http://localhost:8080/api/tricksets/load \
-  -d '{"path": "tricksets/gemma4.json"}'
+  -d '{"path": "tricksets/opencode.json"}'
 
 # Update filters
 curl -X PUT http://localhost:8080/api/tricksets/opencode \
   -d '{"filters": {"X-Title": "myagent*", "User-Agent": "*", "Model": "*"}}'
 
 # Update model roles for a trickset
-curl -X PUT http://localhost:8080/api/tricksets/gemma4 \
+curl -X PUT http://localhost:8080/api/tricksets/opencode \
   -d '{"models": {"toolcall": {"url": "http://localhost:11434", "model": "lfm2.5:latest"}}}'
 
 # Turn a trickset off (saved, and unloaded)

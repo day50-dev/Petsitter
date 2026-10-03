@@ -87,8 +87,7 @@ _SOURCE_TRICKSETS = Path(__file__).resolve().parent / "tricksets"
 # The heavy hitters: see what your tool sends, keep secrets out of the model,
 # and keep a copy of the conversation. The two monitors go first so they see
 # the request before anything else changes it.
-DEFAULT_TRICKS = ["tricks/context_monitor.py", "tricks/tool_monitor.py",
-                  "tricks/secrets_protector.py", "tricks/exportit.py"]
+DEFAULT_TRICKS = ["tricks/context_monitor.py", "tricks/tool_monitor.py", "tricks/exportit.py"]
 
 _IGNORE_PATH_RE = re.compile(r"^/ignore/[^/]+(/.*)?$")
 _PROXY_HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*(?::\d+)?$")
@@ -476,7 +475,7 @@ def install_examples(force: bool = False) -> list[dict]:
 
     Returns a list of dicts, one per source file::
 
-        {"name": "gemma4", "result": True}
+        {"name": "opencode", "result": True}
         {"name": "opencode", "result": False, "errmsg": "opencode.json already exists"}
     """
     results: list[dict] = []
@@ -518,8 +517,10 @@ class _NormalizeV1Path:
     async def __call__(self, scope, receive, send):
         if scope.get("type") == "http":
             from petsitter.observability import (new_request_id, set_client_addr, set_request_headers,
-                                                 set_request_id, set_user_agent)
+                                                 set_request_id, set_request_line, set_user_agent)
             client = scope.get("client") or ("", 0)
+            query = (scope.get("query_string") or b"").decode("latin-1", "replace")
+            set_request_line(f"{scope.get('method', '')} {scope.get('path', '')}{'?' + query if query else ''}")
             set_client_addr(f"{client[0]}:{client[1]}" if client and client[0] else "")
             raw = scope.get("headers") or []
             ua = next((v for k, v in raw if k == b"user-agent"), b"")
@@ -625,7 +626,7 @@ def create_app(
     _log_capture.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
     logging.getLogger().addHandler(_log_capture)
 
-    # First run used to copy the example channels (gemma4, opencode) into
+    # First run used to copy the example channels (opencode) into
     # the user's folder. Channels are live by default now, so examples are
     # opt-in instead: Help -> Install Examples, and they arrive turned off.
     cfg = load_config()

@@ -517,7 +517,7 @@
                   "path": {
                     "type": "string",
                     "description": "Path to the trickset JSON file",
-                    "example": "tricksets/gemma4.json"
+                    "example": "tricksets/opencode.json"
                   }
                 }
               }

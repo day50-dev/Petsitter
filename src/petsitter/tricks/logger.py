@@ -21,6 +21,11 @@ before.jsonl  {"timestamp": "...", "event": "request",  "stage": "before", "requ
 after.jsonl   {"timestamp": "...", "event": "response", "stage": "after",  "request_id": "ab12cd34", "messages": [...], "answer": {"role": "assistant", "content": "hi!"}}
 ```
 
+Its **Live** tab shows the last 40 requests without the payloads: the request
+line, where it came from, the HTTP headers, and the parameters it asked for (stream, model,
+temperature, max_tokens, tool_choice...), the tools offered, how many messages
+and how big, and what came back. The files have everything else.
+
 `request_id` ties the two together, so each file can be read on its own or the
 two joined, which shows exactly what the extensions changed:
 
@@ -50,17 +55,26 @@ everything after it, so put the logger first to be sure of a record.
 - Appends are serialized with a module-level lock. Unserializable values are
   written via `str()`; write errors are swallowed so logging never breaks a
   request.
+- The Live tab's summaries are kept in memory (the last 40), and a restart
+  drops them.
 """
 
 import json
 import threading
+import time
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 
-from petsitter.observability import LOG_DIR, request_meta
+from petsitter.observability import (LOG_DIR, current_client_addr, current_request_headers,
+                                     current_request_line, current_trickset, current_user_agent,
+                                     request_meta)
 from petsitter.trick import Trick
 
 DEFAULT_LOGGER_PATH = LOG_DIR / "traffic"
+KEEP = 40                      # requests on the Live tab
+def _size(messages) -> int:
+    return len(json.dumps(messages, default=str)) if messages else 0
 
 
 def _json_default(value) -> str:
@@ -75,6 +89,7 @@ class LoggerTrick(Trick):
     __display_name__ = "Traffic Logger"
     __category__ = "Diagnostics"
     needs_window = 0   # only looks at replies, so they can stream
+    ui_page = "logger.html"
     config_fields = [
         {
             "key": "path",
@@ -91,6 +106,8 @@ class LoggerTrick(Trick):
 
     def __init__(self, path: str = ""):
         self.path = path or str(DEFAULT_LOGGER_PATH)
+        self._lock = threading.Lock()
+        self._recent: deque = deque(maxlen=KEEP)   # summaries for the Live tab, newest last
 
     def configure(self, config: dict) -> None:
         super().configure(config)
@@ -103,7 +120,7 @@ class LoggerTrick(Trick):
         """Record the request in before.jsonl: full payload and message list."""
         meta = request_meta()
         tools = meta.get("tools") or (params or {}).get("tools") or []
-        if self._append("before", {
+        self._append("before", {
             "timestamp": _now(),
             "trick": type(self).__name__,
             "event": "request",
@@ -115,11 +132,8 @@ class LoggerTrick(Trick):
             "tools": tools,
             "payload": params or {},
             "messages": context,
-        }):
-            # Reported on the way out: a request whose reply never comes back
-            # (the provider timed out) was still logged. Repeats fold (x N);
-            # the reply joins its request in the log without a second line.
-            self.report(f"Logged a request to {self._log_path('before').parent}")
+        })
+        self._remember(context, params or {}, meta, tools)
         return context
 
     def post_hook(self, context: list) -> list:
@@ -138,7 +152,62 @@ class LoggerTrick(Trick):
             "messages": context,
             "answer": context[-1],
         })
+        self._remember_reply(context[-1])
         return context
+
+    # -- the Live tab --------------------------------------------------------
+
+    def _remember(self, context: list, params: dict, meta: dict, tools: list) -> None:
+        try:
+            ts = current_trickset()
+            raw = meta.get("request_params")
+            shown = raw if isinstance(raw, dict) else {k: v for k, v in params.items() if k not in ("messages", "tools")}
+            ua = current_user_agent()
+            entry = {
+                "id": self.request_id, "at": time.time(),
+                "line": current_request_line(), "from": current_client_addr(),
+                "program": meta.get("x_title") or (ua.split("/")[0].split(" ")[0] if ua else ""),
+                "api": meta.get("api") or "openai",
+                "channel": ("Default" if ts.name == "_default" else ts.name) if ts is not None else "",
+                "model": meta.get("model") or params.get("model", ""),
+                "stream": bool(meta.get("stream", params.get("stream", False))),
+                "headers": [[k, v] for k, v in current_request_headers()],
+                "params": dict(shown),
+                "tools": [(t.get("function") or {}).get("name") or t.get("name", "") for t in tools if isinstance(t, dict)],
+                "messages": len(context), "chars": _size(context),
+            }
+        except Exception:
+            return
+        with self._lock:
+            self._recent.append(entry)
+        self.publish({"event": "traffic", "id": entry["id"]})
+
+    def _remember_reply(self, reply) -> None:
+        if not isinstance(reply, dict):
+            return
+        with self._lock:
+            entry = next((e for e in reversed(self._recent) if e["id"] == self.request_id), None)
+            if entry is None:
+                return
+            entry["reply"] = {
+                "ms": round((time.time() - entry["at"]) * 1000),
+                "chars": len(reply.get("content") or "") if isinstance(reply.get("content"), str) else _size(reply.get("content")),
+                "tool_calls": [(c.get("function") or {}).get("name", "") for c in reply.get("tool_calls") or []
+                               if isinstance(c, dict)],
+            }
+        self.publish({"event": "traffic", "id": self.request_id})
+
+    def ui_action(self, data):
+        action = (data or {}).get("action") if isinstance(data, dict) else None
+        if action == "requests":
+            with self._lock:
+                return {"requests": list(reversed(self._recent)), "folder": str(self._log_path("before").parent)}
+        if action == "clear":
+            with self._lock:
+                self._recent.clear()
+            self.live_feed.clear()
+            return {"ok": True}
+        return super().ui_action(data)
 
     # -- helpers -------------------------------------------------------------
 

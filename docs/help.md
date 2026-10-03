@@ -35,7 +35,7 @@ the model's, and cut old pictures and tool output, by hand or automatically.
 
 ![Context Editor](../src/petsitter/gui/help/help-editor.png)
 
-Context Monitor and Secrets Protector come installed. The rest are under
+Context Monitor, Tool Dashboard and Export It come installed. The rest are under
 [Default](#tricks/_default) → **Browse**; click one to see what it does.
 
 Extensions live in **channels**. Each app's requests go through every channel

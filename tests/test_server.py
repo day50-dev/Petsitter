@@ -67,13 +67,12 @@ class TestCreateAppDefaults:
 
     @pytest.mark.asyncio
     async def test_fresh_default_seeds_the_heavy_hitters(self, monkeypatch, tmp_path):
-        """A brand-new _default starts with tool_monitor, secrets_protector, exportit."""
+        """A brand-new _default starts with Context Monitor, Tool Dashboard and Export It."""
         monkeypatch.setattr("petsitter.server.TRICKSETS_DIR", tmp_path)
         app = create_app(model_url="", model_name=None, api_key="", trick_paths=[])
         tricks = await self._trick_files(app)
         files = [t["file"] for t in tricks]
-        assert files == ["tricks/context_monitor.py", "tricks/tool_monitor.py",
-                         "tricks/secrets_protector.py", "tricks/exportit.py"]
+        assert files == ["tricks/context_monitor.py", "tricks/tool_monitor.py", "tricks/exportit.py"]
         assert all(t["enabled"] for t in tricks)
 
     @pytest.mark.asyncio

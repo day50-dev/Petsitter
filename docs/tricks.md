@@ -692,6 +692,8 @@ Appends one timestamped JSON line per request to each of two files — the debug
 
 Put the logger first in the channel and `before.jsonl` is exactly what your tool sent; comparing the two shows every change the extensions made.
 
+Its **Live** tab shows the last 40 requests with everything but the content: the request line as it arrived (`POST /use/openai.com/v1/chat/completions`), where it came from, every HTTP header as sent, every request parameter (`stream`, `model`, `temperature`, `max_tokens`, `tool_choice`, `thinking`...), the tools' names, how many messages and how big, and the reply's time, size and tool calls. The content is in the files.
+
 ```bash
 pet add mine logger            # writes ~/.cache/petsitter/traffic/{before,after}.jsonl
 ```

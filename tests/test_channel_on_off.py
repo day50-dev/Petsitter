@@ -39,6 +39,6 @@ def test_turning_off_in_the_file_unloads_on_reload(tmp_path):
 
 
 def test_shipped_examples_arrive_off():
-    for name in ("gemma4", "opencode"):
+    for name in ("opencode",):
         data = json.loads((server._SOURCE_TRICKSETS / f"{name}.json").read_text())
         assert data["enabled"] is False

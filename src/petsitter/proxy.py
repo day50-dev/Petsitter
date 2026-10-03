@@ -1482,6 +1482,9 @@ class ProxyHandler:
             model=payload.get("model", ""),
             stream=bool(payload.get("stream", False)),
             api="anthropic",
+            # The caller's own parameters (max_tokens, thinking...): the shadow
+            # above keeps only what the pipeline works with.
+            request_params={k: v for k, v in payload.items() if k not in ("messages", "system", "tools")},
         )
         log = get_logger()
         model = payload.get("model", "")

@@ -403,6 +403,42 @@ User-Agent, when it sends no X-Title), and which channel its requests went to. K
 </div>
 </div>
 
+<!-- === PETSITTER SETTINGS (petsitter's own, not a channel's) === -->
+<div class="tab-pane" id="tab-petsitter">
+<div class="card">
+<h2>Settings</h2>
+<div class="section-desc">Petsitter's own settings.</div>
+<div class="ps-settings">
+<div class="ps-setting">
+<label class="ps-label" for="ps-timeout">Provider timeout</label>
+<div class="ps-input">
+<input type="number" id="ps-timeout" min="1" step="1" class="ps-num"><span class="setting-unit">minutes</span>
+<button class="btn btn-secondary btn-sm" onclick="savePetsitterSetting('upstream_timeout_minutes', +document.getElementById('ps-timeout').value)">Save</button>
+</div>
+<div class="setting-help">How long petsitter waits for your provider to connect and answer. Your tool's own timeout still applies. Default <span id="ps-timeout-default"></span>.</div>
+</div>
+<div class="ps-setting">
+<label class="ps-label" for="ps-rid">Reserved id</label>
+<div class="ps-input">
+<input type="text" id="ps-rid" class="ps-text" spellcheck="false" autocomplete="off" maxlength="32">
+<button class="btn btn-secondary btn-sm" onclick="savePetsitterSetting('reserved_id', document.getElementById('ps-rid').value.trim())">Save</button>
+</div>
+<div class="setting-help">Starts every name petsitter puts into a conversation: Secrets Protector's stand-ins, Expose Petsitter's tools. 8 to 32 letters and digits. Takes effect when petsitter restarts. Default <code id="ps-rid-default"></code>.</div>
+<div class="setting-help setting-pending" id="ps-rid-pending" hidden></div>
+</div>
+<div class="setting-help setting-error" id="ps-error" hidden></div>
+</div>
+</div>
+<div class="ps-elsewhere">
+<p>Looking for an extension's settings? They're on the extension itself: open a channel, pick the extension, and use its <b>⚙ Settings</b> button. A channel's logging and models are on that channel's Settings tab.</p>
+<figure class="ps-shot">
+<div class="ps-shot-frame" aria-hidden="true"><span></span><span></span><span></span></div>
+<img src="/static/help/settings-extension.png" alt="An extension's page, with its Settings button next to the on/off switch" width="664" height="200" draggable="false">
+<figcaption>Screenshot: Secrets Protector's page, in a channel's Extensions tab</figcaption>
+</figure>
+</div>
+</div>
+
 <!-- === HELP TAB === -->
 <div class="tab-pane" id="tab-help">
 <div class="card">
@@ -439,7 +475,7 @@ function html(strings, ...vals) {
 let currentTab = 'intro';
 
 let _prevTab = null;
-const NO_CHANNEL_TABS = ['intro', 'help', 'newchannel', 'connecting', 'agents', 'models'];
+const NO_CHANNEL_TABS = ['intro', 'help', 'newchannel', 'connecting', 'agents', 'models', 'petsitter'];
 function switchTab(name) {
   // Changing the hash calls back into here for the tab we're already on;
   // per-page setup that resets state (the New channel form) runs on arrival only.
@@ -460,6 +496,7 @@ function switchTab(name) {
   if (typeof queueFitExtPanes === 'function') queueFitExtPanes();
   if (name === 'intro') refreshIntro();
   if (name === 'help') loadHelpContent();
+  if (name === 'petsitter') loadPetsitterSettings();
   if (name === 'connecting') paintBaseUrl();
   if (name === 'newchannel' && (arriving || _newChanPrefill)) openRuleEditor(true);
   // Always from the server: either picker (or the pet CLI) may have changed it.
@@ -750,13 +787,17 @@ async function openContextMonitor() {
 function paintOnboardTools() {
   const el = document.getElementById('ob-tools');
   if (!el || !_obAgents) return;
-  el.innerHTML = _obAgents.map(a => {
+  // Only what's on this machine: nothing to choose between that isn't here.
+  const here = _obAgents.filter(a => _obRegistered[a.id] || a.ready);
+  el.innerHTML = here.length ? here.map(a => {
     const on = _obRegistered[a.id];
     const btn = on
       ? `<button class="btn btn-sm btn-secondary" onclick="switchTab('agents')">&#10003; connected</button>`
       : `<button class="btn btn-sm btn-secondary" onclick="obConnectTool('${escapeHtml(a.id)}')">connect</button>`;
-    return `<div class="ob-tool${on ? ' on' : ''}"><span class="ob-tool-name">${escapeHtml(a.name)}</span>${btn}</div>`;
-  }).join('');
+    const icon = /^(https?:|\/)/.test(a.icon)
+      ? `<span class="ob-tool-icon"><img src="${escapeHtml(a.icon)}" alt="" onerror="defaultImage(this)"></span>` : '';
+    return `<div class="ob-tool${on ? ' on' : ''}">${icon}<span class="ob-tool-name">${escapeHtml(a.name)}</span>${btn}</div>`;
+  }).join('') : `<div class="ob-tool-none">No coding tools found on this machine. Point any tool at the address on <a href="#connecting/_default">Connecting</a>.</div>`;
 }
 
 async function obConnectTool(id) {
@@ -1397,7 +1438,7 @@ function renderExtDetail() {
   let actions;
   if (inst) {
     actions = `<label class="ext-onoff"><button class="toggle ${on ? 'on' : 'off'}" onclick="setTrickEnabled('${escapeHtml(inst.id || '')}','${escapeHtml(inst.name)}',${!on})" aria-label="${on ? 'Turn off' : 'Turn on'}"></button><span>${on ? 'On' : 'Off'}</span></label>`
-      + ((e.config_fields || []).length || e.prompt_keyword ? `<button class="btn btn-secondary" onclick="openTrickConfig('${escapeHtml(inst.id || '')}')">Settings</button>` : '')
+      + ((e.config_fields || []).length || e.prompt_keyword ? `<button class="btn btn-secondary" onclick="openTrickConfig('${escapeHtml(inst.id || '')}')">⚙ Settings</button>` : '')
       + `<button class="btn btn-secondary" onclick="togglePlayground()" title="Send a test message through this channel">Try it</button>`
       + `<button class="btn btn-danger" onclick="unloadTrick('${escapeHtml(inst.id || '')}','${escapeHtml(inst.name)}')">Uninstall</button>`;
   } else if (e.source === 'community') {
@@ -2162,6 +2203,7 @@ function renderRuleBar() {
 // The channel list: every trickset, always on screen, each with its traffic.
 // A dot means it caught a request in the last minute.
 const _homeIcon = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg>';
+const _gearIcon = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
 const _helpIcon = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.6 2.6 0 0 1 5 .9c0 1.7-2.5 2.3-2.5 3.9"/><line x1="12" y1="17" x2="12" y2="17.01"/></svg>';
 const _plugIcon = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6"/><path d="M15 2v6"/><path d="M6 8h12v4a6 6 0 0 1-12 0V8z"/><path d="M12 18v4"/></svg>';
 const _modelsIcon = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/><line x1="9" y1="2" x2="9" y2="6"/><line x1="15" y1="2" x2="15" y2="6"/><line x1="9" y1="18" x2="9" y2="22"/><line x1="15" y1="18" x2="15" y2="22"/><line x1="2" y1="9" x2="6" y2="9"/><line x1="2" y1="15" x2="6" y2="15"/><line x1="18" y1="9" x2="22" y2="9"/><line x1="18" y1="15" x2="22" y2="15"/></svg>';
@@ -2217,6 +2259,8 @@ function renderChannelRail() {
     + names.map(item).join('')
     + item('_default')
     + `<button class="chan chan-add${currentTab === 'newchannel' ? ' active' : ''}" onclick="openRuleEditor(true)" title="Add channel"><span class="chan-abbr" aria-hidden="true">+</span><span class="chan-glyph">+</span><span class="chan-name">Add channel</span></button>`
+    + `<button class="chan chan-page chan-settings${currentTab === 'petsitter' ? ' active' : ''}" onclick="switchTab('petsitter')" title="Settings: petsitter's own">`
+    + `<span class="chan-abbr" aria-hidden="true">${_gearIcon}</span><span class="chan-glyph" aria-hidden="true">${_gearIcon}</span><span class="chan-name">Settings</span></button>`
     + `<button class="chan chan-page chan-help${currentTab === 'help' ? ' active' : ''}" onclick="switchTab('help')" title="Help: how petsitter works">`
     + `<span class="chan-abbr" aria-hidden="true">${_helpIcon}</span><span class="chan-glyph" aria-hidden="true">${_helpIcon}</span><span class="chan-name">Help</span></button>`;
 }
@@ -3221,6 +3265,35 @@ function clearTricksetLogDisplay() {
   document.getElementById('tslog-count').textContent = '0 entries';
 }
 
+// ---- petsitter's own settings ----
+function _paintPetsitterSettings(d) {
+  const s = d.settings || {}, def = d.defaults || {}, active = (d.active || {}).reserved_id;
+  document.getElementById('ps-timeout').value = s.upstream_timeout_minutes;
+  document.getElementById('ps-timeout-default').textContent = def.upstream_timeout_minutes + ' minutes';
+  document.getElementById('ps-rid').value = s.reserved_id;
+  document.getElementById('ps-rid-default').textContent = def.reserved_id;
+  const pending = document.getElementById('ps-rid-pending');
+  pending.hidden = !active || active === s.reserved_id;
+  pending.innerHTML = pending.hidden ? '' : `Running with <code>${escapeHtml(active)}</code> until petsitter restarts.`;
+}
+
+async function loadPetsitterSettings() {
+  try { _paintPetsitterSettings(await fetchJSON('/api/settings')); } catch (e) {}
+}
+
+async function savePetsitterSetting(key, value) {
+  const err = document.getElementById('ps-error');
+  err.hidden = true;
+  try {
+    const r = await fetch('/api/settings', {method: 'PUT', headers: {'Content-Type': 'application/json'},
+                                            body: JSON.stringify({[key]: value})});
+    const d = await r.json();
+    if (!r.ok) { err.textContent = d.error || 'Not saved'; err.hidden = false; return; }
+    _paintPetsitterSettings(d);
+    showToast('Saved');
+  } catch (e) { err.textContent = 'Not saved: ' + e; err.hidden = false; }
+}
+
 // ---- agents ----
 async function fetchAgents() {
   try {
@@ -3249,14 +3322,15 @@ async function fetchAgents() {
     // on now. A tool that's already registered counts step two as done.
     _obRegistered = {};
     ids.forEach(i => { if (regAgents[i] && regAgents[i].status === 'registered') _obRegistered[i] = true; });
-    _obAgents = ordered.map(i => ({ id: i, name: agents[i].display_name || i, ready: (agents[i].detect || {}).status === 'ready' }));
+    _obAgents = ordered.map(i => ({ id: i, name: agents[i].display_name || i, icon: agents[i].icon || '',
+                                    ready: (agents[i].detect || {}).status === 'ready' }));
     if (!_ob.tool) {
       const reg = ids.find(i => _obRegistered[i]);
       if (reg) { _ob.tool = true; _ob.toolName = agents[reg].display_name || reg; }
     }
     paintOnboardTools();
     paintOnboard();
-    el.innerHTML = ordered.map(id => {
+    const card = id => {
       const a = agents[id];
       const d = a.detect || {};
       const isReg = regAgents[id] && regAgents[id].status === 'registered';
@@ -3278,7 +3352,6 @@ async function fetchAgents() {
       } else if (d.installed === false) {
         statusClass = 'status-muted'; statusLabel = 'not installed';
         route = [hop(name), arrow, hop(who)].join('');
-        note = 'Install it and this lights up.';
       } else if (d.status === 'missing_creds') {
         statusClass = 'status-warn'; statusLabel = 'not signed in';
         route = [hop(name), arrow, hop(who)].join('');
@@ -3291,27 +3364,25 @@ async function fetchAgents() {
       }
       const chipHtml = statusLabel
         ? `<span class="agent-chip ${statusClass}">${escapeHtml(statusLabel)}</span>` : '';
-      const noteHtml = note ? `<span class="agent-note">${escapeHtml(note)}</span>` : '';
+      const noteHtml = note ? `<div class="agent-note">${escapeHtml(note)}</div>` : '';
       const idEsc = escapeHtml(id);
       // The card is not itself a switch. Making it one meant a click anywhere
       // -- on the route, on the way to the details -- flipped the tool on or
       // off, and left nothing else on the card clickable.
       const actionable = isReg || d.status === 'ready';
       const cardAttrs = ` class="agent-card${isReg ? ' agent-registered' : ''}${actionable ? '' : ' agent-inert'}"`;
-      // Once it's connected, turning it off is not the interesting next step --
-      // seeing what petsitter is doing to the traffic is.
-      const primary = isReg
-        ? `<button class="agent-btn btn-configure" onclick="configureAgent('${idEsc}')"`
-          + ` title="See and change the tricks applied to this tool">Configure</button>`
-        : `<button class="agent-btn btn-connect" onclick="toggleAgent('${idEsc}', true)"`
-          + ` title="Route this tool through petsitter">Connect</button>`;
-      const actionHtml = actionable
-        ? primary
-          + `<label class="toggle-switch" title="${isReg ? 'Disconnect' : 'Connect'}">`
+      // One control connects and disconnects: the switch, in the corner. Once
+      // connected, the next step is seeing what petsitter does to the traffic.
+      const switchHtml = actionable
+        ? `<label class="toggle-switch agent-switch" title="${isReg ? 'Disconnect' : 'Connect'}">`
           + `<input type="checkbox" ${isReg ? 'checked' : ''} onchange="toggleAgent('${idEsc}', this.checked)">`
           + `<span class="toggle-slider"></span></label>`
         : '';
-      var iconHtml = a.icon && a.icon.indexOf('http') === 0
+      const actionHtml = isReg
+        ? `<button class="agent-btn btn-configure" onclick="configureAgent('${idEsc}')"`
+          + ` title="See and change the tricks applied to this tool">Configure</button>`
+        : '';
+      var iconHtml = a.icon && /^(https?:|\/)/.test(a.icon)
         ? `<img src="${escapeHtml(a.icon)}" alt="" class="agent-favicon" onerror="defaultImage(this)">`
         : (a.icon || '\u{1F916}');
       const configPaths = a.config_paths || [];
@@ -3319,6 +3390,7 @@ async function fetchAgents() {
       // when something is wrong, noise when it isn't. They live behind a fold.
       const diag = [];
       if (d.message) diag.push(escapeHtml(d.message));
+      if (a.checked) diag.push('Checked with ' + escapeHtml(a.checked));
       if (configPaths.length) {
         diag.push((isReg ? 'Editing: ' : 'Would edit: ')
           + configPaths.map(escapeHtml).join('<br>' + (isReg ? 'Editing: ' : 'Would edit: ')));
@@ -3326,8 +3398,19 @@ async function fetchAgents() {
       const detailHtml = diag.length
         ? `<details class="agent-diag"><summary>details</summary><div>${diag.join('<br>')}</div></details>`
         : '';
-      return `<div${cardAttrs}><div class="agent-icon">${iconHtml}</div><div class="agent-body"><div class="agent-head"><span class="agent-name">${name}</span>${chipHtml}${noteHtml}</div><div class="agent-route${isReg ? ' route-on' : ''}">${route}</div>${detailHtml}</div><div class="agent-actions">${actionHtml}</div></div>`;
-    }).join('');
+      // Rows: icon, name and switch; the route, full width so it fits on one
+      // line; details, with Configure on the right once connected.
+      return `<div${cardAttrs}><div class="agent-top"><div class="agent-icon">${iconHtml}</div>`
+        + `<div class="agent-head"><span class="agent-name">${name}</span>${chipHtml}${switchHtml}</div></div>`
+        + `<div class="agent-route${isReg ? ' route-on' : ''}">${route}</div>${noteHtml}`
+        + `<div class="agent-foot">${detailHtml}${actionHtml}</div></div>`;
+    };
+    // Tools you can turn on, then, smaller, the ones this machine doesn't have.
+    const usable = id => (regAgents[id] && regAgents[id].status === 'registered') || (agents[id].detect || {}).status === 'ready';
+    const found = ordered.filter(usable), missing = ordered.filter(id => !usable(id));
+    el.innerHTML = found.map(card).join('')
+      + `<div class="agents-manual">Don't see it? <a class="agents-manual-link" href="#connecting/_default">Connect manually</a> Takes under a minute!</div>`
+      + (missing.length ? `<h3 class="agents-missing-h">Not found</h3>` + missing.map(card).join('') : '');
   } catch(e) { document.getElementById('agents-grid').innerHTML = '<div class="loader">Error loading agents</div>'; }
 }
 
@@ -3486,7 +3569,7 @@ async function openTrickConfig(id) {
     document.getElementById('config-modal-title').textContent = (t.display_name || t.name) + ' settings';
     const vals = t.config || {};
     const kwField = t.prompt_keyword
-      ? `<label class="cfg-field"><span class="cfg-label">Prompt keyword</span><input type="text" id="cfg-_keyword" value="${escapeHtml(t.prompt_keyword || '')}" spellcheck="false" placeholder="e.g. rules"><div class="cfg-desc">Use <code>(keyword: ...)</code> in a message to trigger this</div></label>`
+      ? `<label class="cfg-field"><span class="cfg-label">Prompt keyword</span><input type="text" id="cfg-_keyword" value="${escapeHtml(t.prompt_keyword || '')}" spellcheck="false" placeholder="e.g. rules" oninput="document.getElementById('cfg-kw-example').textContent = this.value.trim() || 'keyword'"><div class="cfg-desc">Use <code>(<span id="cfg-kw-example">${escapeHtml(t.prompt_keyword || 'keyword')}</span>: ...)</code> in a message to trigger this</div></label>`
       : '';
     const body = kwField + (t.config_fields || []).map(f => {
       const key = f.key;

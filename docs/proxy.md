@@ -83,8 +83,21 @@ reply it needs to see at once with `needs_window` (see
 [writing tricks](writing-tricks.md)); if any extension in the channel needs the
 whole reply (`-1`, the default), petsitter holds it until it's complete and sends
 heartbeats every 5 seconds (SSE comments, or `ping` events on the Messages API)
-so the client doesn't time out. Petsitter waits up to 15 minutes for the model to
-answer.
+so the client doesn't time out. Petsitter waits up to 30 minutes for the provider
+to connect and answer, a backstop only: your tool's own timeout decides when to
+give up. Change it on petsitter's Settings page.
+
+## Settings
+
+Petsitter's own settings, on the Settings page (`/api/settings`), kept in
+`config.json` under `settings`:
+
+- `upstream_timeout_minutes` (30): how long to wait on the provider. Applies at once.
+- `reserved_id` (`gRefWg2D7zO8`): the prefix of every name petsitter puts into a
+  conversation (see `get_prefix()` in [writing tricks](writing-tricks.md)). 8 to
+  32 letters and digits; applies when petsitter restarts, since tricks build
+  their tool names and patterns from it when they load. Stand-ins from before
+  the change are no longer recognised.
 
 ## Config Diagnostic (`__petsitter_config__`)
 

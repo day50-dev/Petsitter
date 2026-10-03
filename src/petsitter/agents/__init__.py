@@ -91,6 +91,10 @@ class Agent:
     # traffic lands in its own trickset instead of everybody's default.
     trickset_filters: dict[str, str] = {"X-Title": "*", "Model": "*"}
     config_paths: list[str] = []
+    # What this adapter was last checked against, how, and when, e.g.
+    # "hermes-agent 0.19.0, `hermes -z`, sandbox, 2026-10-03". Third-party
+    # tools move their config around; this says whether one has since.
+    checked: str = ""
     tricks: list[str] = []
     model_config: dict[str, Any] = {}
 

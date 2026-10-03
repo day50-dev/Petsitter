@@ -31,7 +31,7 @@ class CodexAgent(Agent):
     id = "codex"
     display_name = "Codex"
     description = "OpenAI official CLI coding agent"
-    icon = "https://chatgpt.com/favicon.ico"
+    icon = "/static/agents/codex.png"   # bundled: gui/agents/
     required_env = ["OPENAI_API_KEY"]
     provider_name = "OpenAI"
     trickset_filters = {"X-Title": "*", "Model": "gpt*"}

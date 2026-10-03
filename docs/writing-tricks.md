@@ -246,9 +246,10 @@ streams included). Bodies are bytes. A `raw_upstream` pipeline event (see
 Logger is built on it.
 
 Anything petsitter itself puts into a conversation starts with its reserved
-id, `get_prefix()` (`gRefWg2D7zO8`), in the form `<id>-<context>-<uuid>`:
-`reserved("redacted")` gives `gRefWg2D7zO8-redacted-c74a3c40-...` (Secrets
-Protector's stand-ins), and `reserved_pattern("redacted")` matches them.
+id, `get_prefix()` (`gRefWg2D7zO8`), in the form `<prefix>-<context>-<id>`, the id 128 bits as 22 base62
+characters (`reserved_id()`):
+`reserved("sp")` gives `gRefWg2D7zO8-sp-3Lw9rTqXc0VbN7mK2pZs4a` (Secrets
+Protector's stand-ins), and `reserved_pattern("sp")` matches them.
 Expose Petsitter's tool names are `gRefWg2D7zO8-<name>`. Use these for yours,
 and sniff for them to tell petsitter's own things from the user's.
 

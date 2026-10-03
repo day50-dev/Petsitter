@@ -21,13 +21,22 @@ The **exit button** in the top-right restores every tool's original configuratio
 
 ### Available agents
 
-| Agent | Config mechanism | What gets patched | Channel filters |
-|-------|-----------------|-------------------|-----------------|
-| [OpenCode](https://opencode.ai) | `~/.config/opencode/opencode.json` | Provider `baseURL` | `X-Title: opencode*` |
-| [Claude Code](https://code.claude.com) | `~/.claude/settings.json` | `ANTHROPIC_BASE_URL` in `env` block | `Model: claude*` |
-| [Codex](https://developers.openai.com/codex) | `~/.codex/config.toml` (or `$CODEX_HOME/config.toml`) | `openai_base_url` | `Model: gpt*` |
+| Agent | Config | What gets patched | Channel | Checked with |
+|-------|--------|-------------------|---------|--------------|
+| [Hermes Agent](https://hermes-agent.nousresearch.com) | `~/.hermes/config.yaml` (`$HERMES_HOME`) | `model.provider: custom`, `model.base_url`, and `model.extra_headers` `X-Title: Hermes Agent` (it sends no title of its own) | `X-Title: Hermes Agent` | hermes-agent 0.19.0, CLI (`hermes -z`). Not yet: the desktop app, which uses a different HTTP client |
+| [Claude Code](https://code.claude.com) | `~/.claude/settings.json` | `ANTHROPIC_BASE_URL` in the `env` block | `Model: claude*` | |
+| [Kilo Code](https://kilo.ai) (`kilo`) | `~/.config/kilo/kilo.json` or `kilo.jsonc` (`$XDG_CONFIG_HOME`) | Provider `baseURL`, as for OpenCode (it's a fork) | `X-Title: Kilo Code*` (its own) | @kilocode/cli 7.8.3 (`kilo run`) |
+| [Cline](https://cline.bot) (`cline`) | `~/.cline/data/settings/providers.json` (`$CLINE_DIR`, `$CLINE_DATA_DIR`, `$CLINE_PROVIDER_SETTINGS_PATH`) | `settings.baseUrl` and `settings.headers` `X-Title: Cline` on `lastUsedProvider` | `X-Title: Cline` | cline 3.0.68 (`cline "…"`) |
+| [Codex](https://developers.openai.com/codex) | `~/.codex/config.toml` (`$CODEX_HOME`) | `openai_base_url` | `Model: gpt*` | |
+| [omp](https://omp.sh) | `~/.omp/agent/models.yml` (`$PI_CODING_AGENT_DIR`) | `baseUrl` and `headers` `X-Title: omp` on the provider of `config.yml`'s `modelRoles.default` | `X-Title: omp` | @oh-my-pi/pi-coding-agent 18.5.0 (`omp -p`) |
+| [pi](https://pi.dev) | `~/.pi/agent/models.json` (`$PI_CODING_AGENT_DIR`) | `baseUrl` and `headers` `X-Title: pi` on `settings.json`'s `defaultProvider` | `X-Title: pi` | @earendil-works/pi-coding-agent 1.0.0 (`pi -p`) |
+| [OpenCode](https://opencode.ai) | `~/.config/opencode/opencode.json` | Provider `baseURL` | `X-Title: opencode*` | |
 
-Each agent saves your original config to `registry.json` in the config directory (`~/.config/petsitter` by default) and restores it on disconnect or shutdown.
+"Checked with" means: installed in a sandbox, a request run through petsitter landed in the tool's own channel, and the config came back byte-for-byte on shutdown. Not yet confirmed by a person on a real setup. These tools change their config formats; when one breaks, this says what it last worked with.
+
+Not supported: **Freebuff**. Its normal mode runs on Freebuff's own models through its backend, with no base URL to change. A custom endpoint is only possible through its in-app "bring your own key" connections, which switch it off its free models, and it has no one-shot mode to test with.
+
+Each agent saves your original config to `registry.json` in the config directory (`~/.config/petsitter` by default) and restores it on disconnect or shutdown. The file is put back exactly as it was, comments included, so anything the tool itself changed in it while connected is undone too. The tools read their config when a session starts: connect or disconnect, then start a new session.
 
 ### Discovered programs
 

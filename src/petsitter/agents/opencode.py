@@ -8,21 +8,64 @@ on the provider being used.
 """
 
 import json
+import os
+import re
 from pathlib import Path
 from typing import Any
 
-from petsitter.agents import Agent, AgentContext, AgentResult
+from petsitter.agents import Agent, AgentContext, AgentResult, petsitter_url
 
 
 GLOBAL_CONFIG = Path.home() / ".config" / "opencode" / "opencode.json"
-from petsitter.agents import petsitter_url
+
+
+def _strip_jsonc(text: str) -> str:
+    """JSON with comments and trailing commas (.jsonc) as plain JSON."""
+    out, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == '"':                                   # a string: copy as is
+            j = i + 1
+            while j < n and text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+            out.append(text[i:j + 1])
+            i = j + 1
+        elif text.startswith("//", i):
+            i = text.find("\n", i)
+            i = n if i < 0 else i
+        elif text.startswith("/*", i):
+            i = text.find("*/", i + 2)
+            i = n if i < 0 else i + 2
+        else:
+            out.append(c)
+            i += 1
+    return re.sub(r",(\s*[}\]])", r"\1", "".join(out))
+
+
+def read_config(path: Path, strict: bool = False) -> dict:
+    """An OpenCode-style config, .json or .jsonc; {} if missing. Unreadable:
+    {} unless strict, when it raises, so connecting never writes over a file
+    it can't read."""
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(_strip_jsonc(path.read_text()))
+    except (OSError, ValueError) as e:
+        if strict:
+            raise RuntimeError(f"Can't read {path} ({e}); not changing it") from e
+        return {}
+    if not isinstance(data, dict):
+        if strict:
+            raise RuntimeError(f"{path} isn't a JSON object; not changing it")
+        return {}
+    return data
 
 
 class OpenCodeAgent(Agent):
     id = "opencode"
     display_name = "OpenCode"
     description = "Open-source AI coding agent for the terminal"
-    icon = "https://opencode.ai/favicon.ico"
+    icon = "/static/agents/opencode.png"   # bundled: gui/agents/
     required_env: list[str] = []
     provider_name = "its AI provider"
     trickset_filters = {"X-Title": "opencode*", "Model": "*"}
@@ -42,169 +85,125 @@ class OpenCodeAgent(Agent):
         "model": "",
         "key": "",
     }
+    file_label = "opencode.json"
+    default_provider = "openai"     # patched when the config names none
+
+    def config_file(self) -> Path:
+        """The global config this tool reads (a subclass for a fork overrides it)."""
+        return GLOBAL_CONFIG
+
+    def installed(self) -> bool:
+        return self.config_file().exists() or super().installed()
 
     def detect(self) -> AgentResult:
-        notes = []
-        found: dict[str, str] = {}
-        missing: list[str] = []
-
-        if GLOBAL_CONFIG.exists():
-            notes.append(f"Found {GLOBAL_CONFIG}")
-            try:
-                data = json.loads(GLOBAL_CONFIG.read_text())
-                model = data.get("model", "")
-                if model:
-                    notes.append(f"Default model: {model}")
-                # Check if any provider has a baseURL set already
-                providers = data.get("provider", {})
-                for pid, pcfg in providers.items() if isinstance(providers, dict) else []:
-                    if isinstance(pcfg, dict):
-                        burl = pcfg.get("options", {}).get("baseURL") or pcfg.get("baseURL")
-                        if burl:
-                            notes.append(f"  {pid} baseURL: {burl}")
-            except (json.JSONDecodeError, OSError):
-                notes.append("Found opencode.json (unreadable)")
-        else:
-            missing.append("opencode.json")
-
-        return AgentResult(
-            status="ready" if GLOBAL_CONFIG.exists() else "missing_creds",
-            found_env=found,
-            missing_env=missing,
-            message="; ".join(notes) if notes else "Not found",
-        )
+        path = self.config_file()
+        if not path.exists():
+            return AgentResult(status="missing_creds", missing_env=[self.file_label], message="Not found")
+        notes = [f"Found {path}"]
+        data = read_config(path)
+        if data.get("model"):
+            notes.append(f"Default model: {data['model']}")
+        providers = data.get("provider", {})
+        for pid, pcfg in providers.items() if isinstance(providers, dict) else []:
+            if isinstance(pcfg, dict):
+                burl = (pcfg.get("options") or {}).get("baseURL") or pcfg.get("baseURL")
+                if burl:
+                    notes.append(f"  {pid} baseURL: {burl}")
+        return AgentResult(status="ready", message="; ".join(notes))
 
     def is_registered(self) -> bool:
-        """Read opencode.json and check some provider's baseURL is ours now.
+        """Whether some provider's baseURL points at petsitter now.
 
         register() doesn't always patch the same provider id (it follows the
         default model, or falls back to the first configured provider), so
         this checks whether any provider currently points at petsitter rather
         than guessing which one register() would have chosen.
         """
-        if not GLOBAL_CONFIG.exists():
-            return False
-        try:
-            data = json.loads(GLOBAL_CONFIG.read_text())
-        except (json.JSONDecodeError, OSError):
+        path = self.config_file()
+        if not path.exists():
             return False
         wanted = f"{petsitter_url()}/v1"
-        providers = data.get("provider", {})
+        providers = read_config(path).get("provider", {})
         if not isinstance(providers, dict):
             return False
-        for pcfg in providers.values():
-            if not isinstance(pcfg, dict):
-                continue
-            options = pcfg.get("options", {})
-            burl = options.get("baseURL") if isinstance(options, dict) else None
-            if burl == wanted:
-                return True
-        return False
+        return any(isinstance(p, dict) and isinstance(p.get("options"), dict)
+                   and p["options"].get("baseURL") == wanted for p in providers.values())
 
     def register(self, ctx: AgentContext) -> list[dict[str, str]]:
         log: list[dict[str, str]] = []
-        backup: dict = ctx.backup
+        path = self.config_file()
+        # The file exactly as it was ("" if it didn't exist), so disconnecting
+        # puts back every comment, not a re-serialization.
+        existing = read_config(path, strict=True)
+        ctx.backup.setdefault("files", {})[f"file::{path}"] = path.read_text() if path.exists() else ""
 
-        existing: dict = {}
-        if GLOBAL_CONFIG.exists():
-            try:
-                existing = json.loads(GLOBAL_CONFIG.read_text())
-            except (json.JSONDecodeError, OSError):
-                pass
-
-        backup.setdefault("files", {})[f"file::{GLOBAL_CONFIG}"] = json.dumps(existing, indent=2) + "\n" if existing else ""
-
-        # Determine which provider to patch — use first provider that has a key
+        # The provider in use: the default model's, else the first configured one.
         model = existing.get("model", "")
         provider_id = model.split("/")[0] if "/" in model else ""
-        if not provider_id:
-            providers = existing.get("provider", {})
-            if isinstance(providers, dict):
-                provider_id = next(iter(providers), "openai")
-
         providers = existing.get("provider", {})
         if not isinstance(providers, dict):
             providers = {}
+        if not provider_id:
+            provider_id = next(iter(providers), self.default_provider)
 
         provider_cfg = providers.get(provider_id, {})
         if not isinstance(provider_cfg, dict):
             provider_cfg = {}
-
-        existing_url = provider_cfg.get("options", {}).get("baseURL", "")
-        if existing_url:
-            log.append({"level": "INFO", "message": f"Saved existing {provider_id} baseURL: {existing_url}"})
-
         options = provider_cfg.get("options", {})
         if not isinstance(options, dict):
             options = {}
+        if options.get("baseURL"):
+            log.append({"level": "INFO", "message": f"Saved existing {provider_id} baseURL: {options['baseURL']}"})
         options["baseURL"] = f"{petsitter_url()}/v1"
         provider_cfg["options"] = options
         providers[provider_id] = provider_cfg
         existing["provider"] = providers
 
-        GLOBAL_CONFIG.parent.mkdir(parents=True, exist_ok=True)
-        GLOBAL_CONFIG.write_text(json.dumps(existing, indent=2) + "\n")
-        log.append({"level": "INFO", "message": f"Set {provider_id} baseURL → {petsitter_url()}/v1 in opencode.json"})
-
-        log.append({"level": "INFO", "message": "OpenCode is now routed through petsitter"})
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(existing, indent=2) + "\n")
+        log.append({"level": "INFO", "message": f"Set {provider_id} baseURL → {petsitter_url()}/v1 in {path}"})
+        log.append({"level": "INFO", "message": f"{self.display_name} is now routed through petsitter"})
         return log
 
     def unregister(self, ctx: AgentContext) -> list[dict[str, str]]:
         log: list[dict[str, str]] = []
-        backup = ctx.backup
-
-        key = f"file::{GLOBAL_CONFIG}"
-        files = backup.get("files", {})
-        have_backup = key in files
-        original = files.get(key)
-        if have_backup and original:
+        path = self.config_file()
+        key = f"file::{path}"
+        files = ctx.backup.get("files", {})
+        if key in files:
+            original = files[key]
             try:
-                GLOBAL_CONFIG.write_text(original)
-                log.append({"level": "INFO", "message": "Restored opencode.json"})
+                if original:
+                    path.write_text(original)
+                    log.append({"level": "INFO", "message": f"Restored {path}"})
+                elif path.exists():
+                    # it didn't exist before we wrote it: removing it is restoring
+                    path.unlink()
+                    log.append({"level": "INFO", "message": f"Removed {path} (created by petsitter)"})
             except OSError as e:
-                # baseURL is still pointed at petsitter in the file on disk, so
-                # this must not be reported as done -- propagate so the caller
-                # keeps this agent marked "registered" and retries later.
-                raise RuntimeError("Could not restore opencode.json") from e
-        elif have_backup and not original and GLOBAL_CONFIG.exists():
-            # We recorded that the file did not exist (or was empty) before
-            # we wrote it, so deleting it is restoring, not destroying.
-            try:
-                GLOBAL_CONFIG.unlink()
-                log.append({"level": "INFO", "message": "Removed opencode.json (created by petsitter)"})
-            except OSError as e:
-                raise RuntimeError("Could not remove opencode.json") from e
-        elif not have_backup and GLOBAL_CONFIG.exists():
-            # No backup to restore from -- e.g. registry.json lost track of
-            # this registration while the file itself still points at
-            # petsitter. We don't know what was here before, so the only
-            # safe move is to clear the baseURL keys we recognize as ours,
-            # never delete a file we didn't create and can't prove is empty
-            # otherwise.
-            try:
-                data = json.loads(GLOBAL_CONFIG.read_text())
-            except (json.JSONDecodeError, OSError) as e:
-                raise RuntimeError("opencode.json is unreadable; not touching it") from e
+                # still pointed at petsitter on disk: must not be reported as
+                # done, so the caller keeps it "registered" and retries
+                raise RuntimeError(f"Could not restore {path}") from e
+        elif path.exists():
+            # No backup on record (registry.json lost it) while the file points
+            # at petsitter: clear only the baseURLs that are ours.
+            data = read_config(path)
+            if not data:
+                raise RuntimeError(f"{path} is unreadable; not touching it")
             wanted = f"{petsitter_url()}/v1"
-            providers = data.get("provider", {})
             removed = False
-            if isinstance(providers, dict):
-                for pcfg in providers.values():
-                    if not isinstance(pcfg, dict):
-                        continue
-                    options = pcfg.get("options", {})
-                    if isinstance(options, dict) and options.get("baseURL") == wanted:
-                        options.pop("baseURL", None)
-                        removed = True
+            for pcfg in (data.get("provider") or {}).values():
+                if isinstance(pcfg, dict) and isinstance(pcfg.get("options"), dict) \
+                        and pcfg["options"].get("baseURL") == wanted:
+                    pcfg["options"].pop("baseURL", None)
+                    removed = True
             if removed:
                 try:
-                    GLOBAL_CONFIG.write_text(json.dumps(data, indent=2) + "\n")
+                    path.write_text(json.dumps(data, indent=2) + "\n")
                 except OSError as e:
-                    raise RuntimeError("Could not write opencode.json") from e
-                log.append({"level": "INFO",
-                            "message": "Removed baseURL from opencode.json (no backup on record)"})
+                    raise RuntimeError(f"Could not write {path}") from e
+                log.append({"level": "INFO", "message": f"Removed petsitter's baseURL from {path} (no backup on record)"})
             else:
-                log.append({"level": "INFO", "message": "opencode.json did not point at petsitter"})
-
+                log.append({"level": "INFO", "message": f"{path} did not point at petsitter"})
         log.append({"level": "INFO", "message": "Configuration restored"})
         return log

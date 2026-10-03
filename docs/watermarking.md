@@ -42,10 +42,10 @@ Two things go wrong when an extension sends its own content to the model.
 
 Each time petsitter sends something of its own back through the pipeline, that
 pass gets a fresh mark, a reserved name (`reserved("petsitter_internal")`):
-petsitter's id, the context, then a UUID.
+petsitter's id, the context, then a 22-character base62 id (128 bits).
 
 ```
-gRefWg2D7zO8-petsitter_internal-3f2b8c1e-0d4a-4e7b-9a51-6c2f8e0b7d13
+gRefWg2D7zO8-petsitter_internal-7hQ2mZx9Lc4TfR0bWn5Kd1
 ```
 
 The mark identifies a pass, not an extension. What an extension needs to know
@@ -55,8 +55,8 @@ also handles nesting: a pass started inside another pass gets its own ID.
 It goes in the text itself, not in a field on the message: extensions rebuild
 messages and copy text around, and a field is lost when they do. It can't be
 confused with the id's other uses: each use has its own context, like
-Secrets Protector's stand-ins (`gRefWg2D7zO8-redacted-<uuid>`), and
-petsitter's tool names have no UUID (`gRefWg2D7zO8-<name>`).
+Secrets Protector's stand-ins (`gRefWg2D7zO8-sp-<id>`), and
+petsitter's tool names have no id (`gRefWg2D7zO8-<name>`).
 
 ## A pass, start to finish
 

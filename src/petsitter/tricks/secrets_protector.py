@@ -3,7 +3,7 @@
 It's easy to paste a config file, a stack trace or a `.env` into a chat without
 noticing the API key or database password in it. This trick finds those before
 the request leaves petsitter and replaces each with an opaque stand-in like
-`gRefWg2D7zO8-redacted-d4360d48-...`. When the model mentions or uses a stand-in, in
+`gRefWg2D7zO8-sp-3Lw9rTqXc0VbN7mK2pZs4a`. When the model mentions or uses a stand-in, in
 its reply or in a tool call, the real value is put back, so your tool still gets
 working output. The model is never told a swap happened.
 
@@ -13,7 +13,9 @@ Detected automatically:
   `"password": "..."`, `api_key = '...'`, `DB_PASSWORD=...`, `secret: ...`
 - about 200 kinds of vendor keys and tokens (OpenAI, Anthropic, AWS, GitHub,
   Slack, Stripe, Google...), database URLs and private keys
-- emails, phone numbers, SSNs and card numbers
+- emails, SSNs and card numbers, and phone numbers if you turn them on. Each
+  has a switch in the settings: a stand-in doesn't look like what it replaced,
+  so hiding one the model needs to recognise can confuse it.
 
 IP addresses are left alone: whether one is local or public, which subnet and
 which machine it is, are what make it useful, and a stand-in loses all of that.
@@ -61,8 +63,8 @@ directly before a `)`.
 - `post_hook` puts the real values back in the reply text and in tool call
   arguments (JSON-escaped there). Only the stand-in format is swapped back,
   so nothing else in the reply can be mistaken for one.
-- The personal-detail patterns are broad: a 10-digit number reads as a phone
-  number.
+- The personal-detail patterns are broad: 16 digits in groups of four read as
+  a card number.
 """
 
 import hashlib
@@ -71,18 +73,18 @@ import json
 import re
 import secrets
 import time
-import uuid
 
 from petsitter import secret_scan
 from petsitter.secret_scan import find_secrets
-from petsitter.trick import Trick, find_prompt_keyword_patterns, reserved, reserved_pattern
+from petsitter.trick import Trick, find_prompt_keyword_patterns, reserved, reserved_id, reserved_pattern
 
-# Every stand-in is a reserved name, gRefWg2D7zO8-redacted-<uuid>, so the way
-# back can find them without guessing, including one the model echoes from an
-# older turn. "redacted" says what it is: models took a bare hex token for the
-# password.
-_MARKER_RE = reserved_pattern("redacted")
-_MARKER_LEN = len(reserved("redacted"))
+# Every stand-in is a reserved name, gRefWg2D7zO8-sp-<id> ("sp" for Secrets
+# Protector), so the way back can find them without guessing, including one the
+# model echoes from an older turn. The word claims nothing about the value: with
+# "redacted" there, a model decided the secrets were gone and asked for them again.
+_MARKER_RE = reserved_pattern("sp")
+
+_MARKER_LEN = len(reserved("sp"))
 
 
 # A detected value at least this long is hidden wherever it shows up (in
@@ -122,6 +124,17 @@ class SecretsProtectorTrick(Trick):
     __category__ = "Safety & Privacy"
     prompt_keyword = "secret"
     strip_prompt_keyword = False
+    # Personal details, each switchable. A stand-in doesn't look like what it
+    # replaced, so hiding one the model needs to recognise (a phone number to
+    # format or dial) can confuse it.
+    config_fields = [
+        {"key": "hide_email", "label": "Hide email addresses", "type": "boolean", "default": True,
+         "description": "They're often logins."},
+        {"key": "hide_phone", "label": "Hide phone numbers", "type": "boolean", "default": False,
+         "description": "Can confuse the model, and catches any 10-digit number."},
+        {"key": "hide_ssn", "label": "Hide social security numbers", "type": "boolean", "default": True},
+        {"key": "hide_credit_card", "label": "Hide card numbers", "type": "boolean", "default": True},
+    ]
 
     def __init__(self):
         # Which of those were found by a detector rather than marked by hand.
@@ -138,7 +151,7 @@ class SecretsProtectorTrick(Trick):
 
     def _marker(self, value: str) -> str:
         digest = hmac.new(self._key, value.encode(), hashlib.sha256).digest()
-        return reserved("redacted", str(uuid.UUID(bytes=digest[:16], version=4)))
+        return reserved("sp", reserved_id(digest))
 
     def _mark(self, text: str) -> str:
         """Replace each (secret: value) in text with its stand-in, in place."""
@@ -217,7 +230,13 @@ class SecretsProtectorTrick(Trick):
         return marker
 
     def _find_spans(self, text: str) -> list[tuple[int, int, str, str]]:
-        return find_secrets(text)
+        return [s for s in find_secrets(text) if self._hiding(s[3])]
+
+    def _hiding(self, kind: str) -> bool:
+        if kind not in secret_scan.PERSONAL_KINDS:
+            return True
+        field = next(f for f in self.config_fields if f["key"] == f"hide_{kind}")
+        return bool(getattr(self, field["key"], field["default"]))
 
     def problems(self) -> list[str]:
         return secret_scan.problems()

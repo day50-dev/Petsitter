@@ -219,7 +219,7 @@ Each channel also has:
 ### Keep secrets out of the model
 
 Install **Secrets Protector**. It finds API keys,
-passwords, emails, phone numbers and the like in what your tool sends, swaps
+passwords, emails, card numbers and the like in what your tool sends, swaps
 each for a stand-in before the model sees it, and puts the real value back in
 the reply and in tool call arguments.
 

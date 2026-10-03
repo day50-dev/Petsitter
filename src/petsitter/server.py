@@ -320,7 +320,7 @@ def _parse_use_path(path: str) -> tuple[str, str] | None:
     return host, ("/" + sub.lstrip("/") if sep else "")
 
 
-async def _generic_proxy(target: str, request: Request, timeout: float = 120.0,
+async def _generic_proxy(target: str, request: Request, timeout: float | None = None,
                           extra_headers: dict | None = None) -> Response:
     """Transparently forward a request to *target* and stream back the response.
 
@@ -342,7 +342,7 @@ async def _generic_proxy(target: str, request: Request, timeout: float = 120.0,
                 request.method, target,
                 content=body or None,
                 headers=headers,
-                timeout=timeout,
+                timeout=timeout if timeout is not None else raw_http.upstream_timeout(),
             )
     except httpx.TransportError as e:
         return JSONResponse({"error": str(e), "type": "proxy_error"}, status_code=502)
@@ -373,6 +373,31 @@ def save_config(config: dict) -> None:
     CONFIG_PATH.write_text(json.dumps(config, indent=2) + "\n")
 
 
+# petsitter's own settings (the Settings page), as opposed to a channel's or
+# an extension's. Kept in config.json under "settings".
+def petsitter_settings(cfg: dict | None = None) -> dict:
+    from petsitter.trick import DEFAULT_PREFIX
+    saved = (cfg if cfg is not None else load_config()).get("settings") or {}
+    return {"upstream_timeout_minutes": saved.get("upstream_timeout_minutes", raw_http.DEFAULT_TIMEOUT_MINUTES),
+            "reserved_id": saved.get("reserved_id", DEFAULT_PREFIX)}
+
+
+def apply_settings(cfg: dict | None = None, startup: bool = False) -> None:
+    """Put petsitter's settings into effect. The timeout applies right away;
+    the reserved id only at startup, before any trick has loaded."""
+    from petsitter.trick import set_prefix
+    settings = petsitter_settings(cfg)
+    try:
+        raw_http.set_upstream_timeout(float(settings["upstream_timeout_minutes"]))
+    except (TypeError, ValueError) as e:
+        logging.getLogger("petsitter").warning("settings: ignoring upstream_timeout_minutes (%s)", e)
+    if startup:
+        try:
+            set_prefix(str(settings["reserved_id"]))
+        except ValueError as e:
+            logging.getLogger("petsitter").warning("settings: ignoring reserved_id (%s)", e)
+
+
 def reload_config(handler: "ProxyHandler") -> dict:
     """Re-read the config files on disk and apply them top-down.
 
@@ -386,6 +411,7 @@ def reload_config(handler: "ProxyHandler") -> dict:
     from petsitter.trick import _modelset
 
     cfg = load_config()
+    apply_settings(cfg)
     modelset_data = cfg.get("modelset") or {}
     if isinstance(modelset_data, dict):
         configure_modelset(modelset_data)
@@ -556,16 +582,28 @@ class _NormalizeV1Path:
                 line = f"{scope.get('method', '')} {original_path}{'?' + query if query else ''}"
                 token, record = raw_http.begin(
                     line, [(k.decode("latin-1", "replace"), v.decode("latin-1", "replace")) for k, v in raw],
-                    f"{client[0]}:{client[1]}" if client and client[0] else "")
+                    f"{client[0]}:{client[1]}" if client and client[0] else "",
+                    scope.get("http_version", "1.1"))
 
                 async def receive_copy():
                     message = await receive()
                     if message.get("type") == "http.request":
                         raw_http.add_body(record, message.get("body", b""))
                     return message
+
+                async def send_copy(message):
+                    # petsitter's response, as the client gets it
+                    if message.get("type") == "http.response.start":
+                        raw_http.respond(record, message.get("status"), [
+                            (k.decode("latin-1", "replace"), v.decode("latin-1", "replace"))
+                            for k, v in message.get("headers") or []])
+                    elif message.get("type") == "http.response.body":
+                        raw_http.add_response_body(record, message.get("body", b""))
+                    await send(message)
                 try:
-                    await self.app(scope, receive_copy, send)
+                    await self.app(scope, receive_copy, send_copy)
                 finally:
+                    raw_http.finish(record)
                     raw_http.end(token)
                 return
         await self.app(scope, receive, send)
@@ -712,7 +750,7 @@ def create_app(
                 api_key = (default_cfg or {}).get("key")
                 if api_key is not False and api_key:
                     extra_headers["authorization"] = f"Bearer {api_key}"
-                return await _generic_proxy(target, request, timeout=600.0, extra_headers=extra_headers)
+                return await _generic_proxy(target, request, extra_headers=extra_headers)
             if stream:
                 return StreamingResponse(
                     stream_chat_completions(handler, payload, x_title),
@@ -773,7 +811,7 @@ def create_app(
             # translation round trip left to mangle thinking blocks or anything
             # else. Bytes go straight to the upstream and straight back.
             logging.getLogger("petsitter").info("/v1/messages: petsitter paused; raw passthrough")
-            return await _generic_proxy(target, request, timeout=600.0)
+            return await _generic_proxy(target, request)
 
         if streaming:
             # Streams Anthropic's own events when no trick needs the whole
@@ -828,6 +866,41 @@ def create_app(
         return JSONResponse({"paused": handler.paused})
     app.add_route("/api/pause", set_pause_state, methods=["POST"])
 
+    async def get_settings(request: Request) -> Response:
+        from petsitter.trick import get_prefix, DEFAULT_PREFIX
+        return JSONResponse({"settings": petsitter_settings(),
+                             "defaults": {"upstream_timeout_minutes": raw_http.DEFAULT_TIMEOUT_MINUTES,
+                                          "reserved_id": DEFAULT_PREFIX},
+                             "active": {"reserved_id": get_prefix()}})
+    app.add_route("/api/settings", get_settings, methods=["GET"])
+
+    async def put_settings(request: Request) -> Response:
+        from petsitter.trick import PREFIX_RE
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        cfg = load_config()
+        saved = dict(cfg.get("settings") or {})
+        if "upstream_timeout_minutes" in body:
+            try:
+                minutes = float(body["upstream_timeout_minutes"])
+            except (TypeError, ValueError):
+                minutes = 0
+            if minutes <= 0:
+                return JSONResponse({"error": "The timeout is a number of minutes above 0"}, status_code=400)
+            saved["upstream_timeout_minutes"] = int(minutes) if minutes == int(minutes) else minutes
+        if "reserved_id" in body:
+            rid = str(body["reserved_id"] or "").strip()
+            if not PREFIX_RE.fullmatch(rid):
+                return JSONResponse({"error": "The reserved id is 8 to 32 letters and digits"}, status_code=400)
+            saved["reserved_id"] = rid
+        cfg["settings"] = saved
+        save_config(cfg)
+        apply_settings(cfg)
+        return await get_settings(request)
+    app.add_route("/api/settings", put_settings, methods=["PUT"])
+
     # ----- /bypass: skip petsitter processing for one tool -----
     # Point a tool at http://host:port/bypass/v1 and its requests go straight
     # to the configured provider (or Anthropic, for /messages): no extensions,
@@ -844,7 +917,7 @@ def create_app(
                                  "type": "invalid_request"}, status_code=404)
         endpoint = m.group(1)
         if endpoint == "messages":
-            return await _generic_proxy(f"{ANTHROPIC_UPSTREAM}/v1/messages", request, timeout=600.0)
+            return await _generic_proxy(f"{ANTHROPIC_UPSTREAM}/v1/messages", request)
         default_cfg = get_model_config("default") or {}
         upstream_url = default_cfg.get("url")
         if not upstream_url:
@@ -857,7 +930,7 @@ def create_app(
         if api_key is not False and api_key:
             extra_headers["authorization"] = f"Bearer {api_key}"
         logging.getLogger("petsitter").info("/bypass -> %s/%s (no processing)", base, endpoint)
-        return await _generic_proxy(f"{base}/{endpoint}", request, timeout=600.0, extra_headers=extra_headers)
+        return await _generic_proxy(f"{base}/{endpoint}", request, extra_headers=extra_headers)
     app.add_route("/bypass/{rest:path}", bypass, methods=["GET", "POST"])
 
     # ----- /use/<host>/...: your extensions, someone else's provider -----
@@ -892,7 +965,7 @@ def create_app(
         if request.method == "POST" and rest.endswith("/chat/completions"):
             if handler.paused:
                 logging.getLogger("petsitter").info("/use/: petsitter paused; raw passthrough -> %s", upstream)
-                return await _generic_proxy(upstream, request, timeout=600.0)
+                return await _generic_proxy(upstream, request)
             try:
                 payload = await request.json()
             except json.JSONDecodeError:
@@ -1316,6 +1389,7 @@ def cli(config_arg: str | None, listen_on: str, no_browser: bool) -> None:
     BACKUPS_DIR = CONFIG_DIR / "backups"
 
     cfg = load_config()
+    apply_settings(cfg, startup=True)   # before any trick loads: the reserved id
     cfg_tricksets = list(cfg.get("tricksets", []))
 
     modelset_data = cfg.get("modelset") or {}

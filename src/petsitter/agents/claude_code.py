@@ -25,7 +25,7 @@ class ClaudeCodeAgent(Agent):
     id = "claude-code"
     display_name = "Claude Code"
     description = "Anthropic official CLI coding agent"
-    icon = "https://claude.ai/favicon.ico"
+    icon = "/static/agents/claude-code.png"   # bundled: gui/agents/
     required_env = ["ANTHROPIC_API_KEY"]
     provider_name = "Anthropic"
     trickset_filters = {"X-Title": "*", "Model": "claude*"}

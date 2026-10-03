@@ -11,7 +11,7 @@ import re
 
 from petsitter.trick import get_prefix
 
-STAND_IN = re.compile(re.escape(get_prefix() + "-redacted-") + r"[0-9a-f-]{36}")
+STAND_IN = re.compile(re.escape(get_prefix() + "-sp-") + r"[0-9A-Za-z]{22}")
 
 
 def hides(text: str, value: str) -> bool:
@@ -49,7 +49,6 @@ class TestSecretsProtectorTrick:
         ("postgres://admin:Tr0ub4dor@db.example.com:5432/app", "Tr0ub4dor"),
         # personal details
         ("Email me at alice@example.com", "alice@example.com"),
-        ("Call me at 555-123-4567", "555-123-4567"),
         ("My SSN is 123-45-6789", "123-45-6789"),
         ("Card: 4111-1111-1111-1111", "4111-1111-1111-1111"),
     ])
@@ -65,6 +64,8 @@ class TestSecretsProtectorTrick:
         'password: str = field(default="")',
         "token: ${GITHUB_TOKEN}",
         "Server at 192.168.1.1, gateway 10.0.0.1/24",
+        # phone numbers are off by default
+        "Call me at 555-123-4567",
         '{"token": "${GITHUB_TOKEN}"}',
         '{"max_tokens": "4096"}',
         '{"key": "theme", "value": "dark"}',
@@ -126,7 +127,7 @@ class TestSecretsProtectorTrick:
         """Something that merely resembles a hidden value is never touched."""
         trick = SecretsProtectorTrick()
         trick._sanitize("alice@example.com")
-        reply = "user.0001@sanitized.local and gRefWg2D7zO8-redacted-00000000-0000-4000-8000-000000000000"
+        reply = "user.0001@sanitized.local and gRefWg2D7zO8-sp-0000000000000000000000"
         assert trick.post_hook([{"role": "assistant", "content": reply}])[-1]["content"] == reply
 
     def test_info_declares_capability(self):
@@ -345,3 +346,28 @@ class TestEscapedJson:
                               {"role": "assistant", "content": "I ran the test suite."}], {})
         assert "test" not in ctx[0]["content"]
         assert ctx[1]["content"] == "I ran the test suite."
+
+
+class TestPersonalDetailSwitches:
+
+    def test_phone_numbers_when_turned_on(self):
+        t = SecretsProtectorTrick()
+        assert "555-123-4567" in t._sanitize("Call me at 555-123-4567")
+        t.configure({"hide_phone": True})
+        assert "555-123-4567" not in t._sanitize("Call me at 555-123-4567")
+
+    @pytest.mark.parametrize("key, text, value", [
+        ("hide_email", "Email me at alice@example.com", "alice@example.com"),
+        ("hide_ssn", "My SSN is 123-45-6789", "123-45-6789"),
+        ("hide_credit_card", "Card: 4111-1111-1111-1111", "4111-1111-1111-1111"),
+    ])
+    def test_each_can_be_turned_off(self, key, text, value):
+        t = SecretsProtectorTrick()
+        t.configure({key: False})
+        assert value in t._sanitize(text)
+
+    def test_credentials_have_no_switch(self):
+        t = SecretsProtectorTrick()
+        t.configure({"hide_email": False})
+        out = t._sanitize('{"username": "bogus@yahoo.com", "password": "magical9bjyX"}')
+        assert "bogus@yahoo.com" in out and "magical9bjyX" not in out

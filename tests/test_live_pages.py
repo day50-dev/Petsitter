@@ -190,7 +190,7 @@ def _logged(tmp_path, monkeypatch, upstream_handler, body, headers, path="/v1/ch
     return entry
 
 
-def test_traffic_logger_shows_request_and_response_but_no_content(tmp_path, monkeypatch):
+def test_traffic_logger_shows_both_hops_as_http_without_content(tmp_path, monkeypatch):
     import httpx
 
     def provider(request):
@@ -203,15 +203,20 @@ def test_traffic_logger_shows_request_and_response_but_no_content(tmp_path, monk
             "messages": [{"role": "user", "content": "the secret plan"}]}
     r = _logged(tmp_path, monkeypatch, provider, body,
                 {"Authorization": "Bearer sk-real-key-1234", "X-Title": "Open WebUI"})
-    assert r["line"] == "POST /v1/chat/completions"
-    assert ["authorization", "Bearer sk-real-key-1234"] in r["headers"]       # as received, not masked
-    assert r["params"] == {"model": "m", "temperature": 0.2, "max_tokens": 50, "tool_choice": "auto"}
-    assert r["tools"] == ["web_search"]
-    [up] = r["upstream"]
-    assert up["status"] == 200 and up["url"] == "http://upstream.test/v1/chat/completions"
-    assert ["x-request-id", "req_42"] in up["headers"]
-    assert up["response"]["usage"] == {"prompt_tokens": 11, "completion_tokens": 3}
-    assert up["response"]["choices"] == [{"index": 0, "finish_reason": "stop"}]
+    h = r["http"]
+    assert h["done"] and h["client_status"] == 200
+    # what your tool sent: request line, every header as sent, the body without the content
+    assert h["client_request"].startswith("POST /v1/chat/completions HTTP/1.1\n")
+    assert "authorization: Bearer sk-real-key-1234" in h["client_request"]
+    assert '"temperature": 0.2' in h["client_request"] and '"tool_choice": "auto"' in h["client_request"]
+    assert '"<1 messages, ' in h["client_request"] and "web_search" in h["client_request"]
+    # what petsitter sent the provider, and what came back
+    [up] = h["upstream"]
+    assert up["request"].startswith("POST http://upstream.test/v1/chat/completions HTTP/1.1\n")
+    assert up["response"].startswith("HTTP/1.1 200 OK\n") and "x-request-id: req_42" in up["response"]
+    assert '"completion_tokens": 3' in up["response"] and '"finish_reason": "stop"' in up["response"]
+    # what petsitter sent your tool
+    assert h["client_response"].startswith("HTTP/1.1 200 OK\n") and "content-type: application/json" in h["client_response"]
     text = json.dumps(r)
     assert "the secret plan" not in text and "the secret reply" not in text   # no content: that's the disk logs
     assert "the secret plan" in (tmp_path / "logs" / "before.jsonl").read_text()
@@ -223,10 +228,11 @@ def test_traffic_logger_shows_a_failed_response(tmp_path, monkeypatch):
                 lambda request: httpx.Response(429, headers={"retry-after": "7"},
                                                json={"error": {"message": "slow down", "type": "rate_limit"}}),
                 {"model": "m", "messages": [{"role": "user", "content": "hi"}]}, {})
-    statuses = [u["status"] for u in r["upstream"]]
-    assert statuses and set(statuses) == {429}                               # retried, every attempt shown
-    assert r["upstream"][-1]["response"]["error"]["message"] == "slow down"
-    assert ["retry-after", "7"] in r["upstream"][-1]["headers"]
+    ups = r["http"]["upstream"]
+    assert ups and {u["status"] for u in ups} == {429}                        # retried, every attempt shown
+    assert ups[-1]["response"].startswith("HTTP/1.1 429 Too Many Requests\n")
+    assert "retry-after: 7" in ups[-1]["response"] and "slow down" in ups[-1]["response"]
+    assert r["http"]["client_status"] >= 400                                 # and what your tool got
 
 
 def test_traffic_logger_keeps_the_last_40(tmp_path):

@@ -226,7 +226,6 @@ def callmodel_sync(
             chat_completions_url(model_url),
             json=payload,
             headers=headers,
-            timeout=60.0,
         )
         response.raise_for_status()
         result = response.json()
@@ -241,8 +240,26 @@ def callmodel_sync(
 # that comes back later (a stand-in the model echoes turns afterwards) is still
 # recognisably petsitter's, and a trick can sniff for it. Twelve base64
 # characters (about 71 bits), found nowhere on Google or GitHub code search.
-_PREFIX = "gRefWg2D7zO8"
-_UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+DEFAULT_PREFIX = "gRefWg2D7zO8"
+_PREFIX = DEFAULT_PREFIX
+PREFIX_RE = re.compile(r"[0-9A-Za-z]{8,32}")
+# A reserved name's own id: 128 bits in base62, always 22 characters. Hex
+# with hyphens (a classic UUID) takes 36 for the same bits and costs more
+# tokens; base62 carries about 5.95 bits a character to hex's 4.
+_B62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+_ID_LEN = 22
+_ID = r"[0-9A-Za-z]{22}"
+
+
+def reserved_id(data: bytes | None = None) -> str:
+    """128 bits as 22 base62 characters: random, or the first 16 bytes of
+    ``data`` (to derive the same id from the same input)."""
+    n = int.from_bytes(data[:16], "big") if data is not None else uuid.uuid4().int
+    out = []
+    for _ in range(_ID_LEN):
+        n, r = divmod(n, 62)
+        out.append(_B62[r])
+    return "".join(reversed(out))
 
 
 def get_prefix() -> str:
@@ -251,16 +268,26 @@ def get_prefix() -> str:
     return _PREFIX
 
 
+def set_prefix(prefix: str) -> None:
+    """Use a different reserved id (petsitter's Settings page). Applied at
+    startup, before any trick is loaded: tricks build tool names and patterns
+    from it when they load. 8 to 32 letters and digits."""
+    global _PREFIX
+    if not PREFIX_RE.fullmatch(prefix or ""):
+        raise ValueError("The reserved id is 8 to 32 letters and digits")
+    _PREFIX = prefix
+
+
 def reserved(context: str, ident: str | None = None) -> str:
-    """A reserved name: ``<id>-<context>-<uuid>``, e.g.
-    ``gRefWg2D7zO8-redacted-c74a3c40-067f-400f-8cf1-36242b6360d7``. A fresh
-    UUID unless ``ident`` is given."""
-    return f"{_PREFIX}-{context}-{ident if ident is not None else uuid.uuid4()}"
+    """A reserved name: ``<prefix>-<context>-<id>``, e.g.
+    ``gRefWg2D7zO8-sp-3Lw9rTqXc0VbN7mK2pZs4a``, the id 22 base62
+    characters (reserved_id()). A fresh id unless ``ident`` is given."""
+    return f"{_PREFIX}-{context}-{ident if ident is not None else reserved_id()}"
 
 
 def reserved_pattern(context: str) -> "re.Pattern":
     """Matches the reserved names for one context (see reserved())."""
-    return re.compile(re.escape(f"{_PREFIX}-{context}-") + _UUID)
+    return re.compile(re.escape(f"{_PREFIX}-{context}-") + _ID + r"(?![0-9A-Za-z])")
 
 
 def get_raw() -> dict | None:
@@ -773,7 +800,6 @@ async def callmodel(
             chat_completions_url(model_url),
             json=payload,
             headers=headers,
-            timeout=60.0,
         )
         response.raise_for_status()
         result = response.json()

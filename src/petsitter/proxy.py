@@ -84,10 +84,6 @@ def _anthropic_headers(incoming: dict) -> dict[str, str]:
     return headers
 
 
-# How long to wait for the model. Generating can take minutes (a big
-# compaction, a slow local model), so reading gets 15 minutes; connecting gets
-# 15 seconds so a host that's down still fails fast.
-UPSTREAM_TIMEOUT = httpx.Timeout(900.0, connect=15.0)
 # While holding a reply, a comment line is sent this often so the client's own
 # read timeout doesn't fire. SSE clients ignore comment lines.
 HEARTBEAT_SECONDS = 5.0
@@ -249,12 +245,15 @@ class ProxyHandler:
     TRAFFIC_KEEP = 50
 
     @staticmethod
-    def _describe_transport_error(e: Exception, timeout: float | None = None) -> str:
+    def _describe_transport_error(e: Exception, timeout: "float | httpx.Timeout | None" = None) -> str:
         name = type(e).__name__
         detail = str(e).strip()
         if isinstance(e, httpx.TimeoutException):
             what = {"ConnectTimeout": "Couldn't connect", "ReadTimeout": "No response",
                     "WriteTimeout": "Couldn't send the request", "PoolTimeout": "No free connection"}.get(name, "Timed out")
+            if isinstance(timeout, httpx.Timeout):   # the limit that ran out
+                timeout = {"ConnectTimeout": timeout.connect, "WriteTimeout": timeout.write,
+                           "PoolTimeout": timeout.pool}.get(name, timeout.read)
             within = f" within {timeout:g}s" if timeout else ""
             return f"{what}{within} ({name})" + (f": {detail}" if detail else "")
         return f"{name}: {detail}" if detail else name
@@ -1069,7 +1068,7 @@ class ProxyHandler:
                 body.pop("tools", None)
                 body.pop("tool_choice", None)
             with raw_http.sync_client() as client:
-                r = client.post(req.target, json=body, headers=req.upstream_headers, timeout=UPSTREAM_TIMEOUT)
+                r = client.post(req.target, json=body, headers=req.upstream_headers, timeout=raw_http.upstream_timeout())
             r.raise_for_status()
             msg = r.json()["choices"][0]["message"]
             if msg.get("tool_calls"):
@@ -1105,11 +1104,12 @@ class ProxyHandler:
                         target,
                         json=upstream_payload,
                         headers=upstream_headers,
-                        timeout=UPSTREAM_TIMEOUT,
+                        timeout=raw_http.upstream_timeout(),
                     )
             except httpx.TransportError as e:
-                self._note_upstream(target, False, error=self._describe_transport_error(e, UPSTREAM_TIMEOUT.read))
-                raise ValueError(f"Error: {target} can't be reached: {e}") from e
+                why = self._describe_transport_error(e, raw_http.upstream_timeout())
+                self._note_upstream(target, False, error=why)
+                raise ValueError(f"Error: {target} can't be reached. {why}") from e
 
             if (response.status_code not in UPSTREAM_RETRY_STATUSES
                     or attempt == UPSTREAM_RETRY_ATTEMPTS):
@@ -1131,7 +1131,7 @@ class ProxyHandler:
             try:
                 async with raw_http.async_client() as client:
                     retry = await client.post(other[0], json=upstream_payload, headers=upstream_headers,
-                                              timeout=UPSTREAM_TIMEOUT)
+                                              timeout=raw_http.upstream_timeout())
             except httpx.TransportError:
                 retry = None
             if retry is not None and retry.status_code != 404:
@@ -1314,14 +1314,15 @@ class ProxyHandler:
                     "created": template.get("created", int(time.time())), "model": template.get("model", ""),
                     "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}]}
 
-        async with raw_http.async_client(timeout=UPSTREAM_TIMEOUT) as client:
+        async with raw_http.async_client(timeout=raw_http.upstream_timeout()) as client:
             for attempt in range(1, UPSTREAM_RETRY_ATTEMPTS + 1):
                 resp_cm = client.stream("POST", target, json=body, headers=req.upstream_headers)
                 try:
                     resp = await resp_cm.__aenter__()
                 except httpx.TransportError as e:
-                    self._note_upstream(target, False, error=self._describe_transport_error(e, UPSTREAM_TIMEOUT.read))
-                    raise ValueError(f"Error: {target} can't be reached: {e}") from e
+                    why = self._describe_transport_error(e, raw_http.upstream_timeout())
+                    self._note_upstream(target, False, error=why)
+                    raise ValueError(f"Error: {target} can't be reached. {why}") from e
                 if resp.status_code in UPSTREAM_RETRY_STATUSES and attempt < UPSTREAM_RETRY_ATTEMPTS:
                     await resp_cm.__aexit__(None, None, None)
                     await asyncio.sleep(UPSTREAM_RETRY_BACKOFF * (2 ** (attempt - 1)))
@@ -1388,7 +1389,7 @@ class ProxyHandler:
                             choice["delta"] = delta
                             yield sent(obj)
                 except httpx.TransportError as e:
-                    self._note_upstream(target, False, error=self._describe_transport_error(e, UPSTREAM_TIMEOUT.read))
+                    self._note_upstream(target, False, error=self._describe_transport_error(e, raw_http.upstream_timeout().read))
                     raise
                 self._note_upstream(target, True, resp.status_code)
             finally:
@@ -1530,7 +1531,7 @@ class ProxyHandler:
             body = ac.to_anthropic_payload(messages, tools or [], payload)
             body.pop("stream", None)
             with raw_http.sync_client() as client:
-                r = client.post(req.target, json=body, headers=req.headers, timeout=UPSTREAM_TIMEOUT)
+                r = client.post(req.target, json=body, headers=req.headers, timeout=raw_http.upstream_timeout())
             r.raise_for_status()
             return ac.response_to_assistant_message(r.json())
         return resend
@@ -1543,9 +1544,9 @@ class ProxyHandler:
         body = {k: v for k, v in req.body.items() if k != "stream"}
         try:
             async with raw_http.async_client() as client:
-                response = await client.post(target, json=body, headers=req.headers, timeout=UPSTREAM_TIMEOUT)
+                response = await client.post(target, json=body, headers=req.headers, timeout=raw_http.upstream_timeout())
         except httpx.TransportError as e:
-            self._note_upstream(target, False, error=self._describe_transport_error(e, UPSTREAM_TIMEOUT.read))
+            self._note_upstream(target, False, error=self._describe_transport_error(e, raw_http.upstream_timeout().read))
             raise
 
         if response.status_code >= 400:
@@ -1763,12 +1764,12 @@ class ProxyHandler:
                         pass
             return raw, ev
 
-        async with raw_http.async_client(timeout=UPSTREAM_TIMEOUT) as client:
+        async with raw_http.async_client(timeout=raw_http.upstream_timeout()) as client:
             try:
                 resp_cm = client.stream("POST", target, json=body, headers=req.headers)
                 resp = await resp_cm.__aenter__()
             except httpx.TransportError as e:
-                self._note_upstream(target, False, error=self._describe_transport_error(e, UPSTREAM_TIMEOUT.read))
+                self._note_upstream(target, False, error=self._describe_transport_error(e, raw_http.upstream_timeout().read))
                 raise
             try:
                 if resp.status_code >= 400:
@@ -1801,7 +1802,7 @@ class ProxyHandler:
                         for raw_out, ev_out in await asyncio.to_thread(release_tools, None):
                             yield sent(raw_out, ev_out)
                 except httpx.TransportError as e:
-                    self._note_upstream(target, False, error=self._describe_transport_error(e, UPSTREAM_TIMEOUT.read))
+                    self._note_upstream(target, False, error=self._describe_transport_error(e, raw_http.upstream_timeout().read))
                     raise
                 self._note_upstream(target, True, resp.status_code)
             finally:
@@ -1834,20 +1835,21 @@ class ProxyHandler:
                 if target is None:
                     for root in api_root_candidates(base):
                         target = root + "/models"
-                        response = await client.get(target, headers=headers, timeout=30.0)
+                        response = await client.get(target, headers=headers, timeout=raw_http.upstream_timeout())
                         if response.status_code != 404:
                             learn_api_root(base, root)
                             break
                 else:
-                    response = await client.get(target, headers=headers, timeout=30.0)
+                    response = await client.get(target, headers=headers, timeout=raw_http.upstream_timeout())
                 if response.status_code >= 400:
                     self._note_upstream(target, False, response.status_code,
                                         (response.text or "").strip() or "(empty body)")
                 response.raise_for_status()
                 result = response.json()
         except httpx.TransportError as e:
-            self._note_upstream(target, False, error=self._describe_transport_error(e, 30.0))
-            raise ValueError(f"Error: {target} can't be reached: {e}") from e
+            why = self._describe_transport_error(e, raw_http.upstream_timeout())
+            self._note_upstream(target, False, error=why)
+            raise ValueError(f"Error: {target} can't be reached. {why}") from e
         self._note_upstream(target, True, response.status_code)
         for name in self.tricksets:
             result.setdefault("data", []).append({

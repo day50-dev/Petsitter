@@ -21,13 +21,13 @@ before.jsonl  {"timestamp": "...", "event": "request",  "stage": "before", "requ
 after.jsonl   {"timestamp": "...", "event": "response", "stage": "after",  "request_id": "ab12cd34", "messages": [...], "answer": {"role": "assistant", "content": "hi!"}}
 ```
 
-Its **Live** tab shows the last 40 requests and responses with everything but
-the content: the request line as it arrived, where it came from, every header,
-every parameter (stream, model, temperature, max_tokens, tool_choice...), the
-tools' names; then each call petsitter made to the provider: its URL, status,
-timing, the headers sent and received, and the response without its content
-(id, model, finish or stop reason, usage, or the error). Each header block has
-a copy button. The files have the content.
+Its **Live** tab shows the last 40 requests as HTTP, in the order it happened:
+the REQUEST your tool sent, the REQUEST petsitter sent the provider, the
+RESPONSE that came back, and the RESPONSE petsitter sent your tool. Each is the
+request or status line, every header with its real value, and the body with
+only the content (messages, system prompt, the reply) swapped for a note of its
+size; streams are summarised (events, finish or stop reason, usage). **copy
+all** copies the whole exchange. The files have the content.
 
 `request_id` ties the two together, so each file can be read on its own or the
 two joined, which shows exactly what the extensions changed:
@@ -58,10 +58,9 @@ everything after it, so put the logger first to be sure of a record.
 - Appends are serialized with a module-level lock. Unserializable values are
   written via `str()`; write errors are swallowed so logging never breaks a
   request.
-- The Live tab reads `get_raw()`, petsitter's record of the raw HTTP at both
-  edges, and hears about each provider call as it finishes (a `raw_upstream`
-  pipeline event), so a failed call shows up too. Its summaries are kept in
-  memory (the last 40), and a restart drops them.
+- The Live tab keeps each request's raw HTTP record (`petsitter.raw`), which
+  fills in as the provider answers and petsitter replies, and turns it into
+  text once the request is done, dropping the bodies. A restart clears it.
 """
 
 import json
@@ -71,15 +70,14 @@ from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 
-from petsitter.observability import (LOG_DIR, current_client_addr, current_request_headers,
-                                     current_trickset, current_user_agent, request_meta, subscribe,
-                                     unsubscribe)
-from petsitter.trick import Trick, get_raw
+from http import HTTPStatus
+
+from petsitter import raw as raw_http
+from petsitter.observability import LOG_DIR, current_client_addr, current_trickset, current_user_agent, request_meta
+from petsitter.trick import Trick
 
 DEFAULT_LOGGER_PATH = LOG_DIR / "traffic"
 KEEP = 40                      # requests on the Live tab
-# The content of a request: the log files have it, the Live tab doesn't.
-_CONTENT = ("messages", "system", "input", "prompt", "contents", "tools")
 
 
 def _json(body: bytes):
@@ -89,21 +87,44 @@ def _json(body: bytes):
         return None
 
 
-def _response_meta(body: bytes):
-    """Everything in a provider's response but the content: id, model, usage,
-    finish or stop reason, an error. Streams are read event by event."""
-    obj = _json(body)
-    if isinstance(obj, dict):
-        if isinstance(obj.get("choices"), list):        # a chat completion
-            return {**{k: v for k, v in obj.items() if k != "choices"},
-                    "choices": [{k: v for k, v in c.items() if k not in ("message", "delta")}
-                                for c in obj["choices"] if isinstance(c, dict)]}
-        if obj.get("type") == "message":                # an Anthropic message
-            return {k: v for k, v in obj.items() if k != "content"}
-        return obj                                      # an error, or something else: all of it
-    text = body.decode("utf-8", "replace")
-    if "data:" not in text:
-        return {"bytes": len(body)} if body else {}
+def _chars(value) -> str:
+    return f"{len(json.dumps(value, default=str)):,} chars"
+
+
+def _message_note(msg) -> str:
+    if not isinstance(msg, dict):
+        return f"<{_chars(msg)}>"
+    calls = [(c.get("function") or {}).get("name", "") for c in msg.get("tool_calls") or [] if isinstance(c, dict)]
+    return f"<{msg.get('role', 'message')}, {_chars(msg.get('content'))}" + (f", tool calls: {', '.join(calls)}" if calls else "") + ">"
+
+
+def _without_content(obj):
+    """A request or response body with the content swapped for a note of its
+    size: the messages, the system prompt, the reply. Everything else stays."""
+    if not isinstance(obj, dict):
+        return obj
+    out = {}
+    for k, v in obj.items():
+        if k == "messages" and isinstance(v, list):
+            out[k] = f"<{len(v)} messages, {_chars(v)}>"
+        elif k in ("system", "prompt", "input", "contents", "instructions"):
+            out[k] = f"<{k}, {_chars(v)}>"
+        elif k == "tools" and isinstance(v, list):
+            names = [(t.get("function") or {}).get("name") or t.get("name", "") for t in v if isinstance(t, dict)]
+            out[k] = f"<{len(v)} tools, {_chars(v)}: {', '.join(n for n in names if n)}>"
+        elif k == "choices" and isinstance(v, list):
+            out[k] = [{ck: (_message_note(cv) if ck in ("message", "delta") else cv) for ck, cv in c.items()}
+                      if isinstance(c, dict) else c for c in v]
+        elif k == "content" and isinstance(v, list) and obj.get("type") == "message":
+            out[k] = f"<{len(v)} content blocks, {_chars(v)}>"
+        else:
+            out[k] = v
+    return out
+
+
+def _stream_summary(text: str) -> dict:
+    """An event stream, without its content: how many events, and what they
+    say about the reply (id, model, finish or stop reason, usage, an error)."""
     out: dict = {"events": 0}
     for line in text.splitlines():
         if not line.startswith("data:"):
@@ -118,17 +139,17 @@ def _response_meta(body: bytes):
         if not isinstance(ev, dict):
             continue
         out["events"] += 1
-        if isinstance(ev.get("choices"), list):         # OpenAI chunks
+        if isinstance(ev.get("choices"), list):          # OpenAI chunks
             for k, v in ev.items():
-                if k not in ("choices", "usage") and k not in out:
+                if k not in ("choices", "usage", "object", "created") and k not in out:
                     out[k] = v
             for c in ev["choices"]:
                 if isinstance(c, dict) and c.get("finish_reason"):
                     out["finish_reason"] = c["finish_reason"]
             if ev.get("usage"):
                 out["usage"] = ev["usage"]
-        elif ev.get("type") == "message_start":         # Anthropic events
-            out.update({k: v for k, v in (ev.get("message") or {}).items() if k != "content"})
+        elif ev.get("type") == "message_start":          # Anthropic events
+            out.update(_without_content(ev.get("message") or {}))
         elif ev.get("type") == "message_delta":
             out.update(ev.get("delta") or {})
             if ev.get("usage"):
@@ -138,12 +159,60 @@ def _response_meta(body: bytes):
     return out
 
 
-def _exchange(ex: dict) -> dict:
-    """One call to the provider, for the Live tab: everything but the content."""
-    return {"method": ex.get("method"), "url": ex.get("url"), "status": ex.get("status"),
-            "ms": ex.get("ms"), "first_byte_ms": ex.get("first_byte_ms"), "error": ex.get("error"),
-            "request_headers": ex.get("request_headers") or [], "headers": ex.get("headers") or [],
-            "response": _response_meta(ex.get("body") or b"")}
+def _body(body: bytes, headers: list) -> str:
+    """A body as the Live tab shows it: JSON pretty-printed without the content,
+    an event stream summarised, anything else as text."""
+    if not body:
+        return ""
+    ctype = next((v for k, v in headers if k.lower() == "content-type"), "").lower()
+    text = body.decode("utf-8", "replace")
+    if "event-stream" in ctype or text.lstrip().startswith(("data:", "event:", ":")):
+        summary = _stream_summary(text)
+        events = summary.pop("events", 0)
+        return f"<event stream, {events} events, {len(body):,} bytes>\n" + json.dumps(summary, indent=2, default=str)
+    obj = _json(body)
+    if obj is not None:
+        return json.dumps(_without_content(obj), indent=2, default=str)
+    return text
+
+
+def _reason(status) -> str:
+    try:
+        return f"{status} {HTTPStatus(status).phrase}"
+    except (ValueError, TypeError):
+        return str(status)
+
+
+def _http(record: dict) -> dict:
+    """The record as four kinds of block (request and response, for the
+    client and for each provider call), each as HTTP text without the content."""
+    req, resp = record["request"], record["response"]
+    version = req.get("http_version") or "1.1"
+    blocks = {
+        "client_request": "\n".join([f"{req['line']} HTTP/{version}",
+                                     *(f"{k}: {v}" for k, v in req["headers"])]) +
+                          "\n\n" + _body(bytes(req["body"]), req["headers"]),
+        "client_response": None if resp["status"] is None else
+            "\n".join([f"HTTP/{version} {_reason(resp['status'])}", *(f"{k}: {v}" for k, v in resp["headers"])]) +
+            "\n\n" + _body(bytes(resp["body"]), resp["headers"]),
+        "client_status": resp["status"], "done": resp["done"],
+        "upstream": [],
+    }
+    for ex in record["upstream"]:
+        sent_body = ex.get("request_body") or b""
+        got = raw_http._decoded(bytes(ex["body"]), ex.get("headers") or [])
+        blocks["upstream"].append({
+            "status": ex.get("status"), "error": ex.get("error"), "ms": ex.get("ms"),
+            "first_byte_ms": ex.get("first_byte_ms"), "url": ex.get("url"),
+            "request": "\n".join([f"{ex['method']} {ex['url']} HTTP/1.1",
+                                  *(f"{k}: {v}" for k, v in ex.get("request_headers") or [])]) +
+                       "\n\n" + _body(sent_body, ex.get("request_headers") or []),
+            "response": (f"<no response: {ex.get('error')}>" if ex.get("status") is None else
+                         "\n".join([f"{ex.get('http_version') or 'HTTP/1.1'} {_reason(ex['status'])}",
+                                    *(f"{k}: {v}" for k, v in ex.get("headers") or [])]) +
+                         "\n\n" + _body(got, ex.get("headers") or [])),
+        })
+    return blocks
 
 
 def _size(messages) -> int:
@@ -230,86 +299,56 @@ class LoggerTrick(Trick):
 
     # -- the Live tab --------------------------------------------------------
 
-    def startup(self) -> None:
-        # Hear about each call to the provider as it finishes, failed ones
-        # included (no post_hook runs for those).
-        subscribe(self._on_pipeline_event)
-
-    def shutdown(self) -> None:
-        unsubscribe(self._on_pipeline_event)
-
-    def _on_pipeline_event(self, event: dict) -> None:
-        if event.get("stage") != "raw_upstream":
-            return
-        raw = get_raw()
-        if raw is None:
-            return
-        upstream = [_exchange(ex) for ex in raw["upstream"] if ex.get("done")]
-        with self._lock:
-            entry = next((e for e in reversed(self._recent) if e["id"] == event.get("request_id")), None)
-            if entry is None:
-                return
-            entry["upstream"] = upstream
-        self.publish({"event": "traffic", "id": entry["id"]})
-
     def _remember(self, context: list, params: dict, meta: dict, tools: list) -> None:
-        try:
-            ts = current_trickset()
-            raw = get_raw()
-            body = _json(raw["request"]["body"]) if raw else None
-            if isinstance(body, dict):
-                shown = {k: v for k, v in body.items() if k not in _CONTENT}
-                tools = body.get("tools") or tools
-            else:
-                shown = {k: v for k, v in params.items() if k not in _CONTENT}
-            ua = current_user_agent()
-            entry = {
-                "id": self.request_id, "at": time.time(),
-                "line": raw["request"]["line"] if raw else "", "from": current_client_addr(),
-                "program": meta.get("x_title") or (ua.split("/")[0].split(" ")[0] if ua else ""),
-                "api": meta.get("api") or "openai",
-                "channel": ("Default" if ts.name == "_default" else ts.name) if ts is not None else "",
-                "model": meta.get("model") or params.get("model", ""),
-                "stream": bool(meta.get("stream", params.get("stream", False))),
-                "headers": raw["request"]["headers"] if raw else [[k, v] for k, v in current_request_headers()],
-                "params": dict(shown),
-                "tools": [(t.get("function") or {}).get("name") or t.get("name", "") for t in tools if isinstance(t, dict)],
-                "messages": len(context), "chars": _size(context),
-            }
-        except Exception:
-            return
+        ts = current_trickset()
+        ua = current_user_agent()
+        entry = {
+            "id": self.request_id, "at": time.time(), "from": current_client_addr(),
+            "program": meta.get("x_title") or (ua.split("/")[0].split(" ")[0] if ua else ""),
+            "api": meta.get("api") or "openai",
+            "channel": ("Default" if ts.name == "_default" else ts.name) if ts is not None else "",
+            "model": meta.get("model") or (params or {}).get("model", ""),
+            "stream": bool(meta.get("stream", (params or {}).get("stream", False))),
+            # the raw HTTP of this request, still filling in (the provider's
+            # response, petsitter's own); turned into text when it's shown
+            "_record": raw_http.current(),
+        }
         with self._lock:
             self._recent.append(entry)
+            self._settle()
         self.publish({"event": "traffic", "id": entry["id"]})
 
     def _remember_reply(self, reply) -> None:
-        if not isinstance(reply, dict):
-            return
-        with self._lock:
-            entry = next((e for e in reversed(self._recent) if e["id"] == self.request_id), None)
-            if entry is None:
-                return
-            entry["reply"] = {
-                "ms": round((time.time() - entry["at"]) * 1000),
-                "chars": len(reply.get("content") or "") if isinstance(reply.get("content"), str) else _size(reply.get("content")),
-                "tool_calls": [(c.get("function") or {}).get("name", "") for c in reply.get("tool_calls") or []
-                               if isinstance(c, dict)],
-            }
         self.publish({"event": "traffic", "id": self.request_id})
+
+    def _settle(self) -> None:
+        """Turn finished requests into their text, so their bodies (with the
+        content) aren't held in memory. Called with the lock held."""
+        for entry in self._recent:
+            record = entry.get("_record")
+            if record is not None and record["response"]["done"]:
+                entry["http"] = _http(record)
+                del entry["_record"]
+
+    def _shown(self, entry: dict) -> dict:
+        out = {k: v for k, v in entry.items() if k != "_record"}
+        if entry.get("_record") is not None:
+            out["http"] = _http(entry["_record"])
+        return out
 
     def ui_action(self, data):
         action = (data or {}).get("action") if isinstance(data, dict) else None
         if action == "requests":
             with self._lock:
-                return {"requests": list(reversed(self._recent)), "folder": str(self._log_path("before").parent)}
+                self._settle()
+                entries = [self._shown(e) for e in reversed(self._recent)]
+            return {"requests": entries, "folder": str(self._log_path("before").parent)}
         if action == "clear":
             with self._lock:
                 self._recent.clear()
             self.live_feed.clear()
             return {"ok": True}
         return super().ui_action(data)
-
-    # -- helpers -------------------------------------------------------------
 
     def _log_path(self, stage: str) -> Path:
         """The file for "before" (requests) or "after" (the transformed

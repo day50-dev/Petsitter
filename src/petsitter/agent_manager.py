@@ -133,6 +133,7 @@ class AgentManager:
                 "provider_name": getattr(agent, "provider_name", "its AI provider"),
                 "icon": agent.icon,
                 "config_paths": list(agent.config_paths),
+                "checked": getattr(agent, "checked", ""),
                 "tricks": agent.tricks,
                 "model_config": agent.model_config,
                 "detect": {

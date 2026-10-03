@@ -410,7 +410,7 @@ class TestProxyHandler:
             payload = {"messages": [{"role": "user", "content": "Hi"}]}
             with pytest.raises(ValueError) as excinfo:
                 await handler.chat_completions(payload)
-            assert "Error: http://localhost:11434/v1/chat/completions can't be reached:" in str(excinfo.value)
+            assert "Error: http://localhost:11434/v1/chat/completions can't be reached." in str(excinfo.value)
             assert "All connection attempts failed" in str(excinfo.value)
 
     @pytest.mark.asyncio
@@ -429,7 +429,7 @@ class TestProxyHandler:
         with patch("httpx.AsyncClient", return_value=mock_client):
             with pytest.raises(ValueError) as excinfo:
                 await handler.models()
-            assert "Error: http://localhost:11434/v1/models can't be reached:" in str(excinfo.value)
+            assert "Error: http://localhost:11434/v1/models can't be reached." in str(excinfo.value)
             assert "All connection attempts failed" in str(excinfo.value)
 
 
@@ -1060,3 +1060,11 @@ class TestTransportErrorText:
         assert d(httpx.ReadTimeout(""), 120.0) == "No response within 120s (ReadTimeout)"
         assert d(httpx.ConnectTimeout(""), 30.0) == "Couldn't connect within 30s (ConnectTimeout)"
         assert d(httpx.ConnectError("All connection attempts failed")) == "ConnectError: All connection attempts failed"
+
+    def test_timeout_names_the_limit_that_ran_out(self):
+        import httpx
+        from petsitter.proxy import ProxyHandler
+        from petsitter.raw import upstream_timeout
+        d = ProxyHandler._describe_transport_error
+        assert d(httpx.ConnectTimeout(""), httpx.Timeout(900.0, connect=15.0)) == "Couldn't connect within 15s (ConnectTimeout)"
+        assert d(httpx.ReadTimeout(""), upstream_timeout()) == "No response within 1800s (ReadTimeout)"

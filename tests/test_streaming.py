@@ -22,13 +22,13 @@ def test_channel_window():
 
     assert channel_window([cm, log, tm]) == (0, [], [log, tm])   # no post_hook / looks only
     assert channel_window([ne, log]) == (1, [ne], [log])
-    assert channel_window([ne, sp])[0] == sp.needs_window >= 52   # the largest wins
+    assert channel_window([ne, sp])[0] == sp.needs_window >= 38   # the largest wins
     assert channel_window([ne, sp, Whole()])[0] == -1              # whole reply wins outright
 
 
 def test_secrets_window_is_one_stand_in():
     sp = SecretsProtectorTrick()
-    assert sp.needs_window == len(sp._marker("anything")) == 58
+    assert sp.needs_window == len(sp._marker("anything")) == 38
 
 
 import random

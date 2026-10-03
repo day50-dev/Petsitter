@@ -4,12 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Traffic Logger</title>
-<!-- Traffic Logger's Live page: the last requests, each with its request line,
-     headers and parameters. The payloads are in the log files. -->
+<!-- Traffic Logger's Live page: the last requests as plain HTTP, both hops
+     (your tool and petsitter, petsitter and the provider), request then
+     response, everything but the content. The content is in the log files. -->
 <style>
   :root {
     --bg: #0f0f1a; --panel: #16162a; --panel2: #12122a; --border: #1e2a3a; --text: #c8d6e5;
-    --dim: #5a7a8a; --muted: #8a9ab0; --title: #8ab4ff; --ok: #6bff8a; --warn: #f0c96b; --sel: #1a2a4d;
+    --dim: #5a7a8a; --muted: #8a9ab0; --title: #8ab4ff; --ok: #6bff8a; --warn: #f0c96b; --bad: #ff7a7a;
+    --sel: #1a2a4d; --req: #8ab4ff; --resp: #6bd6a8;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
@@ -22,9 +24,11 @@
   h1 { font-size: 14px; margin: 0; color: var(--title); font-weight: 600; }
   .sub { color: var(--dim); font-size: 12px; }
   .sub code { color: var(--muted); }
-  header button { margin-left: auto; background: none; border: 1px solid var(--border); color: var(--muted);
-                  border-radius: 5px; font: inherit; font-size: 12px; padding: 3px 12px; cursor: pointer; }
-  header button:hover { border-color: var(--title); color: var(--text); }
+  button { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 5px;
+           font: inherit; font-size: 12px; padding: 3px 12px; cursor: pointer; }
+  button:hover { border-color: var(--title); color: var(--text); }
+  button.done { color: var(--ok); border-color: #2a5a3a; }
+  header #clear { margin-left: auto; }
   .main { flex: 1; min-height: 0; display: grid; grid-template-columns: 340px minmax(0, 1fr); }
   .list { border-right: 1px solid var(--border); overflow-y: auto; }
   .req { padding: 8px 14px; border-bottom: 1px solid #141a26; cursor: pointer; }
@@ -38,25 +42,23 @@
   .tag { font-size: 10.5px; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 6px; }
   .tag.stream { color: var(--ok); border-color: #2a5a3a; }
   .tag.pending { color: var(--warn); border-color: #5a4a2a; }
-  .tag.bad { color: #ff7a7a; border-color: #6a2a2a; }
+  .tag.bad { color: var(--bad); border-color: #6a2a2a; }
   .detail { overflow-y: auto; padding: 14px 20px 40px; }
   .empty { color: var(--dim); padding: 40px 20px; max-width: 560px; line-height: 1.6; }
   .empty b { color: var(--text); }
-  h2 { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--dim);
-       margin: 20px 0 6px; }
-  h2:first-child { margin-top: 0; }
-  h2 .copy { margin-left: 10px; background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 4px;
-             font: inherit; font-size: 10.5px; letter-spacing: .04em; padding: 1px 8px; cursor: pointer; text-transform: none; }
-  h2 .copy:hover { border-color: var(--title); color: var(--text); }
-  h2 .copy.done { color: var(--ok); border-color: #2a5a3a; }
-  table { border-collapse: collapse; width: 100%; font-size: 13px; }
-  td { padding: 3px 10px 3px 0; vertical-align: top; border-bottom: 1px solid #141a26; }
-  td.k { color: var(--muted); white-space: nowrap; width: 1%; padding-right: 18px; }
-  td.v { font: 12.5px ui-monospace, "SF Mono", Consolas, monospace; overflow-wrap: anywhere; word-break: break-word; }
-  .chips { display: flex; flex-wrap: wrap; gap: 4px; }
-  .chip { font: 11.5px ui-monospace, "SF Mono", Consolas, monospace; color: var(--muted); background: #0d1320;
-          border: 1px solid var(--border); border-radius: 4px; padding: 1px 7px; }
-  .none { color: var(--dim); font-size: 13px; }
+  .bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .bar b { color: var(--text); font-weight: 600; }
+  .bar button { margin-left: auto; }
+  .kind { display: flex; align-items: baseline; gap: 10px; margin: 18px 0 4px; }
+  .kind span { font-size: 13px; font-weight: 700; letter-spacing: .1em; }
+  .kind.request span { color: var(--req); }
+  .kind.response span { color: var(--resp); }
+  .kind small { color: var(--dim); font-size: 12px; }
+  pre { margin: 0; padding: 10px 12px; background: #0b0f1a; border: 1px solid var(--border); border-left: 3px solid var(--req);
+        border-radius: 4px; font: 12.5px/1.5 ui-monospace, "SF Mono", Consolas, monospace; color: var(--text);
+        white-space: pre-wrap; overflow-wrap: anywhere; }
+  pre.response { border-left-color: var(--resp); }
+  pre.bad { border-left-color: var(--bad); }
   ::-webkit-scrollbar { width: 14px; height: 14px; }
   ::-webkit-scrollbar-track { background: #0f0f23; border-left: 1px solid #1e2a3a; }
   ::-webkit-scrollbar-thumb { background: #34465a; border-radius: 7px; border: 2px solid #0f0f23; border-left-width: 3px; min-height: 40px; }
@@ -72,7 +74,7 @@
 <header>
   <span class="dot" id="dot"></span>
   <h1>Traffic Logger</h1>
-  <span class="sub" id="sub">The last 40 requests and responses, without the content, which is in the log files.</span>
+  <span class="sub" id="sub">The last 40 requests as HTTP, without the content, which is in the log files.</span>
   <button id="clear">clear</button>
 </header>
 <div class="main">
@@ -86,7 +88,6 @@ function esc(s) {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 function when(t) { return new Date(t * 1000).toLocaleTimeString(); }
-function size(chars) { return chars.toLocaleString() + " chars (~" + Math.round(chars / 4).toLocaleString() + " tokens)"; }
 
 async function act(body) {
   const r = await fetch("action", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
@@ -97,35 +98,52 @@ async function load() {
   const d = await act({action: "requests"});
   requests = d.requests || [];
   folder = d.folder || "";
-  if (folder) document.getElementById("sub").innerHTML = `The last 40 requests and responses, without the content, which is in <code>${esc(folder)}</code>.`;
+  if (folder) document.getElementById("sub").innerHTML =
+    `The last 40 requests as HTTP, without the content, which is in <code>${esc(folder)}</code>.`;
   if (!requests.find(r => r.id === selected)) selected = requests.length ? requests[0].id : null;
   renderList();
   renderDetail();
+}
+
+function firstLine(text) { return (text || "").split("\n")[0]; }
+
+function statusTag(r) {
+  const h = r.http || {};
+  const last = (h.upstream || []).slice(-1)[0];
+  const status = last ? last.status : h.client_status;
+  if (status === undefined || status === null) {
+    if (last && last.error) return '<span class="tag bad">no response</span>';
+    return h.done ? "" : '<span class="tag pending">waiting</span>';
+  }
+  return `<span class="tag${status >= 400 ? " bad" : ""}">HTTP ${status}</span>`;
 }
 
 function renderList() {
   document.getElementById("list").innerHTML = requests.map(r =>
     `<div class="req${r.id === selected ? " sel" : ""}" data-id="${esc(r.id)}">` +
     `<div class="top"><span>${esc(r.program || "unknown program")}</span><span class="t">${when(r.at)}</span></div>` +
-    `<div class="line">${esc(r.line || "")}</div>` +
+    `<div class="line">${esc(firstLine((r.http || {}).client_request))}</div>` +
     `<div class="tags">${r.model ? `<span class="tag">${esc(r.model)}</span>` : ""}` +
     `${r.stream ? '<span class="tag stream">stream</span>' : '<span class="tag">no stream</span>'}` +
-    `<span class="tag">${esc(r.api)}</span>` +
-    `${statusTag(r)}${r.reply ? `<span class="tag">${r.reply.ms} ms</span>` : ""}</div></div>`).join("");
+    `<span class="tag">${esc(r.api)}</span>${statusTag(r)}</div></div>`).join("");
   document.querySelectorAll(".req").forEach(el => el.onclick = () => { selected = el.dataset.id; renderList(); renderDetail(); });
 }
 
-function statusTag(r) {
-  const last = (r.upstream || []).slice(-1)[0];
-  if (!last) return r.reply ? "" : '<span class="tag pending">waiting</span>';
-  const bad = last.error || !last.status || last.status >= 400;
-  return `<span class="tag${bad ? " bad" : ""}">${last.status ? "HTTP " + last.status : "no response"}</span>`;
-}
-
-function rows(pairs) {
-  return pairs.length
-    ? `<table>${pairs.map(([k, v]) => `<tr><td class="k">${esc(k)}</td><td class="v">${esc(typeof v === "string" ? v : JSON.stringify(v))}</td></tr>`).join("")}</table>`
-    : '<div class="none">none</div>';
+// The whole exchange in order: what was sent, what came back, for each hop.
+function sections(r) {
+  const h = r.http || {};
+  const out = [["REQUEST", "your tool → petsitter", h.client_request || "", "request"]];
+  (h.upstream || []).forEach((u, i, all) => {
+    const n = all.length > 1 ? ` (call ${i + 1} of ${all.length})` : "";
+    const timing = u.ms !== undefined && u.ms !== null
+      ? ` · ${u.first_byte_ms !== undefined && u.first_byte_ms !== null ? `first byte ${u.first_byte_ms} ms, ` : ""}${u.ms} ms` : "";
+    out.push(["REQUEST", `petsitter → provider${n}`, u.request, "request"]);
+    out.push(["RESPONSE", `provider → petsitter${n}${timing}`, u.response,
+              "response" + (u.status === null || u.status === undefined || u.status >= 400 ? " bad" : "")]);
+  });
+  out.push(["RESPONSE", "petsitter → your tool", h.client_response ?? "(not sent yet)",
+            "response" + (h.client_status >= 400 ? " bad" : "")]);
+  return out;
 }
 
 function renderDetail() {
@@ -133,43 +151,21 @@ function renderDetail() {
   const r = requests.find(x => x.id === selected);
   if (!r) {
     el.innerHTML = '<div class="empty"><b>No requests yet.</b><br><br>Use your AI tool as normal (or send a message ' +
-      'from <b>Try it</b>) and each request shows up here: its headers, and the parameters it asked for.</div>';
+      'from <b>Try it</b>) and each request shows up here as HTTP: what your tool sent and got back, and what ' +
+      'petsitter sent the provider and got back.</div>';
     return;
   }
-  const reply = r.reply;
-  copyTexts = [];
+  const parts = sections(r);
   el.innerHTML =
-    `<h2>Request</h2>` + rows([
-      ["request", r.line], ["id", r.id], ["from", r.from], ["program", r.program], ["channel", r.channel],
-      ["api", r.api], ["model", r.model], ["stream", String(r.stream)], ["time", new Date(r.at * 1000).toLocaleString()]]) +
-    `<h2>Headers${copyButton([r.line, ...lines(r.headers)])}</h2>` + rows(r.headers || []) +
-    `<h2>Parameters</h2>` + rows(Object.entries(r.params || {})) +
-    `<h2>Tools offered (${(r.tools || []).length})</h2>` +
-    ((r.tools || []).length ? `<div class="chips">${r.tools.map(t => `<span class="chip">${esc(t)}</span>`).join("")}</div>` : '<div class="none">none</div>') +
-    `<h2>Messages</h2>` + rows([["count", String(r.messages)], ["size", size(r.chars)]]) +
-    (r.upstream || []).map((u, i, all) => {
-      const n = all.length > 1 ? ` ${i + 1} of ${all.length}` : "";
-      return `<h2>Upstream${n}</h2>` + rows([
-          ["request", `${u.method} ${u.url}`],
-          ["status", u.status === null || u.status === undefined ? "no response" : String(u.status)],
-          ...(u.first_byte_ms !== undefined && u.first_byte_ms !== null ? [["first byte", u.first_byte_ms + " ms"]] : []),
-          ["took", u.ms + " ms"], ...(u.error ? [["error", u.error]] : [])]) +
-        `<h2>Headers sent${copyButton([`${u.method} ${u.url}`, ...lines(u.request_headers)])}</h2>` + rows(u.request_headers || []) +
-        `<h2>Response headers${copyButton([`HTTP ${u.status ?? ""}`, ...lines(u.headers)])}</h2>` + rows(u.headers || []) +
-        `<h2>Response, without the content</h2>` + rows(Object.entries(u.response || {}));
-    }).join("") +
-    `<h2>Reply to your tool</h2>` + (reply ? rows([
-      ["took", reply.ms + " ms"], ["size", size(reply.chars)],
-      ["tool calls", (reply.tool_calls || []).join(", ") || "none"]]) : '<div class="none">waiting</div>');
-  el.querySelectorAll("button.copy").forEach(b => b.onclick = () => copy(b, copyTexts[+b.dataset.copy]));
-}
-
-// Headers as an HTTP message would show them, for pasting anywhere.
-let copyTexts = [];
-function lines(headers) { return (headers || []).map(([k, v]) => `${k}: ${v}`); }
-function copyButton(textLines) {
-  copyTexts.push(textLines.join("\n"));
-  return `<button class="copy" data-copy="${copyTexts.length - 1}">copy to clipboard</button>`;
+    `<div class="bar"><b>${esc(r.program || "unknown program")}</b><span>${esc(r.model)}</span>` +
+    `<span>${esc(r.channel)}</span><span>${esc(r.api)}</span><span>${esc(r.from)}</span>` +
+    `<span>${new Date(r.at * 1000).toLocaleString()}</span><span>id ${esc(r.id)}</span>` +
+    `<button id="copy-all">copy all</button></div>` +
+    parts.map(([kind, hop, text, cls]) =>
+      `<div class="kind ${kind.toLowerCase()}"><span>${kind}</span><small>${esc(hop)}</small></div>` +
+      `<pre class="${cls}">${esc(text)}</pre>`).join("");
+  document.getElementById("copy-all").onclick = e =>
+    copy(e.target, parts.map(([kind, hop, text]) => `=== ${kind}: ${hop} ===\n${text}`).join("\n\n"));
 }
 
 async function copy(btn, text) {
@@ -181,7 +177,7 @@ async function copy(btn, text) {
     document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove();
   }
   btn.textContent = "copied"; btn.classList.add("done");
-  setTimeout(() => { btn.textContent = "copy to clipboard"; btn.classList.remove("done"); }, 1500);
+  setTimeout(() => { btn.textContent = "copy all"; btn.classList.remove("done"); }, 1500);
 }
 
 document.getElementById("clear").onclick = async () => { await act({action: "clear"}); selected = null; load(); };
@@ -193,6 +189,8 @@ source.onerror = () => document.getElementById("dot").classList.remove("live");
 source.onmessage = m => {
   try { if (JSON.parse(m.data).event === "traffic") { clearTimeout(pending); pending = setTimeout(load, 200); } } catch (_) {}
 };
+// petsitter's own response goes out after the hooks: look again until it has
+setInterval(() => { if (requests.some(r => !(r.http || {}).done)) load(); }, 1500);
 load();
 </script>
 </body>

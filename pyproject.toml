@@ -23,6 +23,8 @@ dependencies = [
     "click>=8.1.0",
     # Secrets Protector: finds passwords and keys by the name they sit under
     "detect-secrets>=1.5.0",
+    # Hermes Agent keeps its config in YAML (agents/hermes.py)
+    "pyyaml>=6.0",
     # tomllib landed in the stdlib in 3.11; 3.10 needs the backport
     "tomli>=2.0.0; python_version < '3.11'",
 ]

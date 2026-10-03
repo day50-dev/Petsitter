@@ -381,14 +381,15 @@ pet add mine tool_monitor
 
 [tricks/secrets_protector.py](../src/petsitter/tricks/secrets_protector.py)
 
-Finds secrets in what your tool sends, swaps each for an opaque stand-in like `gRefWg2D7zO8-redacted-d4360d48-...` before the model sees it, and puts the real value back wherever the stand-in comes back: in the reply, and in the arguments of the model's tool calls.
+Finds secrets in what your tool sends, swaps each for an opaque stand-in like `gRefWg2D7zO8-sp-3Lw9rTqXc0VbN7mK2pZs4a` before the model sees it, and puts the real value back wherever the stand-in comes back: in the reply, and in the arguments of the model's tool calls.
 
 - **Detection** combines three sources, since no one covers what people paste into a chat:
   - [gitleaks](https://github.com/gitleaks/gitleaks)' rules (bundled, MIT) for about 200 kinds of vendor keys and tokens.
   - [detect-secrets](https://github.com/Yelp/detect-secrets)' keyword detector for values named as secrets: `"password": "..."`, `api_key = '...'`. This is what catches a human-chosen password.
-  - petsitter's own patterns for unquoted `.env`/YAML lines (`DB_PASSWORD=...`, `password: ...`), JSON quoted keys (`{"db_password": "two words"}`), name/value pairs (`{"key": "password", "value": "..."}`, Kubernetes' `{"name": "DB_PASSWORD", "value": "..."}`), a few vendor formats, and personal details (emails, phones, SSNs, card numbers). IP addresses are left alone: whether one is local or public, its subnet and which machine it is are what make it useful.
+  - petsitter's own patterns for unquoted `.env`/YAML lines (`DB_PASSWORD=...`, `password: ...`), JSON quoted keys (`{"db_password": "two words"}`), name/value pairs (`{"key": "password", "value": "..."}`, Kubernetes' `{"name": "DB_PASSWORD", "value": "..."}`), a few vendor formats, and personal details. IP addresses are left alone: an IP's meaning (local or public, which subnet, which machine) is what makes it useful.
+- Personal details each have a switch in the settings: emails (on; they're often logins), phone numbers (off), SSNs (on), card numbers (on). A stand-in doesn't look like what it replaced, so hiding something the model needs to recognise, like a phone number, can confuse it. Credentials have no switch.
 
-  JSON escaped inside a JSON string (`{\"password\":\"...\"}`, a tool returning an encoded object) is unescaped and checked too. Code that only refers to a secret (`password = os.environ["DB_PASSWORD"]`, `token: ${GITHUB_TOKEN}`) is left alone. The personal-detail patterns are broad: a 10-digit number reads as a phone number.
+  JSON escaped inside a JSON string (`{\"password\":\"...\"}`, a tool returning an encoded object) is unescaped and checked too. Code that only refers to a secret (`password = os.environ["DB_PASSWORD"]`, `token: ${GITHUB_TOKEN}`) is left alone. The personal-detail patterns are broad: 16 digits in groups of four read as a card number.
 - **Scanned:** user messages and tool results, including content sent as a list of parts.
 - **Stand-ins:** every hidden value gets the same kind of stand-in, and only that exact format is ever swapped back, so nothing else in a reply can be mistaken for one.
 - **Streaming:** the reply still streams, with only one stand-in's length (52 characters) held back.
@@ -406,7 +407,7 @@ For anything the patterns can't recognize, mark it by hand with `(secret: value)
 Here's my credentials. Username: (secret: realusername) Password: (secret: realpassword)
 ```
 
-The proxy leaves these patterns in place (the trick sets `strip_prompt_keyword = False`), and the trick swaps each marked value for an opaque stand-in like `gRefWg2D7zO8-redacted-d4360d48-b2ed-49cb-b39f-6de6443d06df` before the model sees it. The model is never told a swap happened, so it just uses the stand-in as if it were the real value. When the stand-in comes back in the reply or in a tool call's arguments, it is swapped back to the real value (JSON-escaped inside tool arguments). Real values that come back up in later turns are swapped out again before they reach the model. That covers your restored reply, the tool calls it made, and tool results that echo the value.
+The proxy leaves these patterns in place (the trick sets `strip_prompt_keyword = False`), and the trick swaps each marked value for an opaque stand-in like `gRefWg2D7zO8-sp-3Lw9rTqXc0VbN7mK2pZs4a` before the model sees it. The model is never told a swap happened, so it just uses the stand-in as if it were the real value. When the stand-in comes back in the reply or in a tool call's arguments, it is swapped back to the real value (JSON-escaped inside tool arguments). Real values that come back up in later turns are swapped out again before they reach the model. That covers your restored reply, the tool calls it made, and tool results that echo the value.
 
 The same value always maps to the same stand-in for the life of the process. Stand-ins are HMAC-derived, so they reveal nothing about the value. With `(secret: value)`, leading and trailing whitespace is trimmed and parentheses have to balance. For values that don't fit that, use the sed-style form: `(secret=|value|)`. You pick the delimiter (`|`, `^`, `#`, anything the value doesn't end with right before a `)`), and everything between the delimiters is taken exactly as typed, spaces and parens included:
 
@@ -692,7 +693,7 @@ Appends one timestamped JSON line per request to each of two files — the debug
 
 Put the logger first in the channel and `before.jsonl` is exactly what your tool sent; comparing the two shows every change the extensions made.
 
-Its **Live** tab shows the last 40 requests and responses with everything but the content. For the request: the line as it arrived (`POST /use/openai.com/v1/chat/completions`), where it came from, every header as sent, every parameter (`stream`, `model`, `temperature`, `max_tokens`, `tool_choice`, `thinking`...), the tools' names. Then each call petsitter made to the provider: URL, status, time to first byte and in total, the headers sent and received, and the response without its content (id, model, finish or stop reason, usage, or the error); a failed call shows up too. Each header block has a copy button. The content is in the files.
+Its **Live** tab shows the last 40 requests as HTTP, both hops, in order: the REQUEST your tool sent, the REQUEST petsitter sent the provider, the RESPONSE that came back, and the RESPONSE petsitter sent your tool. Each block is the request or status line, every header with its real value, and the body with only the content swapped for a note of its size (`"messages": "<12 messages, 48,210 chars>"`); streams are summarised (events, finish or stop reason, usage). Failed calls and retries show too. **copy all** copies the whole exchange. The content is in the files.
 
 ```bash
 pet add mine logger            # writes ~/.cache/petsitter/traffic/{before,after}.jsonl

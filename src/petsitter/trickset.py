@@ -473,6 +473,23 @@ class Trickset:
             self._clear_changed_by(tid, list(changes))
         self._save_or_default_path()
 
+    def remove_trick_config(self, tid: str, key: str, changed_by: dict | None = None) -> None:
+        """Remove one stored setting, so the install is back to its default for
+        it, and save the channel (see set_trick_config)."""
+        i = self.trick_ids.index(tid)
+        cfg = self.trick_configs.setdefault(tid, {})
+        cfg.pop(key, None)
+        if i < len(self.tricks):
+            trick = self.tricks[i]
+            field = next((f for f in type(trick).config_fields or [] if isinstance(f, dict) and f.get("key") == key), {})
+            setattr(trick, key, field.get("default", ""))
+            trick.configure(dict(cfg))
+        if changed_by:
+            self.trick_changed_by.setdefault(tid, {})[key] = dict(changed_by)
+        else:
+            self._clear_changed_by(tid, [key])
+        self._save_or_default_path()
+
     def set_trick_enabled(self, tid: str, enabled: bool, changed_by: dict | None = None) -> None:
         """Turn one install on or off and save the channel (see set_trick_config)."""
         i = self.trick_ids.index(tid)

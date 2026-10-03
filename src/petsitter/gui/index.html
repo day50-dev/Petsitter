@@ -1413,7 +1413,7 @@ function renderExtDetail() {
   const live = !!(inst && inst.has_ui);
   if (_extView === 'live' && !live) _extView = 'details';
   const tabs = `<div class="ext-tabs">`
-    + (live ? `<button class="ext-tab${_extView === 'live' ? ' active' : ''}" onclick="setExtView('live')"><span class="ext-live-dot" aria-hidden="true"></span>Live</button>` : '')
+    + (live ? `<button class="ext-tab${_extView === 'live' ? ' active' : ''}" onclick="liveTabClick('${escapeHtml(inst.id || '')}')" title="${_extView === 'live' ? 'Open in its own tab' : 'Live'}"><span class="ext-live-dot" aria-hidden="true"></span>Live</button>` : '')
     + `<button class="ext-tab${_extView === 'details' ? ' active' : ''}" onclick="setExtView('details')">Details</button>`
     + (e.source !== 'file' ? `<button class="ext-tab${_extView === 'source' ? ' active' : ''}" onclick="setExtView('source')">Source code</button>` : '')
     // Pop out: the Live page on its own in a browser tab. It only uses
@@ -1452,6 +1452,11 @@ function renderExtDetail() {
 }
 
 function setExtView(v) { _extView = v; renderExtDetail(); }
+// Clicking Live while it's already showing pops it out, like the Pop out link.
+function liveTabClick(id) {
+  if (_extView === 'live' && id) window.open('/api/tricks/ui/' + encodeURIComponent(id) + '/', '_blank', 'noopener');
+  else setExtView('live');
+}
 
 // Keep the extension list and the Live frame inside the window. How far down
 // they start depends on the header, the channel bar and the tabs (and on the

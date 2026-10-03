@@ -28,7 +28,7 @@ def test_channel_window():
 
 def test_secrets_window_is_one_stand_in():
     sp = SecretsProtectorTrick()
-    assert sp.needs_window == len(sp._marker("anything")) == 52
+    assert sp.needs_window == len(sp._marker("anything")) == 58
 
 
 import random

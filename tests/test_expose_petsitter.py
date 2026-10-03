@@ -119,7 +119,7 @@ def test_turning_an_extension_off_and_bad_values(tmp_path):
         assert t.change("Tool Dashboard", "enabled", "false")["enabled"] is False
         assert "must be one of" in t.change("Context Editor", "compaction", "summarize")["error"]
         assert "no setting" in t.change("Context Editor", "nonsense", 1)["error"]
-        assert "only be changed by the user" in t.change("Expose Petsitter", "allow_changes", False)["error"]
+        assert t.change("Secrets Protector", "enabled", "false")["error"].startswith("no extension")  # not in this channel
     assert ts.trick_enabled[1] is False
     assert ts.trick_changed_by[ts.trick_ids[1]]["enabled"]["by"] == "qwen3"
 
@@ -320,3 +320,32 @@ def test_try_it_leaves_out_extensions_that_are_switched_off(tmp_path, monkeypatc
     r = client.post("/api/playground", json={"messages": [{"role": "user", "content": "hi"}], "trickset": "_default"})
     assert r.status_code == 200, r.text
     assert GET not in json.dumps(up.bodies[-1]) and "petsitter" not in json.dumps(up.bodies[-1].get("messages"))
+
+
+def test_sudo_removes_settings_and_runs_actions(tmp_path, monkeypatch):
+    import sys
+    ts = Trickset("_default", "0.3.0", {"X-Title": "*", "Model": "*"},
+                  ["tricks/expose_petsitter.py", "tricks/context_editor.py", "tricks/exportit.py",
+                   "tricks/secrets_protector.py"], file_path=str(tmp_path / "_default.json"))
+    ts.load_tricks()
+    # the channel loads extensions by path: patch the module it actually loaded
+    monkeypatch.setattr(sys.modules[type(ts.tricks[2]).__module__], "EXPORT_DIR", str(tmp_path / "exports"))
+    t = ts.tricks[0]
+    t.configure({"allow_changes": True})
+    with _Request(ts, []):
+        conf = t.configuration()
+        export = next(e for e in conf["extensions"] if e["name"] == "Export It")
+        assert export["actions"][0]["name"] == "exportit"
+        assert "actions" not in next(e for e in conf["extensions"] if e["name"] == "Context Editor")
+        # set, then remove: back to the default
+        t.change("Context Editor", "compaction", "observation_masking")
+        assert t.remove("Context Editor", "compaction")["value"] == "off"
+        assert ts.tricks[1].compaction == "off" and "compaction" not in ts.trick_configs[ts.trick_ids[1]]
+        # an action, as if typed: (exportit: both)
+        convo = [{"role": "user", "content": "hello"}]
+        result = t.run_action("Export It", "exportit", "both", convo)
+        assert result["ok"] and "before" in result["answer"].lower()
+        assert len(list((tmp_path / "exports").glob("convo-*.json"))) == 2
+        assert "no action" in t.run_action("Export It", "nope", "", convo)["error"]
+        # sudo is everything: the controls too
+        assert t.change("Secrets Protector", "enabled", "false")["enabled"] is False

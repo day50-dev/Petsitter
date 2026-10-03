@@ -130,6 +130,7 @@ It targets whichever channel is selected in the sidebar, so switching channels s
 - **[Community tricks](docs/community.md)** — Installing tricks other people wrote, and publishing your own.
 - **[Proxy behaviour](docs/proxy.md)** — `/use/`, `/ignore/`, `/bypass/`, streaming, the config diagnostic, and the HTTP surface petsitter serves.
 - **[Compaction](docs/compaction.md)** — Context Editor's automatic compaction techniques, their sources and defaults.
+- **[Watermarking](docs/watermarking.md)** — How petsitter's own internal traffic stays inside the egress controls without loops (design).
 - **[When things go wrong](docs/troubleshooting.md)** — Known rough edges and how they show up.
 - **[Working on petsitter](docs/development.md)** — Running the tests, and driving petsitter from other code.
 

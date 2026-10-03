@@ -238,9 +238,11 @@ that answers some of the model's tool calls itself and then lets it carry on,
 as Expose Petsitter does. Outside a request it falls back to the default model.
 
 Anything petsitter itself puts into a conversation starts with its reserved
-prefix, `get_prefix()` (`__96178c403fd9__`): Secrets Protector's stand-ins,
-Expose Petsitter's tool names. Use it for yours, and sniff for it to tell
-petsitter's own things from the user's.
+id, `get_prefix()` (`gRefWg2D7zO8`), in the form `<id>-<context>-<uuid>`:
+`reserved("redacted")` gives `gRefWg2D7zO8-redacted-c74a3c40-...` (Secrets
+Protector's stand-ins), and `reserved_pattern("redacted")` matches them.
+Expose Petsitter's tool names are `gRefWg2D7zO8-<name>`. Use these for yours,
+and sniff for them to tell petsitter's own things from the user's.
 
 A trick that uses other models says so: `required_models` for ones it needs,
 `optional_models` for ones it uses if they're set up and otherwise does

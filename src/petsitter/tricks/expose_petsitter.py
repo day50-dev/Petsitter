@@ -6,10 +6,12 @@ there's no such thing. This extension says so in the system prompt and gives
 the model a tool to look: each extension in the channel, what it's for,
 whether it's on, and its settings.
 
-Turn on **Let the model change settings** and it gets a second tool to change
-them: switch an extension on or off, pick a compaction technique, switch a tool
-off or back on. What a model does with that is an open question, and the
-reason to try it.
+Turn on **Let the model change settings** and it gets petsitter's sudo: it
+can switch any extension on or off, set or remove any setting, and run any
+extension's action (whatever you could type as a prompt keyword, like
+`(exportit: both)`). That includes Secrets Protector and every other control:
+it's a footgun on purpose. What a model does with it is an open question, and
+the reason to try it.
 
 ## How to use
 
@@ -24,24 +26,29 @@ stays until you change it. The extension's page says who changed it and when:
 the model looked at and changed.
 
 Installing it changes what the model sees: a paragraph at the end of the
-system prompt, and one or two tools. Replies still stream; only the model's
-tool calls are held until the reply ends.
+system prompt, and its tools. Replies still stream; only the model's tool
+calls are held until the reply ends.
 
 ## How it works
 
 - `system_prompt` adds a short paragraph about petsitter.
-- `pre_hook` adds `__96178c403fd9__get_petsitter_configuration`, and
-  `__96178c403fd9__set_petsitter_configuration` when changes are allowed, to
-  the tools. The names start with petsitter's reserved prefix (`get_prefix()`),
-  so they can't collide with your tool's.
+- `pre_hook` adds `gRefWg2D7zO8-get_petsitter_configuration` to the tools,
+  and with changes allowed, `...-set_petsitter_setting`,
+  `...-remove_petsitter_setting` and `...-run_petsitter_action`. The names
+  start with petsitter's reserved prefix (`get_prefix()`), so they can't
+  collide with your tool's.
+- The configuration lists each extension: whether it's on, its settings, and
+  its actions (its prompt keyword, by the name it has in this channel).
+  Running an action calls the extension's keyword handler, as if you'd typed
+  `(keyword: text)`; its answer goes back to the model.
 - `post_hook` (`needs_window = 1`: the text streams, tool calls are held to the
   end): when the model calls one of them, petsitter answers and asks the same
   model again (`call_upstream_sync`), up to 5 times. Your tool sees the text
   the model wrote before the call, then its answer, never the call. If the model called your tool's own
   tools in the same turn, those are dropped; it can call them again once it
   has its answer.
-- The model can't change this extension's own settings. Settings of type
-  `password` are never shown to it.
+- Settings of type `password` are never shown to it or changed by it.
+- Installing and uninstalling extensions isn't offered.
 """
 
 import json
@@ -52,8 +59,10 @@ from petsitter.trick import Trick, call_upstream_sync, get_prefix
 
 # petsitter's own tools carry its reserved prefix: they can't collide with your
 # tool's, and anything can tell they're petsitter's.
-GET = get_prefix() + "get_petsitter_configuration"
-SET = get_prefix() + "set_petsitter_configuration"
+GET = get_prefix() + "-get_petsitter_configuration"
+SET = get_prefix() + "-set_petsitter_setting"
+REMOVE = get_prefix() + "-remove_petsitter_setting"
+RUN = get_prefix() + "-run_petsitter_action"
 MAX_ROUNDS = 5
 
 GET_TOOL = {"type": "function", "function": {
@@ -64,7 +73,7 @@ GET_TOOL = {"type": "function", "function": {
 }}
 SET_TOOL = {"type": "function", "function": {
     "name": SET,
-    "description": "Change one setting of a petsitter extension in this channel, or turn the extension "
+    "description": "Set one setting of a petsitter extension in this channel, or turn the extension "
                    "on or off (setting \"enabled\"). The change is saved and stays until changed again.",
     "parameters": {"type": "object", "properties": {
         "extension": {"type": "string", "description": f"The extension's id or name, from {GET}"},
@@ -73,6 +82,25 @@ SET_TOOL = {"type": "function", "function": {
                                                    "setting, a number, or one of the setting's options"},
     }, "required": ["extension", "setting", "value"]},
 }}
+REMOVE_TOOL = {"type": "function", "function": {
+    "name": REMOVE,
+    "description": "Remove a setting of a petsitter extension in this channel, putting it back to its default.",
+    "parameters": {"type": "object", "properties": {
+        "extension": {"type": "string", "description": f"The extension's id or name, from {GET}"},
+        "setting": {"type": "string", "description": f"A setting key from {GET}"},
+    }, "required": ["extension", "setting"]},
+}}
+RUN_TOOL = {"type": "function", "function": {
+    "name": RUN,
+    "description": "Run one of a petsitter extension's actions, as if the user had typed (action: text). "
+                   "Its answer comes back as the result.",
+    "parameters": {"type": "object", "properties": {
+        "extension": {"type": "string", "description": f"The extension's id or name, from {GET}"},
+        "action": {"type": "string", "description": f"An action name from {GET}"},
+        "text": {"type": "string", "description": "What goes after the colon; may be empty"},
+    }, "required": ["extension", "action"]},
+}}
+CHANGE_TOOLS = [SET_TOOL, REMOVE_TOOL, RUN_TOOL]
 
 ABOUT = ("This conversation passes through petsitter, a proxy between you and the user's tool. Its "
          "extensions can change requests and replies on the way through: hide secrets, remove old tool "
@@ -104,6 +132,23 @@ def _unwrap(value, setting: str, field: dict):
     return value
 
 
+def _how_to_use(trick) -> str:
+    """The "## How to use" section of an extension's page (its module
+    docstring), which says what its keyword takes."""
+    import sys
+    doc = getattr(sys.modules.get(type(trick).__module__), "__doc__", "") or ""
+    lines, keep = [], False
+    for line in doc.splitlines():
+        if line.startswith("## "):
+            if keep:
+                break
+            keep = line[3:].strip().lower() == "how to use"
+            continue
+        if keep:
+            lines.append(line)
+    return "\n".join(lines).strip()[:1500]
+
+
 class ExposePetsitterTrick(Trick):
     """Lets the model see, and optionally change, petsitter's extensions."""
 
@@ -112,7 +157,8 @@ class ExposePetsitterTrick(Trick):
     __category__ = "Agents"
     config_fields = [
         {"key": "allow_changes", "label": "Let the model change settings", "type": "boolean", "default": False,
-         "description": "Adds a tool the model can use to change extensions' settings and turn them on or off."},
+         "description": "petsitter's sudo: the model can turn any extension on or off, set or remove any "
+                        "setting, and run any extension's action. Secrets Protector included."},
     ]
     # The text streams; the tool calls are held to the end either way, and a
     # call to one of these is answered there and replaced (see post_hook).
@@ -129,19 +175,19 @@ class ExposePetsitterTrick(Trick):
             return False
 
     def _ours(self) -> set[str]:
-        return {GET, SET} if self._allowed() else {GET}
+        return {GET, SET, REMOVE, RUN} if self._allowed() else {GET}
 
     # -- the request ------------------------------------------------------------
 
     def system_prompt(self, to_add: str) -> str:
-        return ABOUT + (f" {SET} changes it." if self._allowed() else "")
+        return ABOUT + (f" With {SET}, {REMOVE} and {RUN} you can change it." if self._allowed() else "")
 
     def pre_hook(self, context: list, params: dict) -> list:
         tools = [t for t in (params.get("tools") or [])
-                 if (t.get("function") or {}).get("name") not in (GET, SET)]
+                 if (t.get("function") or {}).get("name") not in (GET, SET, REMOVE, RUN)]
         tools.append(GET_TOOL)
         if self._allowed():
-            tools.append(SET_TOOL)
+            tools.extend(CHANGE_TOOLS)
         params["tools"] = tools
         request_meta()["expose_tools"] = tools
         return context
@@ -164,7 +210,7 @@ class ExposePetsitterTrick(Trick):
             convo.append({**reply, "tool_calls": mine})
             for call in mine:
                 convo.append({"role": "tool", "tool_call_id": call["id"],
-                              "content": json.dumps(self._run(call), default=str)})
+                              "content": json.dumps(self._run(call, context[:-1]), default=str)})
             try:
                 reply = call_upstream_sync(convo, tools)
             except Exception as e:
@@ -193,7 +239,7 @@ class ExposePetsitterTrick(Trick):
 
     # -- the tools --------------------------------------------------------------
 
-    def _run(self, call: dict) -> dict:
+    def _run(self, call: dict, conversation: list | None = None) -> dict:
         fn = call.get("function") or {}
         try:
             args = json.loads(fn.get("arguments") or "{}") if isinstance(fn.get("arguments"), str) else (fn.get("arguments") or {})
@@ -204,10 +250,17 @@ class ExposePetsitterTrick(Trick):
                 result = self.configuration()
                 self.report("Looked at the configuration", **self._who())
                 return result
-            if fn.get("name") == SET and self._allowed():
-                result = self.change(str(args.get("extension", "")), str(args.get("setting", "")), args.get("value"))
+            if self._allowed() and fn.get("name") in (SET, REMOVE, RUN):
+                ext = str(args.get("extension", ""))
+                if fn.get("name") == SET:
+                    result = self.change(ext, str(args.get("setting", "")), args.get("value"))
+                elif fn.get("name") == REMOVE:
+                    result = self.remove(ext, str(args.get("setting", "")))
+                else:
+                    result = self.run_action(ext, str(args.get("action", "")), args.get("text") or "", conversation)
                 if "error" in result:
-                    self.report(f"Couldn't change {args.get('extension')}: {result['error']}", **self._who())
+                    self.report(f"Couldn't {fn['name'][len(get_prefix()) + 1:].split('_')[0]} {ext}: {result['error']}",
+                                **self._who())
                 return result
         except Exception as e:
             self.report(f"{fn.get('name')} failed: {e}", **self._who())
@@ -238,6 +291,9 @@ class ExposePetsitterTrick(Trick):
                     "about": getattr(trick, "__brief__", ""),
                     "enabled": ts.trick_enabled[i] if i < len(ts.trick_enabled) else True,
                     "settings": settings}
+            actions = self._actions(ts, i, trick)
+            if actions:
+                item["actions"] = actions
             if trick is self:
                 item["this_is_me"] = True
             if ts.trick_changed_by.get(tid):
@@ -247,22 +303,11 @@ class ExposePetsitterTrick(Trick):
                 "can_change": self._allowed(), "extensions": extensions}
 
     def change(self, extension: str, setting: str, value) -> dict:
-        ts = current_trickset()
-        if ts is None:
-            return {"error": "this request isn't in a petsitter channel"}
-        want = extension.strip().lower()
-        for i, trick in enumerate(ts.tricks):
-            tid = ts.trick_ids[i] if i < len(ts.trick_ids) else ""
-            names = {tid.lower(), type(trick).__name__.lower(), (getattr(trick, "__display_name__", "") or "").lower()}
-            if want in names:
-                break
-        else:
-            return {"error": f"no extension {extension!r} in this channel"}
-        name = getattr(trick, "__display_name__", "") or type(trick).__name__
-        if trick is self or isinstance(trick, type(self)):
-            return {"error": "Expose Petsitter's own settings can only be changed by the user"}
-        who = self._who()
-        mark = {"by": who["model"] or "the model", "program": who["program"], "at": time.time()}
+        found = self._find(extension)
+        if "error" in found:
+            return found
+        ts, i, tid, trick, name = found["ts"], found["i"], found["tid"], found["trick"], found["name"]
+        who, mark = self._who(), self._mark()
         raw = value
         if setting == "enabled":
             on = _as_bool(value)
@@ -288,6 +333,74 @@ class ExposePetsitterTrick(Trick):
         ts.set_trick_config(tid, {setting: value}, changed_by=mark)
         self.report(f"Set {name}'s {field.get('label') or setting} to {value!r}", **who)
         return {"ok": True, "extension": name, "setting": setting, "value": value}
+
+    def remove(self, extension: str, setting: str) -> dict:
+        found = self._find(extension)
+        if "error" in found:
+            return found
+        ts, tid, trick, name = found["ts"], found["tid"], found["trick"], found["name"]
+        field = next((f for f in type(trick).config_fields or [] if isinstance(f, dict) and f.get("key") == setting), None)
+        if field is None or field.get("type") == "password":
+            return {"error": f"{name} has no setting {setting!r}"}
+        ts.remove_trick_config(tid, setting, changed_by=self._mark())
+        self.report(f"Removed {name}'s {field.get('label') or setting}, back to its default", **self._who())
+        return {"ok": True, "extension": name, "setting": setting, "value": getattr(trick, setting, None)}
+
+    def run_action(self, extension: str, action: str, text: str, conversation: list | None = None) -> dict:
+        found = self._find(extension)
+        if "error" in found:
+            return found
+        ts, i, trick, name = found["ts"], found["i"], found["trick"], found["name"]
+        actions = {a["name"]: a for a in self._actions(ts, i, trick)}
+        if action.strip().strip("()").rstrip(":").strip() not in actions:
+            return {"error": f"{name} has no action {action!r}; its actions are {sorted(actions) or 'none'}"}
+        from petsitter.trick import _preview
+        meta = request_meta()
+        after = list(conversation or [])
+        before = (meta.get("payload") or {}).get("messages") or after
+        # Export It and others read the conversation as it goes to the model.
+        token = _preview.set(lambda: list(after))
+        try:
+            answer = trick.handle_prompt_keyword(str(text), list(before), meta.get("payload") or {})
+        finally:
+            _preview.reset(token)
+        self.report(f"Ran ({action}: {text})" if text else f"Ran ({action})", **self._who())
+        content = (answer or {}).get("content") if isinstance(answer, dict) else None
+        return {"ok": True, "extension": name, "action": action, "answer": content or "(done; nothing to say)"}
+
+    @staticmethod
+    def _actions(ts, i: int, trick) -> list[dict]:
+        """An extension's actions: its prompt keyword, if it handles one."""
+        if type(trick).handle_prompt_keyword is Trick.handle_prompt_keyword:
+            return []
+        keyword = (ts.trick_keywords[i] if i < len(ts.trick_keywords) and ts.trick_keywords[i] else None) \
+            or getattr(trick, "prompt_keyword", "") or ""
+        if not keyword:
+            return []
+        doc = (type(trick).handle_prompt_keyword.__doc__ or "").strip().split("\n")[0]
+        action = {"name": keyword, "usage": f"({keyword}: text)", "about": doc or getattr(trick, "__brief__", "")}
+        how = _how_to_use(trick)
+        if how:
+            action["how_to_use"] = how     # what the text can be: "both", a path...
+        return [action]
+
+    @staticmethod
+    def _find(extension: str) -> dict:
+        ts = current_trickset()
+        if ts is None:
+            return {"error": "this request isn't in a petsitter channel"}
+        want = extension.strip().lower()
+        for i, trick in enumerate(ts.tricks):
+            tid = ts.trick_ids[i] if i < len(ts.trick_ids) else ""
+            names = {tid.lower(), type(trick).__name__.lower(), (getattr(trick, "__display_name__", "") or "").lower()}
+            if want in names:
+                return {"ts": ts, "i": i, "tid": tid, "trick": trick,
+                        "name": getattr(trick, "__display_name__", "") or type(trick).__name__}
+        return {"error": f"no extension {extension!r} in this channel"}
+
+    def _mark(self) -> dict:
+        who = self._who()
+        return {"by": who["model"] or "the model", "program": who["program"], "at": time.time()}
 
     @staticmethod
     def _who() -> dict:

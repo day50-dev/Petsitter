@@ -381,7 +381,7 @@ pet add mine tool_monitor
 
 [tricks/secrets_protector.py](../src/petsitter/tricks/secrets_protector.py)
 
-Finds secrets in what your tool sends, swaps each for an opaque stand-in like `__96178c403fd9__d4360d48-...` before the model sees it, and puts the real value back wherever the stand-in comes back: in the reply, and in the arguments of the model's tool calls.
+Finds secrets in what your tool sends, swaps each for an opaque stand-in like `gRefWg2D7zO8-redacted-d4360d48-...` before the model sees it, and puts the real value back wherever the stand-in comes back: in the reply, and in the arguments of the model's tool calls.
 
 - **Detection** combines three sources, since no one covers what people paste into a chat:
   - [gitleaks](https://github.com/gitleaks/gitleaks)' rules (bundled, MIT) for about 200 kinds of vendor keys and tokens.
@@ -406,7 +406,7 @@ For anything the patterns can't recognize, mark it by hand with `(secret: value)
 Here's my credentials. Username: (secret: realusername) Password: (secret: realpassword)
 ```
 
-The proxy leaves these patterns in place (the trick sets `strip_prompt_keyword = False`), and the trick swaps each marked value for an opaque stand-in like `__96178c403fd9__d4360d48-b2ed-49cb-b39f-6de6443d06df` before the model sees it. The model is never told a swap happened, so it just uses the stand-in as if it were the real value. When the stand-in comes back in the reply or in a tool call's arguments, it is swapped back to the real value (JSON-escaped inside tool arguments). Real values that come back up in later turns are swapped out again before they reach the model. That covers your restored reply, the tool calls it made, and tool results that echo the value.
+The proxy leaves these patterns in place (the trick sets `strip_prompt_keyword = False`), and the trick swaps each marked value for an opaque stand-in like `gRefWg2D7zO8-redacted-d4360d48-b2ed-49cb-b39f-6de6443d06df` before the model sees it. The model is never told a swap happened, so it just uses the stand-in as if it were the real value. When the stand-in comes back in the reply or in a tool call's arguments, it is swapped back to the real value (JSON-escaped inside tool arguments). Real values that come back up in later turns are swapped out again before they reach the model. That covers your restored reply, the tool calls it made, and tool results that echo the value.
 
 The same value always maps to the same stand-in for the life of the process. Stand-ins are HMAC-derived, so they reveal nothing about the value. With `(secret: value)`, leading and trailing whitespace is trimmed and parentheses have to balance. For values that don't fit that, use the sed-style form: `(secret=|value|)`. You pick the delimiter (`|`, `^`, `#`, anything the value doesn't end with right before a `)`), and everything between the delimiters is taken exactly as typed, spaces and parens included:
 
@@ -472,11 +472,11 @@ Assistant: Creates tricks/request_logger.py and explains how to load it
 
 [tricks/expose_petsitter.py](../src/petsitter/tricks/expose_petsitter.py)
 
-Petsitter is invisible to the model, and models were never trained on a proxy rewriting their conversation, so ask one about it and it denies there is one. This extension says so at the end of the system prompt and gives the model a tool, `__96178c403fd9__get_petsitter_configuration`: every extension in the channel, what it's for, whether it's on, and its settings.
+Petsitter is invisible to the model, and models were never trained on a proxy rewriting their conversation, so ask one about it and it denies there is one. This extension says so at the end of the system prompt and gives the model a tool, `gRefWg2D7zO8-get_petsitter_configuration`: every extension in the channel, what it's for, whether it's on, and its settings.
 
-Turn on **Let the model change settings** and it also gets `__96178c403fd9__set_petsitter_configuration`, to change a setting or turn an extension on or off. A change the model makes is saved like yours and stays until you change it; the extension's page says "changed by qwen3 in Open WebUI, 2h ago" next to it, and your own change clears that. The model can't change this extension's own settings.
+Turn on **Let the model change settings** and it gets petsitter's sudo: it can turn any extension in the channel on or off, set or remove any setting (removing puts it back to its default), and run any extension's action, which is whatever you could type as a prompt keyword, like `(exportit: both)`. Each action comes with its extension's "How to use" section, so the model knows what the keyword takes. That includes Secrets Protector and every other control, and Expose Petsitter itself: it's a footgun on purpose. Installing and uninstalling aren't offered; settings of type `password` are never shown or changed. A change the model makes is saved like yours and stays until you change it; the extension's page says "changed by qwen3 in Open WebUI, 2h ago" next to it, and your own change clears that. The tools are `gRefWg2D7zO8-set_petsitter_setting`, `...-remove_petsitter_setting` and `...-run_petsitter_action`.
 
-Petsitter answers these tool calls itself and asks the same model again (up to 5 times); your tool sees the text the model wrote before the call, then its answer, never the call. The reply still streams; only tool calls are held to the end. Put it first in the channel. The tool names start with petsitter's reserved prefix, `__96178c403fd9__` (the same one Secrets Protector's stand-ins use), so they can't collide with your tool's.
+Petsitter answers these tool calls itself and asks the same model again (up to 5 times); your tool sees the text the model wrote before the call, then its answer, never the call. The reply still streams; only tool calls are held to the end. Put it first in the channel. The tool names start with petsitter's reserved id, `gRefWg2D7zO8` (the same one Secrets Protector's stand-ins use), so they can't collide with your tool's.
 
 ```bash
 pet add mine expose_petsitter

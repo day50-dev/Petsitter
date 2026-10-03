@@ -11,7 +11,7 @@ import re
 
 from petsitter.trick import get_prefix
 
-STAND_IN = re.compile(re.escape(get_prefix()) + r"[0-9a-f-]{36}")
+STAND_IN = re.compile(re.escape(get_prefix() + "-redacted-") + r"[0-9a-f-]{36}")
 
 
 def hides(text: str, value: str) -> bool:
@@ -126,7 +126,7 @@ class TestSecretsProtectorTrick:
         """Something that merely resembles a hidden value is never touched."""
         trick = SecretsProtectorTrick()
         trick._sanitize("alice@example.com")
-        reply = "user.0001@sanitized.local and __96178c403fd9__00000000-0000-4000-8000-000000000000"
+        reply = "user.0001@sanitized.local and gRefWg2D7zO8-redacted-00000000-0000-4000-8000-000000000000"
         assert trick.post_hook([{"role": "assistant", "content": reply}])[-1]["content"] == reply
 
     def test_info_declares_capability(self):

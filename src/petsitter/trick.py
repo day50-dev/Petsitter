@@ -3,6 +3,8 @@
 import html
 import contextvars
 import json
+import re
+import uuid
 import sys
 import threading
 import time
@@ -231,18 +233,32 @@ def callmodel_sync(
     return messages + [assistant_message]
 
 
-# petsitter's reserved prefix. Anything that starts with it was put there by
+# petsitter's reserved id. Anything that starts with it was put there by
 # petsitter, not by the user, their tool or the model: a secret's stand-in,
 # the name of a tool petsitter answers itself. One fixed string, so something
 # that comes back later (a stand-in the model echoes turns afterwards) is still
-# recognisably petsitter's, and a trick can sniff for it.
-_PREFIX = "__96178c403fd9__"
+# recognisably petsitter's, and a trick can sniff for it. Twelve base64
+# characters (about 71 bits), found nowhere on Google or GitHub code search.
+_PREFIX = "gRefWg2D7zO8"
+_UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 
 
 def get_prefix() -> str:
-    """petsitter's reserved prefix (see _PREFIX). Start anything petsitter
-    puts into a conversation with it: stand-ins, tool names."""
+    """petsitter's reserved id (see _PREFIX). Anything petsitter puts into a
+    conversation starts with it; see reserved()."""
     return _PREFIX
+
+
+def reserved(context: str, ident: str | None = None) -> str:
+    """A reserved name: ``<id>-<context>-<uuid>``, e.g.
+    ``gRefWg2D7zO8-redacted-c74a3c40-067f-400f-8cf1-36242b6360d7``. A fresh
+    UUID unless ``ident`` is given."""
+    return f"{_PREFIX}-{context}-{ident if ident is not None else uuid.uuid4()}"
+
+
+def reserved_pattern(context: str) -> "re.Pattern":
+    """Matches the reserved names for one context (see reserved())."""
+    return re.compile(re.escape(f"{_PREFIX}-{context}-") + _UUID)
 
 
 def call_upstream_sync(messages: list, tools: list | None = None) -> dict:

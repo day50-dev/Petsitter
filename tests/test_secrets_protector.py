@@ -9,9 +9,9 @@ from petsitter.tricks.secrets_protector import SecretsProtectorTrick
 
 import re
 
-from petsitter.tricks.secrets_protector import MARKER_PREFIX
+from petsitter.trick import get_prefix
 
-STAND_IN = re.compile(rf"__{MARKER_PREFIX}__[0-9a-f-]{{36}}")
+STAND_IN = re.compile(re.escape(get_prefix()) + r"[0-9a-f-]{36}")
 
 
 def hides(text: str, value: str) -> bool:

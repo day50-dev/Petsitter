@@ -406,12 +406,11 @@ User-Agent, when it sends no X-Title), and which channel its requests went to. K
 <!-- === HELP TAB === -->
 <div class="tab-pane" id="tab-help">
 <div class="card">
-<p class="help-lead">Each app's requests go through every channel that matches it. <b>Default</b> gets what no channel matches.</p>
-<div style="margin-bottom:16px">
+<div id="help-content"><div class="loader">Loading help...</div></div>
+<div class="help-examples">
 <button class="btn btn-accent" id="btn-install-examples" onclick="installExamples()" title="Install the example channels and their extensions">Install Examples</button>
 <div id="install-examples-result" style="margin-top:8px"></div>
 </div>
-<div id="help-content"><div class="loader">Loading help...</div></div>
 </div>
 </div>
 </div>
@@ -496,16 +495,45 @@ function parseHash() {
 
 let _helpLoaded = false;
 let _mermaidReady = false;
+// The one question Help can answer live: is anything coming through?
+function renderHelpStatus() {
+  const el = document.getElementById('help-status');
+  if (!el) return;
+  const progs = (_traffic.programs || []).slice().sort((a, b) => a.ago - b.ago);
+  let html;
+  if (_upstream && !_upstream.ok) {
+    html = `<span class="hs-dot bad"></span><span><b>Your provider isn't answering.</b> ${escapeHtml(_upstream.error || _upstream.target || '')} `
+      + `Check <a href="#models/_default">Models</a>.</span>`;
+  } else if (!progs.length) {
+    html = `<span class="hs-dot"></span><span><b>Nothing has come through yet.</b> Point a tool at `
+      + `<code>${escapeHtml(baseUrl())}</code> (<a href="#connecting/_default">Connecting</a>) and use it.</span>`;
+  } else {
+    const name = p => escapeHtml(p.x_title || p.key || 'a program');
+    const chans = p => Object.keys(p.channels || {}).map(c => c === '_default' ? 'Default' : '#' + c).join(', ');
+    // Programs are remembered across restarts: only a recent request says it's working now.
+    const recent = progs[0].ago < 3600;
+    html = `<span class="hs-dot${recent ? ' ok' : ''}"></span><span><b>${recent ? "It's working." : 'Nothing in the last hour.'}</b> `
+      + progs.slice(0, 3).map(p => `${name(p)}: ${p.count} request${p.count === 1 ? '' : 's'}, last ${_ago(p.ago)}, through ${escapeHtml(chans(p))}`).join('. ')
+      + (progs.length > 3 ? `. And ${progs.length - 3} more on <a href="#agents/_default">Agents</a>` : '') + `.</span>`;
+  }
+  el.innerHTML = html;
+}
+
 async function loadHelpContent() {
   if (_helpLoaded) return;
   _helpLoaded = true;
   try {
-    // The user guide. Its "back to the README" line means nothing here, and
-    // its links to the other docs are relative to docs/: send those to GitHub.
-    const md = (await (await fetch('/api/help')).text()).replace(/^\[← back to the README\]\([^)]*\)\s*$/m, '');
-    const html = marked.parse(md);   // the guide is hard-wrapped: a single newline isn't a break
+    // docs/help.md. Its links to the other docs are relative to docs/: send
+    // those to GitHub. Its screenshots ship in the package, under /static.
+    const md = await (await fetch('/api/help')).text();
+    const html = marked.parse(md);   // hard-wrapped: a single newline isn't a break
     const box = document.getElementById('help-content');
     box.innerHTML = html;
+    box.querySelectorAll('img[src]').forEach(img => {
+      img.src = img.getAttribute('src').replace(/^(\.\.\/)?src\/petsitter\/gui\//, '/static/');
+      img.loading = 'lazy';
+    });
+    renderHelpStatus();
     const DOCS = 'https://github.com/day50-dev/Petsitter/blob/main/docs/';
     box.querySelectorAll('a[href]').forEach(a => {
       const href = a.getAttribute('href');
@@ -1296,8 +1324,18 @@ const _safeMd = new marked.Marked({
   },
 });
 
+// A setting a model changed (Expose Petsitter) says so where you'd look, and
+// stays until you change it yourself.
+function _changedByNote(m) {
+  const when = m.at ? _ago(Math.max(0, Date.now() / 1000 - m.at)) : '';
+  return `<span class="glance-by">changed by ${escapeHtml(m.by || 'the model')}${m.program ? ' in ' + escapeHtml(m.program) : ''}${when ? ', ' + when : ''}</span>`;
+}
+
 function _howToUse(e, installed) {
   const rows = [];
+  if (installed && e.changed_by && e.changed_by.enabled) {
+    rows.push([e.enabled === false ? 'Turned off' : 'Turned on', _changedByNote(e.changed_by.enabled)]);
+  }
   const kw = e.prompt_keyword;
   if (e.keywords && e.keywords.length) {
     rows.push(['Turns on', `only for messages that mention ${e.keywords.map(k => `<code>${escapeHtml(k)}</code>`).join(' or ')}.`]);
@@ -1327,8 +1365,9 @@ function _howToUse(e, installed) {
     const fmt = v => v === '' || v === null || v === undefined ? '<span class="glance-dim">not set</span>'
       : typeof v === 'boolean' ? (v ? 'on' : 'off') : `<code>${escapeHtml(String(v))}</code>`;
     const live = installed && Array.isArray(e.settings) ? e.settings : null;
+    const by = e.changed_by || {};
     const pairs = live
-      ? live.map(x => `<span class="glance-k">${escapeHtml(x.label)}</span>${fmt(x.value)}`)
+      ? live.map(x => `<span class="glance-k">${escapeHtml(x.label)}</span><span>${fmt(x.value)}${by[x.key] ? ' ' + _changedByNote(by[x.key]) : ''}</span>`)
       : e.config_fields.map(f => `<span class="glance-k">${escapeHtml(f.label || f.key)}</span>${fmt(f.default)}`);
     rows.push(['Settings', `<div class="glance-settings">${pairs.join('')}</div>`
       + (installed ? `<a href="#" onclick="openTrickConfig('${escapeHtml(e.id || '')}');return false">Change</a>`
@@ -2087,6 +2126,7 @@ function _setTricksetList(loaded, avail) {
 
 async function fetchTraffic() {
   try { _traffic = await fetchJSON('/api/traffic'); } catch(e) {}
+  renderHelpStatus();
   renderRuleBar();
   renderDiscovered();
   // Fresh suggestions for an untouched New channel form (never over typing).
@@ -3452,6 +3492,10 @@ async function openTrickConfig(id) {
       const desc = f.description ? `<div class="cfg-desc">${escapeHtml(f.description)}</div>` : '';
       if (type === 'boolean') {
         return `<label class="cfg-field cfg-bool"><input type="checkbox" id="cfg-${escapeHtml(key)}" ${cur ? 'checked' : ''}><span>${escapeHtml(label)}</span>${desc}</label>`;
+      }
+      if (type === 'choice') {
+        const opts = (f.options || []).map(o => `<option value="${escapeHtml(String(o))}"${String(o) === String(cur) ? ' selected' : ''}>${escapeHtml(String(o))}</option>`).join('');
+        return `<label class="cfg-field"><span class="cfg-label">${escapeHtml(label)}</span><select id="cfg-${escapeHtml(key)}">${opts}</select>${desc}</label>`;
       }
       return `<label class="cfg-field"><span class="cfg-label">${escapeHtml(label)}</span><input type="${type === 'number' ? 'number' : 'text'}" id="cfg-${escapeHtml(key)}" value="${escapeHtml(String(cur === undefined || cur === null ? '' : cur))}" spellcheck="false">${desc}</label>`;
     }).join('');

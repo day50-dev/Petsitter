@@ -153,7 +153,8 @@ config_fields = [
 | `key` (required) | The attribute name the value arrives as on `self` |
 | `label` (required) | Shown in the dashboard |
 | `description` | Help text under the field |
-| `type` | `"text"` (default), `"number"`, `"boolean"` or `"path"` (a text box) |
+| `type` | `"text"` (default), `"number"`, `"boolean"`, `"path"` (a text box) or `"choice"` (pick one of `options`) |
+| `options` | For `"choice"`: the values to pick from |
 | `default` | Shown in the form when nothing is stored |
 | `required` | Whether a value must be given |
 
@@ -184,6 +185,18 @@ reply = callmodel_sync(ctx, model_url=cfg["url"], model_name=cfg["model"] or "",
 
 `model` and `key` may be `False` (passthrough), hence the `or ""`. Falling back
 to `"default"` is the trick's job, as above (Politeify).
+
+To ask **the model this request is going to** again, rather than the default
+one, use `call_upstream_sync(messages, tools=None)`. It goes to the same
+provider, model, key and API as the request (a `/use/` upstream, Anthropic for
+Claude Code) and returns the reply as an assistant message. It's for a trick
+that answers some of the model's tool calls itself and then lets it carry on,
+as Expose Petsitter does. Outside a request it falls back to the default model.
+
+Anything petsitter itself puts into a conversation starts with its reserved
+prefix, `get_prefix()` (`__96178c403fd9__`): Secrets Protector's stand-ins,
+Expose Petsitter's tool names. Use it for yours, and sniff for it to tell
+petsitter's own things from the user's.
 
 ## Live page (optional)
 

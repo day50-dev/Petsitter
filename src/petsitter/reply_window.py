@@ -89,4 +89,5 @@ class ReplyWindow:
             msg["tool_calls"] = tool_calls
         msg = self._rewrite(msg)
         self._pending = ""
-        return msg.get("content") or "", msg.get("tool_calls") or tool_calls
+        # A rewriter may remove the calls (answered them itself): no fallback.
+        return msg.get("content") or "", msg.get("tool_calls") or None

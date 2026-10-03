@@ -54,6 +54,10 @@ class Trickset:
         while len(self.trick_keywords) < len(self.trick_paths):
             self.trick_keywords.append(None)
         self.trick_configs: dict[str, dict[str, Any]] = dict(trick_configs or {})
+        # Settings something other than you changed (a model, through Expose
+        # Petsitter): install id -> {setting: {"by", "program", "at"}}. Cleared
+        # for a setting when you change it yourself.
+        self.trick_changed_by: dict[str, dict[str, dict]] = {}
         self.file_path = file_path
         self.parameters: dict[str, Any] = parameters or {}
         self.models: dict[str, str] = models or {}
@@ -76,6 +80,9 @@ class Trickset:
                 "enabled": self.trick_enabled[i] if i < len(self.trick_enabled) else True,
                 "config": self.trick_configs.get(self.trick_ids[i] if i < len(self.trick_ids) else "", {}),
             }
+            changed_by = self.trick_changed_by.get(entry["id"])
+            if changed_by:
+                entry["changed_by"] = changed_by
             if effective:
                 entry["keyword"] = effective
             entries.append(entry)
@@ -183,6 +190,7 @@ class Trickset:
                     "enabled": entry.get("enabled", True),
                     "keyword": entry.get("keyword"),
                     "config": entry.get("config") or {},
+                    "changed_by": entry.get("changed_by") if isinstance(entry.get("changed_by"), dict) else {},
                 })
 
         existing_idx = {tid: i for i, tid in enumerate(self.trick_ids)}
@@ -235,6 +243,7 @@ class Trickset:
         self.trick_ids = new_ids
         self.trick_keywords = new_keywords
         self.trick_configs = new_configs
+        self.trick_changed_by = {d["id"]: dict(d["changed_by"]) for d in desired if d.get("changed_by")}
         self.get_logger().info("trickset '%s': reread config from %s", self.name, source)
         return {
             "name": self.name,
@@ -304,6 +313,7 @@ class Trickset:
         trick_ids: list[str] = []
         trick_keywords: list[str | None] = []
         trick_configs: dict[str, dict[str, Any]] = {}
+        trick_changed_by: dict[str, dict[str, dict]] = {}
         for entry in raw_tricks:
             if isinstance(entry, str):
                 trick_paths.append(entry)
@@ -319,12 +329,15 @@ class Trickset:
                 cfg = entry.get("config")
                 if isinstance(cfg, dict) and cfg:
                     trick_configs[eid] = dict(cfg)
+                if isinstance(entry.get("changed_by"), dict) and entry["changed_by"]:
+                    trick_changed_by[eid] = dict(entry["changed_by"])
         parameters = data.get("parameters", {})
         models = data.get("models", {})
         logfile = data.get("logfile")
         loglevel = data.get("loglevel", "INFO")
         ts = cls(name, schema, filters, trick_paths, file_path=file_path, parameters=parameters, models=models, trick_enabled=trick_enabled, trick_ids=trick_ids, trick_keywords=trick_keywords, logfile=logfile, loglevel=loglevel, trick_configs=trick_configs)
         ts.enabled = data.get("enabled", True) is not False
+        ts.trick_changed_by = trick_changed_by
         ts.load_tricks()
         ts.get_logger().info("trickset '%s': loaded %d tricks", name, len(ts.tricks))
         return ts
@@ -363,6 +376,7 @@ class Trickset:
                         self.trick_enabled.append(True)
                     if self.trick_enabled[i] != val:
                         self.trick_enabled[i] = val
+                        self._clear_changed_by(eid, ["enabled"])
                         changed = True
                 if "keyword" in entry:
                     val = entry["keyword"]
@@ -373,7 +387,9 @@ class Trickset:
                         changed = True
                 if "config" in entry:
                     val = entry["config"] or {}
-                    if self.trick_configs.get(eid) != val:
+                    old = self.trick_configs.get(eid) or {}
+                    if old != val:
+                        self._clear_changed_by(eid, [k for k in set(old) | set(val) if old.get(k) != val.get(k)])
                         self.trick_configs[eid] = dict(val)
                         changed = True
                     if i < len(self.tricks):
@@ -405,6 +421,7 @@ class Trickset:
                 if i < len(self.trick_keywords):
                     del self.trick_keywords[i]
                 self.trick_configs.pop(trick_id, None)
+                self.trick_changed_by.pop(trick_id, None)
                 self.get_logger().info("trickset '%s': removed trick %s", self.name, tid)
                 return True
         return False
@@ -425,6 +442,48 @@ class Trickset:
                 self.trick_keywords.insert(new_index, tk)
                 return True
         return False
+
+    def _clear_changed_by(self, tid: str, keys) -> None:
+        marks = self.trick_changed_by.get(tid)
+        if marks:
+            for k in keys:
+                marks.pop(k, None)
+            if not marks:
+                self.trick_changed_by.pop(tid, None)
+
+    def _save_or_default_path(self) -> None:
+        if not self.file_path:
+            from petsitter.proxy import _tricksets_dir
+            self.file_path = str(_tricksets_dir() / f"{self.name}.json")
+        self.save()
+
+    def set_trick_config(self, tid: str, changes: dict, changed_by: dict | None = None) -> None:
+        """Change some of one install's settings, apply them, and save the
+        channel. ``changed_by`` ({"by", "program", "at"}) marks the change as
+        made by something other than you; without it, the marks on those
+        settings are cleared, since you set them now."""
+        i = self.trick_ids.index(tid)
+        cfg = self.trick_configs.setdefault(tid, {})
+        cfg.update(changes)
+        if i < len(self.tricks):
+            self.tricks[i].configure(dict(cfg))
+        if changed_by:
+            self.trick_changed_by.setdefault(tid, {}).update({k: dict(changed_by) for k in changes})
+        else:
+            self._clear_changed_by(tid, list(changes))
+        self._save_or_default_path()
+
+    def set_trick_enabled(self, tid: str, enabled: bool, changed_by: dict | None = None) -> None:
+        """Turn one install on or off and save the channel (see set_trick_config)."""
+        i = self.trick_ids.index(tid)
+        while len(self.trick_enabled) <= i:
+            self.trick_enabled.append(True)
+        self.trick_enabled[i] = bool(enabled)
+        if changed_by:
+            self.trick_changed_by.setdefault(tid, {})["enabled"] = dict(changed_by)
+        else:
+            self._clear_changed_by(tid, ["enabled"])
+        self._save_or_default_path()
 
     def find_trick_id_by_class(self, class_name: str) -> str | None:
         for i, t in enumerate(self.tricks):

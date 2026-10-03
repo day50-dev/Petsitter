@@ -75,15 +75,14 @@ import uuid
 
 from petsitter import secret_scan
 from petsitter.secret_scan import find_secrets
-from petsitter.trick import Trick, find_prompt_keyword_patterns
+from petsitter.trick import Trick, find_prompt_keyword_patterns, get_prefix
 
-# Every hand-marked stand-in starts with this, so the way back can find them
-# without guessing. It's fixed rather than per-process so a stand-in the model
-# echoes from an older turn is still recognizably one of ours.
-MARKER_PREFIX = "96178c403fd9"
+# Every stand-in starts with petsitter's reserved prefix, so the way back can
+# find them without guessing, including one the model echoes from an older turn.
+PREFIX = get_prefix()
 _MARKER_RE = re.compile(
-    rf"__{MARKER_PREFIX}__"
-    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    re.escape(PREFIX)
+    + r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 )
 
 
@@ -136,11 +135,11 @@ class SecretsProtectorTrick(Trick):
 
     # Every stand-in is the same length, so the reply can stream with only
     # that much held back (see reply_window).
-    needs_window = len(f"__{MARKER_PREFIX}__") + 36
+    needs_window = len(PREFIX) + 36
 
     def _marker(self, value: str) -> str:
         digest = hmac.new(self._key, value.encode(), hashlib.sha256).digest()
-        return f"__{MARKER_PREFIX}__{uuid.UUID(bytes=digest[:16], version=4)}"
+        return f"{PREFIX}{uuid.UUID(bytes=digest[:16], version=4)}"
 
     def _mark(self, text: str) -> str:
         """Replace each (secret: value) in text with its stand-in, in place."""

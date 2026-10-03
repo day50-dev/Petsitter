@@ -229,7 +229,19 @@ def test_playground_passes_its_tools_and_tool_turns():
     assert r.json()["tool_calls"][0]["function"]["name"] == "get_table"
 
 
-def test_help_serves_the_guide_from_a_checkout():
+def test_help_serves_the_help_page_from_a_checkout():
     client = _client(Trick())
     r = client.get("/api/help")
-    assert r.status_code == 200 and r.text.startswith("# User guide")
+    assert r.status_code == 200 and r.text.startswith("# Help")
+
+
+def test_help_screenshots_are_served():
+    import re
+    from pathlib import Path
+    client = _client(Trick())
+    md = (Path(__file__).resolve().parent.parent / "docs" / "help.md").read_text()
+    images = re.findall(r"\]\(\.\./src/petsitter/gui/(help/[^)]+\.png)\)", md)
+    assert images
+    for path in images:
+        r = client.get("/static/" + path)
+        assert r.status_code == 200 and r.headers["content-type"] == "image/png", path

@@ -1022,7 +1022,6 @@ header .nav a:hover { background: #1a2a4d; }
   background: #0f0f1a;
   color: #8ab4ff;
 }
-#help-content img { max-width: 100%; height: auto; }
 #help-content blockquote {
   border-left: 3px solid #2a4a6a;
   margin: 0.8em 0;
@@ -2193,8 +2192,17 @@ body.rail-collapsed .chan-count { position: absolute; top: 0; right: 0; font-siz
 .chan-warn b { color: #ffd08a; }
 /* Help sits at the bottom of the rail */
 .chan.chan-help { margin-top: auto; }
-.help-lead { margin: 0 0 14px; font-size: 14px; color: #a4b8d4; }
-.help-lead b { color: #c8d6e5; }
+.help-examples { margin-top: 24px; padding-top: 16px; border-top: 1px solid #1e2a3a; }
+/* Help's live answer to "is it working?" */
+#help-status:empty { display: none; }
+#help-status { display: flex; align-items: baseline; gap: 10px; margin: 0 0 18px; padding: 10px 14px;
+  background: #12122a; border: 1px solid #1e2a3a; border-radius: 8px; font-size: 14px; color: #a4b8d4; line-height: 1.5; }
+#help-status b { color: #c8d6e5; }
+#help-status code { font-size: 13px; }
+.hs-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: #5a7a8a; transform: translateY(-1px); }
+.hs-dot.ok { background: #6bff8a; box-shadow: 0 0 6px #6bff8a; }
+.hs-dot.bad { background: #ff7a7a; }
+#help-content img { max-width: min(100%, 760px); height: auto; border: 1px solid #1e2a3a; border-radius: 6px; margin: 4px 0 8px; }
 
 .rule-bar { position: relative; margin: 0 0 12px; }
 .rule-row {
@@ -2608,3 +2616,6 @@ body.rail-collapsed .chan-alert { position: absolute; bottom: 2px; right: 2px; w
 /* An installed extension's place in the run order */
 .trick-item .ext-pos { flex: none; width: 16px; margin-right: 6px; text-align: center; font-size: 11px;
   font-weight: 600; color: #5a7a8a; font-variant-numeric: tabular-nums; }
+
+/* a setting a model changed, on the extension's At a glance */
+.glance-by { color: #f0c96b; font-size: 12px; }

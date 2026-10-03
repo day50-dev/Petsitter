@@ -144,14 +144,14 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
     app.add_route("/docs", docs_page, methods=["GET"])
 
     async def help_page(request: Request) -> Response:
-        # The Help page is the user guide. Installed, it's copied into the
+        # The Help page is docs/help.md. Installed, it's copied into the
         # package (pyproject's force-include); run from a checkout
-        # (./petsitter), it's docs/guide.md.
+        # (./petsitter), it's read from docs/.
         here = Path(__file__).resolve().parent
-        for guide in (here / "guide.md", here.parent.parent / "docs" / "guide.md"):
-            if guide.is_file():
-                return Response(content=guide.read_text(encoding="utf-8"), media_type="text/plain")
-        return Response(content="petsitter's guide wasn't found.", media_type="text/plain", status_code=404)
+        for page in (here / "help.md", here.parent.parent / "docs" / "help.md"):
+            if page.is_file():
+                return Response(content=page.read_text(encoding="utf-8"), media_type="text/plain")
+        return Response(content="petsitter's help page wasn't found.", media_type="text/plain", status_code=404)
     app.add_route("/api/help", help_page, methods=["GET"])
 
     async def gui_info(request: Request) -> Response:
@@ -403,14 +403,8 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
             tid = request.path_params.get("tid", "")
             for ts in handler.tricksets.values():
                 if tid in ts.trick_ids:
-                    cfg = ts.trick_configs.setdefault(tid, {})
-                    cfg.update(changes)
-                    trick.configure(dict(cfg))
                     try:
-                        if not ts.file_path:
-                            from petsitter.proxy import _tricksets_dir
-                            ts.file_path = str(_tricksets_dir() / f"{ts.name}.json")
-                        ts.save()
+                        ts.set_trick_config(tid, changes)
                     except Exception as e:
                         reply["save_error"] = str(e)
                     break

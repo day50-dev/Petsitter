@@ -205,8 +205,9 @@ class LoggerTrick(Trick):
 ```
 
 Each field has a `key` (the attribute name) and `label`, and optionally a
-`description`, a `type` (`"text"`, `"number"`, `"boolean"` or `"path"`), a
-`default`, and `required`. `"path"` is shown as a text box. Nothing may be
+`description`, a `type` (`"text"`, `"number"`, `"boolean"`, `"path"` or
+`"choice"`, with its `options` listed), a `default`, and `required`. `"path"`
+is shown as a text box, `"choice"` as a list to pick from. Nothing may be
 stored yet, and a field cleared in the dashboard arrives as `""`, so fall back
 with `or` as above. Override `configure(config)` (calling
 `super().configure(config)`) to react when a value changes. The values in use
@@ -228,6 +229,18 @@ the reply added. It takes `model_url`, `model_name`, `api_key` and `tools` (the
 reply may then carry `tool_calls`); without a model it uses the one petsitter
 was started with. It raises on HTTP errors and times out after 60 seconds.
 `callmodel` is the async version, for async code only.
+
+To ask **the model this request is going to** again, rather than the default
+one, use `call_upstream_sync(messages, tools=None)`. It goes to the same
+provider, model, key and API as the request (a `/use/` upstream, Anthropic for
+Claude Code) and returns the reply as an assistant message. It's for a trick
+that answers some of the model's tool calls itself and then lets it carry on,
+as Expose Petsitter does. Outside a request it falls back to the default model.
+
+Anything petsitter itself puts into a conversation starts with its reserved
+prefix, `get_prefix()` (`__96178c403fd9__`): Secrets Protector's stand-ins,
+Expose Petsitter's tool names. Use it for yours, and sniff for it to tell
+petsitter's own things from the user's.
 
 A trick that uses other models says so: `required_models` for ones it needs,
 `optional_models` for ones it uses if they're set up and otherwise does

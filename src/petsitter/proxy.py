@@ -858,6 +858,7 @@ class ProxyHandler:
                     "optional_models": list(getattr(t, "optional_models", []) or []),
                     "config_fields": list(getattr(type(t), "config_fields", []) or []),
                     "config": ts.trick_configs.get(tid, {}),
+                    "changed_by": ts.trick_changed_by.get(tid, {}),
                     "has_ui": type(t).has_ui(),
                     "settings": t.current_settings(),
                     "problems": _problems_of(t),
@@ -873,12 +874,7 @@ class ProxyHandler:
                 if type(t).__name__ == name:
                     if enabled is None:
                         enabled = not (ts.trick_enabled[i] if i < len(ts.trick_enabled) else True)
-                    while len(ts.trick_enabled) <= i:
-                        ts.trick_enabled.append(True)
-                    ts.trick_enabled[i] = enabled
-                    if not ts.file_path:
-                        ts.file_path = str(_tricksets_dir() / f"{ts.name}.json")
-                    ts.save()
+                    ts.set_trick_enabled(ts.trick_ids[i], enabled)   # you did it: clears a model's mark
                     return True
         return False
 
@@ -990,7 +986,8 @@ class ProxyHandler:
                 ts_name = model.split("/", 1)[1]
                 ts = self.tricksets.get(ts_name)
                 if ts:
-                    tricks = list(ts.tricks)
+                    # the channel's extensions that are on, as for any request
+                    tricks = [t for i, t in enumerate(ts.tricks) if i < len(ts.trick_enabled) and ts.trick_enabled[i]]
                     matched_ts_name = ts.name
                     req.ts_token = set_current_trickset(ts)
                     log = get_logger()
@@ -1054,7 +1051,29 @@ class ProxyHandler:
         req.upstream_payload = upstream_payload
         req.upstream_headers = upstream_headers
         req.log = log
+        request_meta()["resend"] = self._resend_chat(req)
         return None
+
+    @staticmethod
+    def _resend_chat(req):
+        """For call_upstream_sync: this request again, with other messages and
+        tools, to the same upstream; the reply as an assistant message."""
+        def resend(messages: list, tools: list | None = None) -> dict:
+            body = {k: v for k, v in req.upstream_payload.items() if k not in ("stream", "stream_options")}
+            body["messages"] = messages
+            if tools:
+                body["tools"] = tools
+            else:
+                body.pop("tools", None)
+                body.pop("tool_choice", None)
+            with httpx.Client() as client:
+                r = client.post(req.target, json=body, headers=req.upstream_headers, timeout=UPSTREAM_TIMEOUT)
+            r.raise_for_status()
+            msg = r.json()["choices"][0]["message"]
+            if msg.get("tool_calls"):
+                msg["tool_calls"] = merge_tool_call_fragments(msg["tool_calls"])
+            return msg
+        return resend
 
     def _other_chat_target(self, req):
         """After a 404: the base's other candidate endpoint (with or without
@@ -1156,15 +1175,20 @@ class ProxyHandler:
 
         log.debug("%scontext before post-hooks: %s", request_tag(), json.dumps(context, indent=2))
 
-        context = self._apply_post_hooks(context, tricks)
+        # In a thread: a post_hook may call the model again (call_upstream_sync),
+        # and that mustn't stop every other request while it waits.
+        context = await asyncio.to_thread(self._apply_post_hooks, context, tricks)
         log.debug("%scontext after post-hooks: %s", request_tag(), json.dumps(context, indent=2))
 
         result["choices"][0]["message"] = context[-1]
         # A trick may have turned the answer into a tool call (see
-        # ToolCallTrick, ReferenceCheckTrick). Harnesses that key off
-        # finish_reason rather than the message body need it to agree.
+        # ToolCallTrick, ReferenceCheckTrick), or answered the model's tool
+        # call itself. Harnesses that key off finish_reason rather than the
+        # message body need it to agree.
         if context[-1].get("tool_calls"):
             result["choices"][0]["finish_reason"] = "tool_calls"
+        elif result["choices"][0].get("finish_reason") == "tool_calls":
+            result["choices"][0]["finish_reason"] = "stop"
 
         capabilities = self._merge_capabilities(tricks)
         if capabilities:
@@ -1368,7 +1392,9 @@ class ProxyHandler:
             finally:
                 await resp_cm.__aexit__(None, None, None)
         if win is not None:
-            tail, final_calls = win.finish(held_calls or None)
+            # In a thread: a rewriter may answer a tool call by asking the
+            # model again (call_upstream_sync), and that mustn't block.
+            tail, final_calls = await asyncio.to_thread(win.finish, held_calls or None)
             for t in rewriters:
                 trace_event("post_hook", t, windowed=True)
             if tail:
@@ -1379,6 +1405,9 @@ class ProxyHandler:
             if not held_end:
                 held_end.append(chunk({}, "tool_calls" if final_calls else "stop"))
             for obj in held_end:
+                for choice in (obj.get("choices") or []) if isinstance(obj, dict) else []:
+                    if choice.get("finish_reason") == "tool_calls" and not final_calls:
+                        choice["finish_reason"] = "stop"   # a rewriter answered them
                 yield sent(obj)
         if calls:
             reply["tool_calls"] = calls
@@ -1487,7 +1516,22 @@ class ProxyHandler:
         req.headers = _anthropic_headers(forward_headers or {})
         req.target = upstream_request_url or f"{ANTHROPIC_UPSTREAM.rstrip('/')}/v1/messages"
         req.log = log
+        request_meta()["resend"] = self._resend_messages(req, payload)
         return None
+
+    @staticmethod
+    def _resend_messages(req, payload: dict):
+        """call_upstream_sync on the Anthropic path: translated there and back."""
+        from petsitter import anthropic_compat as ac
+
+        def resend(messages: list, tools: list | None = None) -> dict:
+            body = ac.to_anthropic_payload(messages, tools or [], payload)
+            body.pop("stream", None)
+            with httpx.Client() as client:
+                r = client.post(req.target, json=body, headers=req.headers, timeout=UPSTREAM_TIMEOUT)
+            r.raise_for_status()
+            return ac.response_to_assistant_message(r.json())
+        return resend
 
     async def _finish_messages_buffered(self, req) -> dict:
         from petsitter import anthropic_compat as ac
@@ -1511,7 +1555,7 @@ class ProxyHandler:
 
         result = response.json()
         assistant = ac.response_to_assistant_message(result)
-        context = self._apply_post_hooks(req.messages + [assistant], req.tricks)
+        context = await asyncio.to_thread(self._apply_post_hooks, req.messages + [assistant], req.tricks)
         if context:
             result = ac.apply_assistant_message(result, context[-1])
         return result
@@ -1573,9 +1617,11 @@ class ProxyHandler:
     async def _stream_messages(self, req, window: int = 0, rewriters=(), observers=()):
         """Forward Anthropic's event stream. Without a window, byte for byte.
         With one, each text block passes through the rewriting post_hooks
-        (its own window per block) and each tool_use block is held until it
-        ends, then rewritten whole; thinking and everything else is untouched.
-        Either way the reply as sent is rebuilt for the observing post_hooks."""
+        (its own window per block), and the tool_use blocks are held to the
+        end and rewritten together, as on the OpenAI path: a rewriter may
+        change them, or answer them itself and add text instead. Thinking and
+        everything else is untouched. Either way the reply as sent is rebuilt
+        for the observing post_hooks."""
         from petsitter import anthropic_compat as ac
         log, target = req.log, req.target
         body = dict(req.body, stream=True)
@@ -1586,7 +1632,10 @@ class ProxyHandler:
         trace_event("upstream", url=target, model=body.get("model", ""), stream=True, window=window)
         rewrite = self._window_rewrite(req, rewriters) if window else None
         texts: dict[int, ReplyWindow] = {}     # open text blocks
-        tools: dict[int, dict] = {}            # open tool_use blocks, held
+        tools: dict[int, dict] = {}            # tool_use blocks, held to the end
+        # Held blocks leave gaps, so blocks are renumbered as they go out.
+        out_index: dict[int, int] = {}
+        next_out = [0]
 
         result: dict[str, Any] = {"type": "message", "role": "assistant", "content": []}
         partial: dict[int, str] = {}
@@ -1621,6 +1670,49 @@ class ProxyHandler:
             ev = {"type": "content_block_delta", "index": idx, "delta": {"type": "text_delta", "text": text}}
             return ac._sse("content_block_delta", ev), ev
 
+        def renumbered(raw: str, ev: dict, idx: int):
+            out = out_index.get(idx, idx)
+            if out == idx:
+                return raw, ev
+            ev = dict(ev, index=out)
+            return ac._sse(ev.get("type", ""), ev), ev
+
+        def release_tools(stop_ev: dict | None) -> list:
+            """The held tool calls, through the rewriters once, as events; then
+            the message_delta, its stop_reason matching what was sent."""
+            calls = [{"id": (h["start"][1].get("content_block") or {}).get("id", ""), "type": "function",
+                      "function": {"name": (h["start"][1].get("content_block") or {}).get("name", ""),
+                                   "arguments": h["json"]}} for h in tools.values()]
+            tools.clear()
+            text, calls = ReplyWindow(rewrite, window).finish(calls)
+            events = []
+
+            def block(start: dict, delta: dict | None):
+                i = next_out[0]
+                next_out[0] += 1
+                for kind, ev in (("content_block_start", dict(start, index=i)),
+                                 ("content_block_delta", dict(delta, index=i)) if delta else (None, None),
+                                 ("content_block_stop", {"type": "content_block_stop", "index": i})):
+                    if kind:
+                        events.append((ac._sse(kind, ev), ev))
+
+            if text:
+                block({"type": "content_block_start", "content_block": {"type": "text", "text": ""}},
+                      {"type": "content_block_delta", "delta": {"type": "text_delta", "text": text}})
+            for call in calls or []:
+                fn = call.get("function") or {}
+                block({"type": "content_block_start", "content_block": {
+                          "type": "tool_use", "id": call.get("id", ""), "name": fn.get("name", ""), "input": {}}},
+                      {"type": "content_block_delta", "delta": {
+                          "type": "input_json_delta", "partial_json": fn.get("arguments") or "{}"}})
+            if stop_ev is not None:
+                d = dict(stop_ev.get("delta") or {})
+                if d.get("stop_reason") == "tool_use" and not calls:
+                    d["stop_reason"] = "end_turn"   # a rewriter answered them
+                stop_ev = dict(stop_ev, delta=d)
+                events.append((ac._sse("message_delta", stop_ev), stop_ev))
+            return events
+
         def through_window(raw: str, ev) -> list:
             """The events to send for one event from Anthropic."""
             if not isinstance(ev, dict):
@@ -1628,37 +1720,34 @@ class ProxyHandler:
             kind, idx = ev.get("type"), ev.get("index", 0)
             if kind == "content_block_start":
                 block = ev.get("content_block") or {}
+                if block.get("type") == "tool_use":
+                    tools[idx] = {"start": (raw, ev), "json": ""}
+                    return []
+                out_index[idx] = next_out[0]
+                next_out[0] += 1
                 if block.get("type") == "text":
                     texts[idx] = ReplyWindow(rewrite, window)
                     if block.get("text"):
                         out = texts[idx].feed(block["text"])
                         ev = dict(ev, content_block=dict(block, text=out))
                         raw = ac._sse("content_block_start", ev)
-                elif block.get("type") == "tool_use":
-                    tools[idx] = {"start": (raw, ev), "json": ""}
-                    return []
             elif kind == "content_block_delta":
                 d = ev.get("delta") or {}
+                if idx in tools:
+                    if d.get("type") == "input_json_delta":
+                        tools[idx]["json"] += d.get("partial_json", "")
+                    return []
                 if idx in texts and d.get("type") == "text_delta":
                     out = texts[idx].feed(d.get("text", ""))
-                    return [text_delta(idx, out)] if out else []
-                if idx in tools and d.get("type") == "input_json_delta":
-                    tools[idx]["json"] += d.get("partial_json", "")
-                    return []
+                    return [text_delta(out_index.get(idx, idx), out)] if out else []
             elif kind == "content_block_stop":
+                if idx in tools:
+                    return []
                 if idx in texts:
                     tail, _ = texts.pop(idx).finish()
-                    return ([text_delta(idx, tail)] if tail else []) + [(raw, ev)]
-                if idx in tools:
-                    held = tools.pop(idx)
-                    block = held["start"][1].get("content_block") or {}
-                    call = {"id": block.get("id", ""), "type": "function",
-                            "function": {"name": block.get("name", ""), "arguments": held["json"]}}
-                    _, calls = ReplyWindow(rewrite, window).finish([call])
-                    args = ((calls or [call])[0].get("function") or {}).get("arguments", "")
-                    ev_d = {"type": "content_block_delta", "index": idx,
-                            "delta": {"type": "input_json_delta", "partial_json": args}}
-                    return [held["start"]] + ([(ac._sse("content_block_delta", ev_d), ev_d)] if args else []) + [(raw, ev)]
+                    return ([text_delta(out_index.get(idx, idx), tail)] if tail else []) + [renumbered(raw, ev, idx)]
+            if kind in ("content_block_start", "content_block_delta", "content_block_stop"):
+                return [renumbered(raw, ev, idx)]
             return [(raw, ev)]
 
         def event(lines: list):
@@ -1694,11 +1783,20 @@ class ProxyHandler:
                             continue
                         raw, ev = event(lines)
                         lines = []
+                        if rewrite and tools and isinstance(ev, dict) and ev.get("type") == "message_delta":
+                            # the content is over: the held tool calls, rewritten (in a
+                            # thread, as a rewriter may ask the model again)
+                            for raw_out, ev_out in await asyncio.to_thread(release_tools, ev):
+                                yield sent(raw_out, ev_out)
+                            continue
                         for raw_out, ev_out in (through_window(raw, ev) if rewrite else [(raw, ev)]):
                             yield sent(raw_out, ev_out)
                     if lines:
                         raw, ev = event(lines)
                         for raw_out, ev_out in (through_window(raw, ev) if rewrite else [(raw, ev)]):
+                            yield sent(raw_out, ev_out)
+                    if rewrite and tools:   # the stream ended without a message_delta
+                        for raw_out, ev_out in await asyncio.to_thread(release_tools, None):
                             yield sent(raw_out, ev_out)
                 except httpx.TransportError as e:
                     self._note_upstream(target, False, error=self._describe_transport_error(e, UPSTREAM_TIMEOUT.read))

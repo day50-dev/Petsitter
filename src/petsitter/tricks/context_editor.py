@@ -169,6 +169,15 @@ class ContextEditorTrick(Trick):
     __category__ = "Context & Prompts"
     needs_window = 0     # reads the reply once it's sent, to show it; never changes it
     ui_page = "context_editor.html"
+    config_fields = [
+        {"key": "compaction", "label": "Compaction", "type": "choice",
+         "options": ["off", *TECHNIQUES], "default": "off",
+         "description": "A published technique run on every request. observation_masking: tool results "
+                        "older than the last 10 become a one-line note. clear_tool_uses_20250919: over 100k "
+                        "tokens, tool results older than the last 3 are cleared. only_n_most_recent_images: "
+                        "keeps the last 3 images inside tool results (screenshots a tool took), not images "
+                        "pasted into messages. Also set from the Live tab, where each links to its source."},
+    ]
 
     def __init__(self):
         self.compaction = "off"   # a key of petsitter.compaction.TECHNIQUES, or "off"

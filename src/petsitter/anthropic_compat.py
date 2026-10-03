@@ -224,16 +224,43 @@ def response_to_assistant_message(response: dict) -> dict:
                                "content": "\n".join(text_parts) if text_parts else None}
     if tool_calls:
         message["tool_calls"] = tool_calls
+    # Kept for to_anthropic_payload, as on the way in: a tool-using turn sent
+    # back to Anthropic (call_upstream_sync) needs its thinking blocks.
+    thinking = [b for b in response.get("content") or []
+                if isinstance(b, dict) and b.get("type") in ("thinking", "redacted_thinking")]
+    if thinking:
+        message["_thinking_blocks"] = thinking
     return message
+
+
+def _calls_of(response: dict) -> list:
+    return [(b.get("id"), b.get("name")) for b in response.get("content") or []
+            if isinstance(b, dict) and b.get("type") == "tool_use"]
 
 
 def apply_assistant_message(response: dict, message: dict) -> dict:
     """Write an edited reply back into the Anthropic response.
 
-    Only the text is written back. A trick that rewrites prose is the common
-    case; one that invents tool calls would need to speak Anthropic's schema
-    itself, and silently reshaping them here would be worse than leaving them.
+    Usually only the text is written back: a trick that rewrites prose is the
+    common case. When a trick changed the tool calls (answered the model's own
+    call to a petsitter tool and let it carry on, see call_upstream_sync), the
+    reply is rebuilt from the message: its thinking, text and tool calls.
     """
+    calls = [(c.get("id"), (c.get("function") or {}).get("name")) for c in message.get("tool_calls") or []]
+    if calls != _calls_of(response):
+        blocks: list[dict] = list(message.get("_thinking_blocks") or [])
+        if message.get("content"):
+            blocks.append({"type": "text", "text": message["content"]})
+        for call in message.get("tool_calls") or []:
+            fn = call.get("function") or {}
+            try:
+                args = json.loads(fn.get("arguments") or "{}")
+            except (ValueError, TypeError):
+                args = {}
+            blocks.append({"type": "tool_use", "id": call.get("id", ""), "name": fn.get("name", ""), "input": args})
+        response["content"] = blocks
+        response["stop_reason"] = "tool_use" if calls else "end_turn"
+        return response
     text = message.get("content")
     if text is None:
         return response

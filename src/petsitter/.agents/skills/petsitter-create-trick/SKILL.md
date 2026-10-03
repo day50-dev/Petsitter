@@ -112,7 +112,8 @@ The class is instantiated with no arguments, so any `__init__` needs defaults
 - `info` gets the capabilities accumulated so far. Add keys, never remove them.
 - Hooks are synchronous: make follow-up model calls with `callmodel_sync()`
   (it returns the context with the new reply appended, and takes `tools=`).
-  `callmodel()` is async and can't be awaited from a hook.
+  `callmodel()` is async and can't be awaited from a hook. To ask the model
+  this request is going to (not the default one), use `call_upstream_sync()`.
 - Keep hooks fast. They run on every request, often on long conversations.
 - Never `report()` or `publish()` something you wouldn't show on screen
   (secrets, full prompts of other people).
@@ -176,3 +177,5 @@ when the trick asks for one that isn't there.
   - `context_editor.py`: rewrites the history in `pre_hook` on every request.
   - `politeify.py`: an optional model (`optional_models`).
   - `exportit.py`: `transformed_messages()` in a prompt keyword handler.
+  - `expose_petsitter.py`: answers its own tool calls and lets the model carry
+    on (`call_upstream_sync`); changes other extensions' settings.

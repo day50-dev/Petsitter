@@ -34,7 +34,8 @@ class <Name>Trick(Trick):
     # optional_models = ["<used if set up, else default>"]
 
     # Optional: settings. The dashboard shows a form; values arrive as
-    # attributes on self. Types: "text", "number", "boolean", "path".
+    # attributes on self. Types: "text", "number", "boolean", "path", and
+    # "choice" (with "options": [...]).
     # Read them as getattr(self, "limit", None) or 3: unset or cleared ("").
     # config_fields = [
     #     {"key": "limit", "label": "Limit", "type": "number", "default": 3,

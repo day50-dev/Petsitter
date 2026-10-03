@@ -59,6 +59,7 @@ Available Tricks list instead.
 
  * [Swap Harness](#swap-harness) - Browse and swap system prompts from AI tool repositories
  * [Self-Improver](#self-improver) - Runtime agent that can add, modify, and list tricks
+ * [Expose Petsitter](#expose-petsitter) - Tells the model petsitter is there, and lets it see (and if you allow it, change) the extensions
 
 ### Utility
 
@@ -465,6 +466,20 @@ Example usage:
 ```
 User: (petsitter: add a trick that logs every request to a file)
 Assistant: Creates tricks/request_logger.py and explains how to load it
+```
+
+### Expose Petsitter
+
+[tricks/expose_petsitter.py](../src/petsitter/tricks/expose_petsitter.py)
+
+Petsitter is invisible to the model, and models were never trained on a proxy rewriting their conversation, so ask one about it and it denies there is one. This extension says so at the end of the system prompt and gives the model a tool, `__96178c403fd9__get_petsitter_configuration`: every extension in the channel, what it's for, whether it's on, and its settings.
+
+Turn on **Let the model change settings** and it also gets `__96178c403fd9__set_petsitter_configuration`, to change a setting or turn an extension on or off. A change the model makes is saved like yours and stays until you change it; the extension's page says "changed by qwen3 in Open WebUI, 2h ago" next to it, and your own change clears that. The model can't change this extension's own settings.
+
+Petsitter answers these tool calls itself and asks the same model again (up to 5 times); your tool sees the text the model wrote before the call, then its answer, never the call. The reply still streams; only tool calls are held to the end. Put it first in the channel. The tool names start with petsitter's reserved prefix, `__96178c403fd9__` (the same one Secrets Protector's stand-ins use), so they can't collide with your tool's.
+
+```bash
+pet add mine expose_petsitter
 ```
 
 ### Export It

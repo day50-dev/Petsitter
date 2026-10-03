@@ -231,6 +231,37 @@ def callmodel_sync(
     return messages + [assistant_message]
 
 
+# petsitter's reserved prefix. Anything that starts with it was put there by
+# petsitter, not by the user, their tool or the model: a secret's stand-in,
+# the name of a tool petsitter answers itself. One fixed string, so something
+# that comes back later (a stand-in the model echoes turns afterwards) is still
+# recognisably petsitter's, and a trick can sniff for it.
+_PREFIX = "__96178c403fd9__"
+
+
+def get_prefix() -> str:
+    """petsitter's reserved prefix (see _PREFIX). Start anything petsitter
+    puts into a conversation with it: stand-ins, tool names."""
+    return _PREFIX
+
+
+def call_upstream_sync(messages: list, tools: list | None = None) -> dict:
+    """Ask the model this request is going to, again, and return its reply
+    (an OpenAI-shaped assistant message).
+
+    Unlike ``callmodel_sync``, which always uses the default model, this goes
+    where the current request goes: the same provider, model, key and API
+    (a ``/use/`` upstream, Anthropic for Claude Code). For a trick that answers
+    some of the model's tool calls itself and then lets it carry on. Outside a
+    request it falls back to the default model.
+    """
+    from petsitter.observability import request_meta
+    resend = request_meta().get("resend")
+    if resend is not None:
+        return resend(messages, tools)
+    return callmodel_sync(messages, tools=tools)[-1]
+
+
 def find_prompt_keyword_patterns(text: str) -> list[dict]:
     """Find every prompt keyword pattern in text, with its span.
 

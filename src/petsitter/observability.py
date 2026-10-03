@@ -259,19 +259,6 @@ def set_client_addr(value: str):
     return _client_addr.set(value or "")
 
 
-# The request line as it arrived ("POST /use/anthropic.com/v1/messages"), before
-# petsitter rewrites the path, for the Traffic Logger's Live tab.
-_request_line: contextvars.ContextVar[str] = contextvars.ContextVar("petsitter_request_line", default="")
-
-
-def set_request_line(value: str):
-    return _request_line.set(value or "")
-
-
-def current_request_line() -> str:
-    return _request_line.get()
-
-
 def current_client_addr() -> str:
     return _client_addr.get()
 

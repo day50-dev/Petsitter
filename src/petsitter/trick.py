@@ -14,6 +14,8 @@ from typing import Any
 
 import httpx
 
+from petsitter import raw as raw_http
+
 from petsitter.observability import current_request_id, get_logger, request_tag
 
 
@@ -219,7 +221,7 @@ def callmodel_sync(
         "%scallmodel_sync: %s model=%r messages=%d",
         request_tag(), chat_completions_url(model_url), model_name or "default", len(messages),
     )
-    with httpx.Client() as client:
+    with raw_http.sync_client() as client:
         response = client.post(
             chat_completions_url(model_url),
             json=payload,
@@ -259,6 +261,13 @@ def reserved(context: str, ident: str | None = None) -> str:
 def reserved_pattern(context: str) -> "re.Pattern":
     """Matches the reserved names for one context (see reserved())."""
     return re.compile(re.escape(f"{_PREFIX}-{context}-") + _UUID)
+
+
+def get_raw() -> dict | None:
+    """The current request's raw HTTP: the client's request as it arrived,
+    and every call petsitter made to a provider for it, bodies included. See
+    petsitter.raw for the shape. None outside a request."""
+    return raw_http.get_raw()
 
 
 def call_upstream_sync(messages: list, tools: list | None = None) -> dict:
@@ -759,7 +768,7 @@ async def callmodel(
         "%scallmodel: %s model=%r messages=%d",
         request_tag(), chat_completions_url(model_url), model_name or "default", len(messages),
     )
-    async with httpx.AsyncClient() as client:
+    async with raw_http.async_client() as client:
         response = await client.post(
             chat_completions_url(model_url),
             json=payload,

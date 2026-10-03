@@ -21,10 +21,13 @@ before.jsonl  {"timestamp": "...", "event": "request",  "stage": "before", "requ
 after.jsonl   {"timestamp": "...", "event": "response", "stage": "after",  "request_id": "ab12cd34", "messages": [...], "answer": {"role": "assistant", "content": "hi!"}}
 ```
 
-Its **Live** tab shows the last 40 requests without the payloads: the request
-line, where it came from, the HTTP headers, and the parameters it asked for (stream, model,
-temperature, max_tokens, tool_choice...), the tools offered, how many messages
-and how big, and what came back. The files have everything else.
+Its **Live** tab shows the last 40 requests and responses with everything but
+the content: the request line as it arrived, where it came from, every header,
+every parameter (stream, model, temperature, max_tokens, tool_choice...), the
+tools' names; then each call petsitter made to the provider: its URL, status,
+timing, the headers sent and received, and the response without its content
+(id, model, finish or stop reason, usage, or the error). Each header block has
+a copy button. The files have the content.
 
 `request_id` ties the two together, so each file can be read on its own or the
 two joined, which shows exactly what the extensions changed:
@@ -55,8 +58,10 @@ everything after it, so put the logger first to be sure of a record.
 - Appends are serialized with a module-level lock. Unserializable values are
   written via `str()`; write errors are swallowed so logging never breaks a
   request.
-- The Live tab's summaries are kept in memory (the last 40), and a restart
-  drops them.
+- The Live tab reads `get_raw()`, petsitter's record of the raw HTTP at both
+  edges, and hears about each provider call as it finishes (a `raw_upstream`
+  pipeline event), so a failed call shows up too. Its summaries are kept in
+  memory (the last 40), and a restart drops them.
 """
 
 import json
@@ -67,12 +72,80 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from petsitter.observability import (LOG_DIR, current_client_addr, current_request_headers,
-                                     current_request_line, current_trickset, current_user_agent,
-                                     request_meta)
-from petsitter.trick import Trick
+                                     current_trickset, current_user_agent, request_meta, subscribe,
+                                     unsubscribe)
+from petsitter.trick import Trick, get_raw
 
 DEFAULT_LOGGER_PATH = LOG_DIR / "traffic"
 KEEP = 40                      # requests on the Live tab
+# The content of a request: the log files have it, the Live tab doesn't.
+_CONTENT = ("messages", "system", "input", "prompt", "contents", "tools")
+
+
+def _json(body: bytes):
+    try:
+        return json.loads(body.decode("utf-8", "replace")) if body else None
+    except ValueError:
+        return None
+
+
+def _response_meta(body: bytes):
+    """Everything in a provider's response but the content: id, model, usage,
+    finish or stop reason, an error. Streams are read event by event."""
+    obj = _json(body)
+    if isinstance(obj, dict):
+        if isinstance(obj.get("choices"), list):        # a chat completion
+            return {**{k: v for k, v in obj.items() if k != "choices"},
+                    "choices": [{k: v for k, v in c.items() if k not in ("message", "delta")}
+                                for c in obj["choices"] if isinstance(c, dict)]}
+        if obj.get("type") == "message":                # an Anthropic message
+            return {k: v for k, v in obj.items() if k != "content"}
+        return obj                                      # an error, or something else: all of it
+    text = body.decode("utf-8", "replace")
+    if "data:" not in text:
+        return {"bytes": len(body)} if body else {}
+    out: dict = {"events": 0}
+    for line in text.splitlines():
+        if not line.startswith("data:"):
+            continue
+        data = line[5:].strip()
+        if data == "[DONE]":
+            continue
+        try:
+            ev = json.loads(data)
+        except ValueError:
+            continue
+        if not isinstance(ev, dict):
+            continue
+        out["events"] += 1
+        if isinstance(ev.get("choices"), list):         # OpenAI chunks
+            for k, v in ev.items():
+                if k not in ("choices", "usage") and k not in out:
+                    out[k] = v
+            for c in ev["choices"]:
+                if isinstance(c, dict) and c.get("finish_reason"):
+                    out["finish_reason"] = c["finish_reason"]
+            if ev.get("usage"):
+                out["usage"] = ev["usage"]
+        elif ev.get("type") == "message_start":         # Anthropic events
+            out.update({k: v for k, v in (ev.get("message") or {}).items() if k != "content"})
+        elif ev.get("type") == "message_delta":
+            out.update(ev.get("delta") or {})
+            if ev.get("usage"):
+                out["usage"] = {**(out.get("usage") or {}), **ev["usage"]}
+        elif ev.get("type") == "error" or "error" in ev:
+            out["error"] = ev.get("error", ev)
+    return out
+
+
+def _exchange(ex: dict) -> dict:
+    """One call to the provider, for the Live tab: everything but the content."""
+    return {"method": ex.get("method"), "url": ex.get("url"), "status": ex.get("status"),
+            "ms": ex.get("ms"), "first_byte_ms": ex.get("first_byte_ms"), "error": ex.get("error"),
+            "request_headers": ex.get("request_headers") or [], "headers": ex.get("headers") or [],
+            "response": _response_meta(ex.get("body") or b"")}
+
+
 def _size(messages) -> int:
     return len(json.dumps(messages, default=str)) if messages else 0
 
@@ -157,21 +230,48 @@ class LoggerTrick(Trick):
 
     # -- the Live tab --------------------------------------------------------
 
+    def startup(self) -> None:
+        # Hear about each call to the provider as it finishes, failed ones
+        # included (no post_hook runs for those).
+        subscribe(self._on_pipeline_event)
+
+    def shutdown(self) -> None:
+        unsubscribe(self._on_pipeline_event)
+
+    def _on_pipeline_event(self, event: dict) -> None:
+        if event.get("stage") != "raw_upstream":
+            return
+        raw = get_raw()
+        if raw is None:
+            return
+        upstream = [_exchange(ex) for ex in raw["upstream"] if ex.get("done")]
+        with self._lock:
+            entry = next((e for e in reversed(self._recent) if e["id"] == event.get("request_id")), None)
+            if entry is None:
+                return
+            entry["upstream"] = upstream
+        self.publish({"event": "traffic", "id": entry["id"]})
+
     def _remember(self, context: list, params: dict, meta: dict, tools: list) -> None:
         try:
             ts = current_trickset()
-            raw = meta.get("request_params")
-            shown = raw if isinstance(raw, dict) else {k: v for k, v in params.items() if k not in ("messages", "tools")}
+            raw = get_raw()
+            body = _json(raw["request"]["body"]) if raw else None
+            if isinstance(body, dict):
+                shown = {k: v for k, v in body.items() if k not in _CONTENT}
+                tools = body.get("tools") or tools
+            else:
+                shown = {k: v for k, v in params.items() if k not in _CONTENT}
             ua = current_user_agent()
             entry = {
                 "id": self.request_id, "at": time.time(),
-                "line": current_request_line(), "from": current_client_addr(),
+                "line": raw["request"]["line"] if raw else "", "from": current_client_addr(),
                 "program": meta.get("x_title") or (ua.split("/")[0].split(" ")[0] if ua else ""),
                 "api": meta.get("api") or "openai",
                 "channel": ("Default" if ts.name == "_default" else ts.name) if ts is not None else "",
                 "model": meta.get("model") or params.get("model", ""),
                 "stream": bool(meta.get("stream", params.get("stream", False))),
-                "headers": [[k, v] for k, v in current_request_headers()],
+                "headers": raw["request"]["headers"] if raw else [[k, v] for k, v in current_request_headers()],
                 "params": dict(shown),
                 "tools": [(t.get("function") or {}).get("name") or t.get("name", "") for t in tools if isinstance(t, dict)],
                 "messages": len(context), "chars": _size(context),

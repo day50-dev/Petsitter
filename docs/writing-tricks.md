@@ -237,6 +237,14 @@ Claude Code) and returns the reply as an assistant message. It's for a trick
 that answers some of the model's tool calls itself and then lets it carry on,
 as Expose Petsitter does. Outside a request it falls back to the default model.
 
+`get_raw()` returns the current request's raw HTTP, recorded at petsitter's two
+edges: the client's request as it arrived (`line`, `headers`, `body`), and each
+call made to a provider for it (`method`, `url`, `request_headers`,
+`request_body`, `status`, `headers`, `first_byte_ms`, `ms`, `error`, `body`,
+streams included). Bodies are bytes. A `raw_upstream` pipeline event (see
+`subscribe`) fires as each provider call finishes, failed ones too. The Traffic
+Logger is built on it.
+
 Anything petsitter itself puts into a conversation starts with its reserved
 id, `get_prefix()` (`gRefWg2D7zO8`), in the form `<id>-<context>-<uuid>`:
 `reserved("redacted")` gives `gRefWg2D7zO8-redacted-c74a3c40-...` (Secrets

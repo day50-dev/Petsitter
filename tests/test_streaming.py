@@ -141,7 +141,7 @@ def fake_anthropic(monkeypatch):
 
     real = httpx.AsyncClient
     monkeypatch.setattr(proxy_mod.httpx, "AsyncClient",
-                        lambda *a, **kw: real(*a, transport=httpx.MockTransport(handle), **kw))
+                        lambda *a, **kw: real(*a, **{**kw, "transport": httpx.MockTransport(handle)}))
     return seen
 
 
@@ -231,7 +231,7 @@ def test_messages_stream_through_a_window(monkeypatch):
 
     real = httpx.AsyncClient
     monkeypatch.setattr(proxy_mod.httpx, "AsyncClient",
-                        lambda *a, **kw: real(*a, transport=httpx.MockTransport(handle), **kw))
+                        lambda *a, **kw: real(*a, **{**kw, "transport": httpx.MockTransport(handle)}))
     watcher = Watcher()
     handler = ProxyHandler(model_url="http://unused", model_name="m", tricks=[Swapper(), watcher])
     out = _collect(handler, PAYLOAD)
@@ -267,7 +267,7 @@ def test_chat_stream_through_a_window(monkeypatch):
 
     real = httpx.AsyncClient
     monkeypatch.setattr(proxy_mod.httpx, "AsyncClient",
-                        lambda *a, **kw: real(*a, transport=httpx.MockTransport(handle), **kw))
+                        lambda *a, **kw: real(*a, **{**kw, "transport": httpx.MockTransport(handle)}))
     watcher = Watcher()
     handler = ProxyHandler(model_url="http://upstream", model_name="m", tricks=[Swapper(), watcher])
 
@@ -301,7 +301,7 @@ def _bare_root_upstream(monkeypatch, seen):
                                          "message": {"role": "assistant", "content": "hi"}}]})
     real = httpx.AsyncClient
     monkeypatch.setattr(proxy_mod.httpx, "AsyncClient",
-                        lambda *a, **kw: real(*a, transport=httpx.MockTransport(handle), **kw))
+                        lambda *a, **kw: real(*a, **{**kw, "transport": httpx.MockTransport(handle)}))
 
 
 @pytest.mark.parametrize("stream", [False, True])
@@ -362,8 +362,8 @@ def test_chat_stream_window_keeps_parallel_calls_apart(monkeypatch):
 
     real = httpx.AsyncClient
     monkeypatch.setattr(proxy_mod.httpx, "AsyncClient", lambda *a, **kw: real(
-        *a, transport=httpx.MockTransport(lambda r: httpx.Response(200, text=body,
-                                          headers={"content-type": "text/event-stream"})), **kw))
+        *a, **{**kw, "transport": httpx.MockTransport(lambda r: httpx.Response(200, text=body,
+                                                  headers={"content-type": "text/event-stream"}))}))
     handler = ProxyHandler(model_url="http://upstream", model_name="m", tricks=[Swapper()])
 
     async def go():

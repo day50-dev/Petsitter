@@ -167,31 +167,66 @@ def test_keyword_report_not_doubled_when_trick_reports():
     assert [e["message"] for _, e in t.live_feed.since(0)] == ["did my own thing"]
 
 
-def test_traffic_logger_live_tab_has_everything_but_the_content(tmp_path):
-    from petsitter.observability import (reset_request_meta, set_request_headers, set_request_line,
-                                         start_request_meta)
-    from petsitter.tricks.logger import LoggerTrick
-    t = LoggerTrick(path=str(tmp_path))
-    ctx = [{"role": "user", "content": "the secret plan"}]
-    params = {"model": "m", "stream": True, "temperature": 0.2, "max_tokens": 50, "messages": ctx,
-              "tools": [{"type": "function", "function": {"name": "web_search"}}]}
-    set_request_line("POST /use/openai.com/v1/chat/completions")
-    set_request_headers([("authorization", "Bearer sk-real-key-1234"), ("x-title", "Open WebUI")])
-    token = start_request_meta(request_id="r1", payload=params, x_title="Open WebUI", tools=params["tools"],
-                               model="m", stream=True)
-    try:
-        t.pre_hook(ctx, params)
-        t.post_hook(ctx + [{"role": "assistant", "content": "ok"}])
-    finally:
-        reset_request_meta(token)
-    [r] = t.ui_action({"action": "requests"})["requests"]
-    assert r["line"] == "POST /use/openai.com/v1/chat/completions"
+def _logged(tmp_path, monkeypatch, upstream_handler, body, headers, path="/v1/chat/completions"):
+    """One request through a real server with the Traffic Logger installed
+    (writing to tmp_path), the provider faked; returns the Live tab's entry."""
+    import httpx
+    from starlette.testclient import TestClient
+    from petsitter import raw as raw_http, server
+    monkeypatch.setattr(server, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(server, "CONFIG_PATH", tmp_path / "config.json")
+    monkeypatch.setattr(server, "TRICKSETS_DIR", tmp_path / "tricksets")
+    monkeypatch.setattr("petsitter.proxy._tricksets_dir", lambda: tmp_path / "tricksets")
+    real = httpx.AsyncClient
+    # the provider is faked under the recording transport, so it's recorded like a real one
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **kw: real(
+        *a, **{**kw, "transport": raw_http._AsyncTap(httpx.MockTransport(upstream_handler))}))
+    client = TestClient(server.create_app(model_url="http://upstream.test/v1", model_name="m", api_key="",
+                                          trick_paths=["tricks/logger.py"]))
+    tid = next(t["id"] for t in client.get("/api/tricks").json() if t["name"] == "LoggerTrick")
+    client.put("/api/tricksets/_default", json={"tricks": [{"id": tid, "config": {"path": str(tmp_path / "logs")}}]})
+    client.post(path, json=body, headers=headers)
+    [entry] = client.post(f"/api/tricks/ui/{tid}/action", json={"action": "requests"}).json()["requests"]
+    return entry
+
+
+def test_traffic_logger_shows_request_and_response_but_no_content(tmp_path, monkeypatch):
+    import httpx
+
+    def provider(request):
+        return httpx.Response(200, headers={"x-request-id": "req_42", "openai-processing-ms": "120"}, json={
+            "id": "chatcmpl-9", "model": "m-2026", "usage": {"prompt_tokens": 11, "completion_tokens": 3},
+            "choices": [{"index": 0, "finish_reason": "stop",
+                         "message": {"role": "assistant", "content": "the secret reply"}}]})
+    body = {"model": "m", "temperature": 0.2, "max_tokens": 50, "tool_choice": "auto",
+            "tools": [{"type": "function", "function": {"name": "web_search"}}],
+            "messages": [{"role": "user", "content": "the secret plan"}]}
+    r = _logged(tmp_path, monkeypatch, provider, body,
+                {"Authorization": "Bearer sk-real-key-1234", "X-Title": "Open WebUI"})
+    assert r["line"] == "POST /v1/chat/completions"
     assert ["authorization", "Bearer sk-real-key-1234"] in r["headers"]       # as received, not masked
-    assert r["params"] == {"model": "m", "stream": True, "temperature": 0.2, "max_tokens": 50}
-    assert r["tools"] == ["web_search"] and r["messages"] == 1
-    assert "the secret plan" not in json.dumps(r)                             # no content: that's the disk logs
-    assert r["reply"]["chars"] == 2 and r["reply"]["tool_calls"] == []
-    assert "the secret plan" in (tmp_path / "before.jsonl").read_text()     # which still have it
+    assert r["params"] == {"model": "m", "temperature": 0.2, "max_tokens": 50, "tool_choice": "auto"}
+    assert r["tools"] == ["web_search"]
+    [up] = r["upstream"]
+    assert up["status"] == 200 and up["url"] == "http://upstream.test/v1/chat/completions"
+    assert ["x-request-id", "req_42"] in up["headers"]
+    assert up["response"]["usage"] == {"prompt_tokens": 11, "completion_tokens": 3}
+    assert up["response"]["choices"] == [{"index": 0, "finish_reason": "stop"}]
+    text = json.dumps(r)
+    assert "the secret plan" not in text and "the secret reply" not in text   # no content: that's the disk logs
+    assert "the secret plan" in (tmp_path / "logs" / "before.jsonl").read_text()
+
+
+def test_traffic_logger_shows_a_failed_response(tmp_path, monkeypatch):
+    import httpx
+    r = _logged(tmp_path, monkeypatch,
+                lambda request: httpx.Response(429, headers={"retry-after": "7"},
+                                               json={"error": {"message": "slow down", "type": "rate_limit"}}),
+                {"model": "m", "messages": [{"role": "user", "content": "hi"}]}, {})
+    statuses = [u["status"] for u in r["upstream"]]
+    assert statuses and set(statuses) == {429}                               # retried, every attempt shown
+    assert r["upstream"][-1]["response"]["error"]["message"] == "slow down"
+    assert ["retry-after", "7"] in r["upstream"][-1]["headers"]
 
 
 def test_traffic_logger_keeps_the_last_40(tmp_path):

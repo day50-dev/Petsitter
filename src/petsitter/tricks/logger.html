@@ -38,12 +38,17 @@
   .tag { font-size: 10.5px; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 6px; }
   .tag.stream { color: var(--ok); border-color: #2a5a3a; }
   .tag.pending { color: var(--warn); border-color: #5a4a2a; }
+  .tag.bad { color: #ff7a7a; border-color: #6a2a2a; }
   .detail { overflow-y: auto; padding: 14px 20px 40px; }
   .empty { color: var(--dim); padding: 40px 20px; max-width: 560px; line-height: 1.6; }
   .empty b { color: var(--text); }
   h2 { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--dim);
        margin: 20px 0 6px; }
   h2:first-child { margin-top: 0; }
+  h2 .copy { margin-left: 10px; background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 4px;
+             font: inherit; font-size: 10.5px; letter-spacing: .04em; padding: 1px 8px; cursor: pointer; text-transform: none; }
+  h2 .copy:hover { border-color: var(--title); color: var(--text); }
+  h2 .copy.done { color: var(--ok); border-color: #2a5a3a; }
   table { border-collapse: collapse; width: 100%; font-size: 13px; }
   td { padding: 3px 10px 3px 0; vertical-align: top; border-bottom: 1px solid #141a26; }
   td.k { color: var(--muted); white-space: nowrap; width: 1%; padding-right: 18px; }
@@ -67,7 +72,7 @@
 <header>
   <span class="dot" id="dot"></span>
   <h1>Traffic Logger</h1>
-  <span class="sub" id="sub">The last 40 requests. Full payloads are in the log files.</span>
+  <span class="sub" id="sub">The last 40 requests and responses, without the content, which is in the log files.</span>
   <button id="clear">clear</button>
 </header>
 <div class="main">
@@ -92,7 +97,7 @@ async function load() {
   const d = await act({action: "requests"});
   requests = d.requests || [];
   folder = d.folder || "";
-  if (folder) document.getElementById("sub").innerHTML = `The last 40 requests. Full payloads are in <code>${esc(folder)}</code>.`;
+  if (folder) document.getElementById("sub").innerHTML = `The last 40 requests and responses, without the content, which is in <code>${esc(folder)}</code>.`;
   if (!requests.find(r => r.id === selected)) selected = requests.length ? requests[0].id : null;
   renderList();
   renderDetail();
@@ -106,8 +111,15 @@ function renderList() {
     `<div class="tags">${r.model ? `<span class="tag">${esc(r.model)}</span>` : ""}` +
     `${r.stream ? '<span class="tag stream">stream</span>' : '<span class="tag">no stream</span>'}` +
     `<span class="tag">${esc(r.api)}</span>` +
-    `${r.reply ? `<span class="tag">${r.reply.ms} ms</span>` : '<span class="tag pending">waiting</span>'}</div></div>`).join("");
+    `${statusTag(r)}${r.reply ? `<span class="tag">${r.reply.ms} ms</span>` : ""}</div></div>`).join("");
   document.querySelectorAll(".req").forEach(el => el.onclick = () => { selected = el.dataset.id; renderList(); renderDetail(); });
+}
+
+function statusTag(r) {
+  const last = (r.upstream || []).slice(-1)[0];
+  if (!last) return r.reply ? "" : '<span class="tag pending">waiting</span>';
+  const bad = last.error || !last.status || last.status >= 400;
+  return `<span class="tag${bad ? " bad" : ""}">${last.status ? "HTTP " + last.status : "no response"}</span>`;
 }
 
 function rows(pairs) {
@@ -125,18 +137,51 @@ function renderDetail() {
     return;
   }
   const reply = r.reply;
+  copyTexts = [];
   el.innerHTML =
     `<h2>Request</h2>` + rows([
       ["request", r.line], ["id", r.id], ["from", r.from], ["program", r.program], ["channel", r.channel],
       ["api", r.api], ["model", r.model], ["stream", String(r.stream)], ["time", new Date(r.at * 1000).toLocaleString()]]) +
-    `<h2>Headers</h2>` + rows(r.headers || []) +
+    `<h2>Headers${copyButton([r.line, ...lines(r.headers)])}</h2>` + rows(r.headers || []) +
     `<h2>Parameters</h2>` + rows(Object.entries(r.params || {})) +
     `<h2>Tools offered (${(r.tools || []).length})</h2>` +
     ((r.tools || []).length ? `<div class="chips">${r.tools.map(t => `<span class="chip">${esc(t)}</span>`).join("")}</div>` : '<div class="none">none</div>') +
     `<h2>Messages</h2>` + rows([["count", String(r.messages)], ["size", size(r.chars)]]) +
-    `<h2>Reply</h2>` + (reply ? rows([
+    (r.upstream || []).map((u, i, all) => {
+      const n = all.length > 1 ? ` ${i + 1} of ${all.length}` : "";
+      return `<h2>Upstream${n}</h2>` + rows([
+          ["request", `${u.method} ${u.url}`],
+          ["status", u.status === null || u.status === undefined ? "no response" : String(u.status)],
+          ...(u.first_byte_ms !== undefined && u.first_byte_ms !== null ? [["first byte", u.first_byte_ms + " ms"]] : []),
+          ["took", u.ms + " ms"], ...(u.error ? [["error", u.error]] : [])]) +
+        `<h2>Headers sent${copyButton([`${u.method} ${u.url}`, ...lines(u.request_headers)])}</h2>` + rows(u.request_headers || []) +
+        `<h2>Response headers${copyButton([`HTTP ${u.status ?? ""}`, ...lines(u.headers)])}</h2>` + rows(u.headers || []) +
+        `<h2>Response, without the content</h2>` + rows(Object.entries(u.response || {}));
+    }).join("") +
+    `<h2>Reply to your tool</h2>` + (reply ? rows([
       ["took", reply.ms + " ms"], ["size", size(reply.chars)],
       ["tool calls", (reply.tool_calls || []).join(", ") || "none"]]) : '<div class="none">waiting</div>');
+  el.querySelectorAll("button.copy").forEach(b => b.onclick = () => copy(b, copyTexts[+b.dataset.copy]));
+}
+
+// Headers as an HTTP message would show them, for pasting anywhere.
+let copyTexts = [];
+function lines(headers) { return (headers || []).map(([k, v]) => `${k}: ${v}`); }
+function copyButton(textLines) {
+  copyTexts.push(textLines.join("\n"));
+  return `<button class="copy" data-copy="${copyTexts.length - 1}">copy to clipboard</button>`;
+}
+
+async function copy(btn, text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (_) {
+    // the page may be framed without clipboard access: select and copy instead
+    const ta = Object.assign(document.createElement("textarea"), {value: text});
+    document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove();
+  }
+  btn.textContent = "copied"; btn.classList.add("done");
+  setTimeout(() => { btn.textContent = "copy to clipboard"; btn.classList.remove("done"); }, 1500);
 }
 
 document.getElementById("clear").onclick = async () => { await act({action: "clear"}); selected = null; load(); };

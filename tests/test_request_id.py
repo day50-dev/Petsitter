@@ -43,7 +43,7 @@ def test_tricks_and_the_traffic_logger_keep_the_arrival_id(tmp_path, monkeypatch
                               "message": {"role": "assistant", "content": "hi"}}]})
     real = httpx.AsyncClient
     monkeypatch.setattr(proxy_mod.httpx, "AsyncClient",
-                        lambda *a, **kw: real(*a, transport=httpx.MockTransport(handle), **kw))
+                        lambda *a, **kw: real(*a, **{**kw, "transport": httpx.MockTransport(handle)}))
 
     seen = []
 

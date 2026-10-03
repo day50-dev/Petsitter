@@ -19,6 +19,8 @@ from typing import Any
 
 import click
 import httpx
+
+from petsitter import raw as raw_http
 import uvicorn
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -335,7 +337,7 @@ async def _generic_proxy(target: str, request: Request, timeout: float = 120.0,
         for k, v in extra_headers.items():
             headers.setdefault(k, v)
     try:
-        async with httpx.AsyncClient() as client:
+        async with raw_http.async_client() as client:
             upstream_resp = await client.request(
                 request.method, target,
                 content=body or None,
@@ -504,6 +506,11 @@ def install_examples(force: bool = False) -> list[dict]:
 _API_PATH_RE = re.compile(r"^(?:/v1)*/(chat/completions|messages|models)/?$")
 
 
+def _is_proxied(path: str) -> bool:
+    """A request on its way to a model (not the dashboard or its API)."""
+    return path != "/" and not path.startswith(("/api/", "/static/", "/gui", "/docs", "/health", "/readconfig"))
+
+
 class _NormalizeV1Path:
     """ASGI layer at the edge of every request.
 
@@ -517,10 +524,9 @@ class _NormalizeV1Path:
     async def __call__(self, scope, receive, send):
         if scope.get("type") == "http":
             from petsitter.observability import (new_request_id, set_client_addr, set_request_headers,
-                                                 set_request_id, set_request_line, set_user_agent)
+                                                 set_request_id, set_user_agent)
             client = scope.get("client") or ("", 0)
-            query = (scope.get("query_string") or b"").decode("latin-1", "replace")
-            set_request_line(f"{scope.get('method', '')} {scope.get('path', '')}{'?' + query if query else ''}")
+            original_path = scope.get("path", "")
             set_client_addr(f"{client[0]}:{client[1]}" if client and client[0] else "")
             raw = scope.get("headers") or []
             ua = next((v for k, v in raw if k == b"user-agent"), b"")
@@ -542,6 +548,26 @@ class _NormalizeV1Path:
                 path = "/v1/" + m.group(1)
                 if path != scope["path"]:
                     scope = dict(scope, path=path, raw_path=path.encode())
+            if _is_proxied(scope.get("path", "")):
+                # The raw request for get_raw(): its line as it arrived (before
+                # the rewrites above), headers, and body, copied as it's read.
+                from petsitter import raw as raw_http
+                query = (scope.get("query_string") or b"").decode("latin-1", "replace")
+                line = f"{scope.get('method', '')} {original_path}{'?' + query if query else ''}"
+                token, record = raw_http.begin(
+                    line, [(k.decode("latin-1", "replace"), v.decode("latin-1", "replace")) for k, v in raw],
+                    f"{client[0]}:{client[1]}" if client and client[0] else "")
+
+                async def receive_copy():
+                    message = await receive()
+                    if message.get("type") == "http.request":
+                        raw_http.add_body(record, message.get("body", b""))
+                    return message
+                try:
+                    await self.app(scope, receive_copy, send)
+                finally:
+                    raw_http.end(token)
+                return
         await self.app(scope, receive, send)
 
 

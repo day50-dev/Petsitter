@@ -345,7 +345,7 @@ def test_messages_pipeline_sends_to_the_given_target(monkeypatch):
                                          "usage": {"input_tokens": 1, "output_tokens": 1}})
     real = httpx.AsyncClient
     monkeypatch.setattr(proxy_mod.httpx, "AsyncClient",
-                        lambda *a, **kw: real(*a, transport=httpx.MockTransport(handle), **kw))
+                        lambda *a, **kw: real(*a, **{**kw, "transport": httpx.MockTransport(handle)}))
     handler = ProxyHandler(model_url="http://unused", model_name="m")
     asyncio.run(handler.messages({"model": "c", "max_tokens": 5, "messages": [{"role": "user", "content": "x"}]},
                                  forward_headers={"x-api-key": "sk-1"},

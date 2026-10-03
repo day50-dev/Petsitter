@@ -12,6 +12,8 @@ from typing import Any
 
 import httpx
 
+from petsitter import raw as raw_http
+
 from petsitter.context import append_to_system_prompt
 from petsitter.discovered import DiscoveredPrograms
 from petsitter.observability import (
@@ -1066,7 +1068,7 @@ class ProxyHandler:
             else:
                 body.pop("tools", None)
                 body.pop("tool_choice", None)
-            with httpx.Client() as client:
+            with raw_http.sync_client() as client:
                 r = client.post(req.target, json=body, headers=req.upstream_headers, timeout=UPSTREAM_TIMEOUT)
             r.raise_for_status()
             msg = r.json()["choices"][0]["message"]
@@ -1098,7 +1100,7 @@ class ProxyHandler:
         for attempt in range(1, UPSTREAM_RETRY_ATTEMPTS + 1):
             attempts = attempt
             try:
-                async with httpx.AsyncClient() as client:
+                async with raw_http.async_client() as client:
                     response = await client.post(
                         target,
                         json=upstream_payload,
@@ -1127,7 +1129,7 @@ class ProxyHandler:
         other = self._other_chat_target(req) if response.status_code == 404 else None
         if other:
             try:
-                async with httpx.AsyncClient() as client:
+                async with raw_http.async_client() as client:
                     retry = await client.post(other[0], json=upstream_payload, headers=upstream_headers,
                                               timeout=UPSTREAM_TIMEOUT)
             except httpx.TransportError:
@@ -1312,7 +1314,7 @@ class ProxyHandler:
                     "created": template.get("created", int(time.time())), "model": template.get("model", ""),
                     "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}]}
 
-        async with httpx.AsyncClient(timeout=UPSTREAM_TIMEOUT) as client:
+        async with raw_http.async_client(timeout=UPSTREAM_TIMEOUT) as client:
             for attempt in range(1, UPSTREAM_RETRY_ATTEMPTS + 1):
                 resp_cm = client.stream("POST", target, json=body, headers=req.upstream_headers)
                 try:
@@ -1482,9 +1484,6 @@ class ProxyHandler:
             model=payload.get("model", ""),
             stream=bool(payload.get("stream", False)),
             api="anthropic",
-            # The caller's own parameters (max_tokens, thinking...): the shadow
-            # above keeps only what the pipeline works with.
-            request_params={k: v for k, v in payload.items() if k not in ("messages", "system", "tools")},
         )
         log = get_logger()
         model = payload.get("model", "")
@@ -1530,7 +1529,7 @@ class ProxyHandler:
         def resend(messages: list, tools: list | None = None) -> dict:
             body = ac.to_anthropic_payload(messages, tools or [], payload)
             body.pop("stream", None)
-            with httpx.Client() as client:
+            with raw_http.sync_client() as client:
                 r = client.post(req.target, json=body, headers=req.headers, timeout=UPSTREAM_TIMEOUT)
             r.raise_for_status()
             return ac.response_to_assistant_message(r.json())
@@ -1543,7 +1542,7 @@ class ProxyHandler:
         trace_event("upstream", url=target, model=req.body.get("model", ""))
         body = {k: v for k, v in req.body.items() if k != "stream"}
         try:
-            async with httpx.AsyncClient() as client:
+            async with raw_http.async_client() as client:
                 response = await client.post(target, json=body, headers=req.headers, timeout=UPSTREAM_TIMEOUT)
         except httpx.TransportError as e:
             self._note_upstream(target, False, error=self._describe_transport_error(e, UPSTREAM_TIMEOUT.read))
@@ -1764,7 +1763,7 @@ class ProxyHandler:
                         pass
             return raw, ev
 
-        async with httpx.AsyncClient(timeout=UPSTREAM_TIMEOUT) as client:
+        async with raw_http.async_client(timeout=UPSTREAM_TIMEOUT) as client:
             try:
                 resp_cm = client.stream("POST", target, json=body, headers=req.headers)
                 resp = await resp_cm.__aenter__()
@@ -1831,7 +1830,7 @@ class ProxyHandler:
             target = None
             headers = self._build_headers(default_cfg)
         try:
-            async with httpx.AsyncClient() as client:
+            async with raw_http.async_client() as client:
                 if target is None:
                     for root in api_root_candidates(base):
                         target = root + "/models"

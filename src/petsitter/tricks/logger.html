@@ -58,6 +58,11 @@
         border-radius: 4px; font: 12.5px/1.5 ui-monospace, "SF Mono", Consolas, monospace; color: var(--text);
         white-space: pre-wrap; overflow-wrap: anywhere; }
   pre.response { border-left-color: var(--resp); }
+  .verdict { margin: 10px 0 4px; padding: 9px 12px; border: 1px solid #6a2a2a; border-left: 3px solid var(--bad);
+             border-radius: 4px; background: #1d1018; font-size: 13px; }
+  .verdict b { color: var(--bad); letter-spacing: .08em; font-size: 12px; }
+  .verdict ul { margin: 4px 0 0; padding-left: 18px; }
+  .verdict li { margin: 2px 0; }
   pre.bad { border-left-color: var(--bad); }
   ::-webkit-scrollbar { width: 14px; height: 14px; }
   ::-webkit-scrollbar-track { background: #0f0f23; border-left: 1px solid #1e2a3a; }
@@ -115,7 +120,18 @@ function statusTag(r) {
     if (last && last.error) return '<span class="tag bad">no response</span>';
     return h.done ? "" : '<span class="tag pending">waiting</span>';
   }
-  return `<span class="tag${status >= 400 ? " bad" : ""}">HTTP ${status}</span>`;
+  const cut = (h.verdict || []).length ? '<span class="tag bad">went wrong</span>' : "";
+  return `<span class="tag${status >= 400 ? " bad" : ""}">HTTP ${status}</span>${cut}`;
+}
+
+// How a response ended, and when: "complete in 268,235 ms (first byte 1,741 ms)".
+function ending(x, goneAt) {
+  if (!x || !x.ended) return "";
+  const n = v => (v === null || v === undefined) ? "?" : Number(v).toLocaleString();
+  const first = x.first_byte_ms !== null && x.first_byte_ms !== undefined ? `, first byte ${n(x.first_byte_ms)} ms` : "";
+  const last = x.last_byte_ms !== null && x.last_byte_ms !== undefined ? `, last byte ${n(x.last_byte_ms)} ms` : "";
+  const gone = goneAt !== null && goneAt !== undefined ? ` at ${n(goneAt)} ms` : "";
+  return ` · ended: ${x.ended}${gone} · ${n(x.ms)} ms${first}${last}`;
 }
 
 function renderList() {
@@ -135,14 +151,16 @@ function sections(r) {
   const out = [["REQUEST", "your tool → petsitter", h.client_request || "", "request"]];
   (h.upstream || []).forEach((u, i, all) => {
     const n = all.length > 1 ? ` (call ${i + 1} of ${all.length})` : "";
-    const timing = u.ms !== undefined && u.ms !== null
-      ? ` · ${u.first_byte_ms !== undefined && u.first_byte_ms !== null ? `first byte ${u.first_byte_ms} ms, ` : ""}${u.ms} ms` : "";
+    const timing = u.ended ? ending(u) : (u.ms !== undefined && u.ms !== null
+      ? ` · ${u.first_byte_ms !== undefined && u.first_byte_ms !== null ? `first byte ${u.first_byte_ms} ms, ` : ""}${u.ms} ms` : "");
     out.push(["REQUEST", `petsitter → provider${n}`, u.request, "request"]);
     out.push(["RESPONSE", `provider → petsitter${n}${timing}`, u.response,
               "response" + (u.status === null || u.status === undefined || u.status >= 400 ? " bad" : "")]);
   });
-  out.push(["RESPONSE", "petsitter → your tool", h.client_response ?? "(not sent yet)",
-            "response" + (h.client_status >= 400 ? " bad" : "")]);
+  const c = h.client || {};
+  const err = c.error ? `\n\npetsitter raised:\n${c.error}` : "";
+  out.push(["RESPONSE", "petsitter → your tool" + ending(c, c.client_gone_ms), (h.client_response ?? "(not sent yet)") + err,
+            "response" + (h.client_status >= 400 || (c.ended && c.ended !== "complete") ? " bad" : "")]);
   return out;
 }
 
@@ -161,11 +179,15 @@ function renderDetail() {
     `<span>${esc(r.channel)}</span><span>${esc(r.api)}</span><span>${esc(r.from)}</span>` +
     `<span>${new Date(r.at * 1000).toLocaleString()}</span><span>id ${esc(r.id)}</span>` +
     `<button id="copy-all">copy all</button></div>` +
+    (((r.http || {}).verdict || []).length
+      ? `<div class="verdict"><b>WHAT WENT WRONG</b><ul>${r.http.verdict.map(v => `<li>${esc(v)}</li>`).join("")}</ul></div>`
+      : "") +
     parts.map(([kind, hop, text, cls]) =>
       `<div class="kind ${kind.toLowerCase()}"><span>${kind}</span><small>${esc(hop)}</small></div>` +
       `<pre class="${cls}">${esc(text)}</pre>`).join("");
   document.getElementById("copy-all").onclick = e =>
-    copy(e.target, parts.map(([kind, hop, text]) => `=== ${kind}: ${hop} ===\n${text}`).join("\n\n"));
+    copy(e.target, (((r.http || {}).verdict || []).length ? `=== WHAT WENT WRONG ===\n${r.http.verdict.map(v => "- " + v).join("\n")}\n\n` : "") +
+                   parts.map(([kind, hop, text]) => `=== ${kind}: ${hop} ===\n${text}`).join("\n\n"));
 }
 
 async function copy(btn, text) {

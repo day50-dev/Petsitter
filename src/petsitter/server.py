@@ -589,6 +589,8 @@ class _NormalizeV1Path:
                     message = await receive()
                     if message.get("type") == "http.request":
                         raw_http.add_body(record, message.get("body", b""))
+                    elif message.get("type") == "http.disconnect":
+                        raw_http.client_gone(record)
                     return message
 
                 async def send_copy(message):
@@ -598,10 +600,18 @@ class _NormalizeV1Path:
                             (k.decode("latin-1", "replace"), v.decode("latin-1", "replace"))
                             for k, v in message.get("headers") or []])
                     elif message.get("type") == "http.response.body":
-                        raw_http.add_response_body(record, message.get("body", b""))
-                    await send(message)
+                        raw_http.add_response_body(record, message.get("body", b""),
+                                                   message.get("more_body", False))
+                    try:
+                        await send(message)
+                    except BaseException:
+                        raw_http.client_gone(record)   # its socket is gone
+                        raise
                 try:
                     await self.app(scope, receive_copy, send_copy)
+                except Exception as e:
+                    raw_http.failed(record, e)
+                    raise
                 finally:
                     raw_http.finish(record)
                     raw_http.end(token)
@@ -725,6 +735,9 @@ def create_app(
         except Exception as e:
             import traceback
             logging.getLogger("petsitter").error(f"Error in stream_chat_completions: {e}\n{traceback.format_exc()}")
+            record = raw_http.current()
+            if record is not None:
+                raw_http.failed(record, e)   # the client gets a 200 with an error event; the record says why
             yield f"data: {json.dumps({'error': {'message': str(e), 'type': 'proxy_error'}})}\n\n"
 
     async def chat_completions(request: Request) -> Response:
@@ -824,6 +837,9 @@ def create_app(
                         yield chunk
                 except Exception as e:
                     logging.getLogger("petsitter").exception("/v1/messages failed")
+                    record = raw_http.current()
+                    if record is not None:
+                        raw_http.failed(record, e)
                     yield ac.error_event(str(e))
             return StreamingResponse(event_stream(), media_type="text/event-stream")
 

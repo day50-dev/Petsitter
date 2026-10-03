@@ -689,14 +689,17 @@ The corollary is worth keeping in mind: the residual errors that survive this ch
 Appends one timestamped JSON line per request to each of two files — the debugging view into whatever harness is misbehaving, and into what the extensions did to it:
 
 - `before.jsonl`: the payload, tools and messages, before the extensions after the logger transform them
-- `after.jsonl`: the message list after they did, with the model's answer
+- `after.jsonl`: the message list after they did, with the model's answer (only for replies that finished)
+- `http.jsonl`: every exchange however it ended: the HTTP of both hops, how each response ended, the verdict, and both response bodies whole (the provider's stream and petsitter's, event by event). Read this one when a reply went wrong.
 
 Put the logger first in the channel and `before.jsonl` is exactly what your tool sent; comparing the two shows every change the extensions made.
 
-Its **Live** tab shows the last 40 requests as HTTP, both hops, in order: the REQUEST your tool sent, the REQUEST petsitter sent the provider, the RESPONSE that came back, and the RESPONSE petsitter sent your tool. Each block is the request or status line, every header with its real value, and the body with only the content swapped for a note of its size (`"messages": "<12 messages, 48,210 chars>"`); streams are summarised (events, finish or stop reason, usage). Failed calls and retries show too. **copy all** copies the whole exchange. The content is in the files.
+Its **Live** tab shows the last 40 requests as HTTP, both hops, in order: the REQUEST your tool sent, the REQUEST petsitter sent the provider, the RESPONSE that came back, and the RESPONSE petsitter sent your tool. Each block is the request or status line, every header with its real value, and the body with only the content swapped for a note of its size (`"messages": "<12 messages, 48,210 chars>"`); streams are summarised (events, heartbeats, whether `[DONE]` came, finish or stop reason, usage, text and reasoning sizes, each tool call and whether its arguments are valid JSON, the last few events verbatim). Failed calls and retries show too.
+
+Each response says how it ended, with timings: the provider's **complete**, **closed early** (petsitter stopped reading) or **error**; petsitter's **complete**, **client disconnected** (and when), **error** (with the traceback) or **incomplete**. When the two sides don't add up, **WHAT WENT WRONG** at the top says so in plain sentences: the provider stopped without finishing, the model hit its token limit, a tool call's arguments aren't JSON, your tool hung up partway, a tool call went missing between the sides. A reply cut short also leaves a `reply cut short` warning in the channel's log. **copy all** copies the whole exchange, verdict first. The content is in the files.
 
 ```bash
-pet add mine logger            # writes ~/.cache/petsitter/traffic/{before,after}.jsonl
+pet add mine logger            # writes ~/.cache/petsitter/traffic/{before,after,http}.jsonl
 ```
 
 Each request produces one record in each file:

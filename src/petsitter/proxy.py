@@ -1248,6 +1248,15 @@ class ProxyHandler:
             else:
                 async for line in self._stream_upstream(req, window, rewriters, observers):
                     yield line
+        except (GeneratorExit, asyncio.CancelledError):
+            # The reply stopped before it finished: the client hung up (or the
+            # server cancelled the request). Said here, since nothing after
+            # this point runs: no "reply done", no observing post_hooks.
+            get_logger().warning("%sreply cut short: the client went away before it finished", request_tag())
+            raise
+        except Exception:
+            get_logger().exception("%sreply failed while streaming", request_tag())
+            raise
         finally:
             self._end_chat(req)
 
@@ -1614,6 +1623,15 @@ class ProxyHandler:
             else:
                 async for chunk in self._stream_messages(req, window, rewriters, observers):
                     yield chunk
+        except (GeneratorExit, asyncio.CancelledError):
+            # The reply stopped before it finished: the client hung up (or the
+            # server cancelled the request). Said here, since nothing after
+            # this point runs: no "reply done", no observing post_hooks.
+            get_logger().warning("%sreply cut short: the client went away before it finished", request_tag())
+            raise
+        except Exception:
+            get_logger().exception("%sreply failed while streaming", request_tag())
+            raise
         finally:
             self._end_messages(req)
 

@@ -8,11 +8,16 @@ It never changes what the model sees.
 
 ## How to use
 
-It writes two files in `~/.cache/petsitter/traffic/` (change the folder with the
+It writes three files in `~/.cache/petsitter/traffic/` (change the folder with the
 `path` setting), one line per request in each:
 
 - `before.jsonl`: the request before the extensions after the logger transform it
-- `after.jsonl`: the conversation after they did, with the model's reply
+- `after.jsonl`: the conversation after they did, with the model's reply. Only
+  for replies that finished: one that was cut short never gets here.
+- `http.jsonl`: every exchange however it ended, written when it's over: the
+  HTTP as the Live tab shows it, how each side's response ended, the verdict,
+  and both response bodies whole (the provider's stream and petsitter's, event
+  by event). This is the one to read when a reply went wrong.
 
 Put it first in the channel and `before.jsonl` is exactly what your tool sent.
 
@@ -26,8 +31,17 @@ the REQUEST your tool sent, the REQUEST petsitter sent the provider, the
 RESPONSE that came back, and the RESPONSE petsitter sent your tool. Each is the
 request or status line, every header with its real value, and the body with
 only the content (messages, system prompt, the reply) swapped for a note of its
-size; streams are summarised (events, finish or stop reason, usage). **copy
-all** copies the whole exchange. The files have the content.
+size; streams are summarised (events, heartbeats, whether [DONE] came, finish
+or stop reason, usage, text and reasoning sizes, each tool call and whether its
+arguments are valid JSON, and the last few events verbatim). Each response says
+how it ended: the provider's "complete", "closed early" (petsitter stopped
+reading) or "error"; petsitter's "complete", "client disconnected" (and when),
+"error" (with the traceback) or "incomplete". When something went wrong,
+**WHAT WENT WRONG** at the top says it in a sentence or two: the provider
+stopped without finishing, the model hit its token limit, a tool call's
+arguments aren't JSON, your tool hung up partway, a tool call went missing
+between the two sides. **copy all** copies the whole exchange, verdict first.
+The files have the content.
 
 `request_id` ties the two together, so each file can be read on its own or the
 two joined, which shows exactly what the extensions changed:
@@ -166,14 +180,91 @@ def _body(body: bytes, headers: list) -> str:
         return ""
     ctype = next((v for k, v in headers if k.lower() == "content-type"), "").lower()
     text = body.decode("utf-8", "replace")
-    if "event-stream" in ctype or text.lstrip().startswith(("data:", "event:", ":")):
+    if _is_stream(body, headers):
         summary = _stream_summary(text)
-        events = summary.pop("events", 0)
-        return f"<event stream, {events} events, {len(body):,} bytes>\n" + json.dumps(summary, indent=2, default=str)
+        summary.pop("events", None)
+        report = raw_http.stream_report(text)
+        last = report.pop("last_events")
+        ending = "ended with [DONE]" if report["done"] else "NO [DONE]"
+        head = (f"<event stream, {report.pop('events')} events, {report.pop('comments')} heartbeat comments, "
+                f"{len(body):,} bytes, {ending}>")
+        report.pop("done")
+        shown = {**summary, **{k: v for k, v in report.items() if v not in (None, [], 0) or k == "finish_reason"}}
+        return (head + "\n" + json.dumps(shown, indent=2, default=str) +
+                "\n\nlast events:\n" + "\n".join(f"data: {e}" for e in last))
     obj = _json(body)
     if obj is not None:
         return json.dumps(_without_content(obj), indent=2, default=str)
     return text
+
+
+def _is_stream(body: bytes, headers: list) -> bool:
+    ctype = next((v for k, v in headers if k.lower() == "content-type"), "").lower()
+    return "event-stream" in ctype or body.lstrip()[:6] in (b"data:", b"event:") or body[:1] == b":"
+
+
+def _report(body: bytes, headers: list) -> dict | None:
+    return raw_http.stream_report(body.decode("utf-8", "replace")) if body and _is_stream(body, headers) else None
+
+
+def verdict(record: dict) -> list[str]:
+    """Plain statements of what went wrong in this exchange, if anything: how
+    each side's stream ended, and where the two don't match. Empty when the
+    provider and petsitter both finished normally."""
+    out: list[str] = []
+    resp = record["response"]
+    client = _report(bytes(resp["body"]), resp["headers"])
+    up_ex = record["upstream"][-1] if record["upstream"] else None
+    up = None
+    if up_ex is not None:
+        got = raw_http._decoded(bytes(up_ex["body"]), up_ex.get("headers") or [])
+        up = _report(got, up_ex.get("headers") or [])
+        ms = up_ex.get("ms")
+        if up_ex.get("error"):
+            out.append(f"The provider call failed after {ms:,} ms: {up_ex['error']}" if ms is not None
+                       else f"The provider call failed: {up_ex['error']}")
+        elif up_ex.get("ended") == "closed early" and not (up is not None and up["done"]):
+            # (petsitter stops at [DONE], before the empty chunk that ends the
+            # body, so a stream with [DONE] in it ended properly)
+            out.append(f"petsitter stopped reading the provider's response at {up_ex.get('last_byte_ms') or 0:,} ms, "
+                       f"before it ended.")
+        if up is not None and up_ex.get("ended") == "complete" and not up["done"]:
+            out.append("The provider's stream ended without [DONE]" +
+                       (f" (finish_reason {up['finish_reason']})." if up["finish_reason"] else " and without a finish_reason."))
+        if up is not None:
+            if up["finish_reason"] == "length":
+                out.append("The model stopped at its token limit (finish_reason length): the provider cut the reply off.")
+            for c in up["tool_calls"]:
+                if not c["arguments_json"]:
+                    out.append(f"The provider's tool call {c['name']} has arguments that aren't valid JSON "
+                               f"({c['arguments_chars']:,} chars).")
+            for e in up["errors"]:
+                out.append(f"The provider's stream carried an error: {e}")
+    ended = resp.get("ended")
+    if ended == "client disconnected":
+        at = resp.get("client_gone_ms")
+        if client is not None and client["done"]:
+            pass   # it had everything
+        elif client is not None and client["finish_reason"]:
+            out.append(f"Your tool disconnected at {at:,} ms, after it got the finish_reason "
+                       f"({client['finish_reason']}) but before [DONE].")
+        else:
+            got = f"after {client['events']:,} events" if client is not None else f"after {len(resp['body']):,} bytes"
+            out.append(f"Your tool disconnected at {at:,} ms, {got}, before the reply finished.")
+    elif ended == "error":
+        first = (resp.get("error") or "").strip().splitlines()
+        out.append("petsitter failed while answering: " + (first[-1] if first else "unknown error"))
+    elif ended == "incomplete":
+        out.append("petsitter's response stopped short, with no error and no disconnect recorded.")
+    if up is not None and client is not None:
+        n_up, n_cl = len(up["tool_calls"]), len(client["tool_calls"])
+        if n_up != n_cl:
+            out.append(f"The provider sent {n_up} tool call{'s' if n_up != 1 else ''}; your tool got {n_cl}.")
+        if any(not c["arguments_json"] for c in client["tool_calls"]) and all(c["arguments_json"] for c in up["tool_calls"]):
+            out.append("Your tool got a tool call whose arguments aren't valid JSON, though the provider's were.")
+        if up["finish_reason"] and client["finish_reason"] and up["finish_reason"] != client["finish_reason"]:
+            out.append(f"finish_reason was {up['finish_reason']} from the provider, {client['finish_reason']} to your tool.")
+    return out
 
 
 def _reason(status) -> str:
@@ -196,6 +287,8 @@ def _http(record: dict) -> dict:
             "\n".join([f"HTTP/{version} {_reason(resp['status'])}", *(f"{k}: {v}" for k, v in resp["headers"])]) +
             "\n\n" + _body(bytes(resp["body"]), resp["headers"]),
         "client_status": resp["status"], "done": resp["done"],
+        "client": {k: resp.get(k) for k in ("ended", "error", "first_byte_ms", "last_byte_ms", "ms", "client_gone_ms")},
+        "verdict": verdict(record) if resp["done"] else [],
         "upstream": [],
     }
     for ex in record["upstream"]:
@@ -203,7 +296,8 @@ def _http(record: dict) -> dict:
         got = raw_http._decoded(bytes(ex["body"]), ex.get("headers") or [])
         blocks["upstream"].append({
             "status": ex.get("status"), "error": ex.get("error"), "ms": ex.get("ms"),
-            "first_byte_ms": ex.get("first_byte_ms"), "url": ex.get("url"),
+            "first_byte_ms": ex.get("first_byte_ms"), "last_byte_ms": ex.get("last_byte_ms"),
+            "ended": ex.get("ended"), "url": ex.get("url"),
             "request": "\n".join([f"{ex['method']} {ex['url']} HTTP/1.1",
                                   *(f"{k}: {v}" for k, v in ex.get("request_headers") or [])]) +
                        "\n\n" + _body(sent_body, ex.get("request_headers") or []),
@@ -313,10 +407,26 @@ class LoggerTrick(Trick):
             # response, petsitter's own); turned into text when it's shown
             "_record": raw_http.current(),
         }
+        if entry["_record"] is not None:
+            raw_http.on_finish(entry["_record"], lambda record, e=dict(entry): self._save_http(e, record))
         with self._lock:
             self._recent.append(entry)
             self._settle()
         self.publish({"event": "traffic", "id": entry["id"]})
+
+    def _save_http(self, entry: dict, record: dict) -> None:
+        """When the exchange is over, however it ended, one line in http.jsonl:
+        the HTTP as the Live tab shows it, the verdict, and both response
+        bodies whole (the streams, event by event), so a reply that went wrong
+        can still be taken apart after it has left the last 40."""
+        line = {k: v for k, v in entry.items() if k != "_record"}
+        line["timestamp"] = _now()
+        line["http"] = _http(record)
+        line["client_response_body"] = bytes(record["response"]["body"]).decode("utf-8", "replace")
+        line["upstream_response_bodies"] = [
+            raw_http._decoded(bytes(ex["body"]), ex.get("headers") or []).decode("utf-8", "replace")
+            for ex in record["upstream"]]
+        self._append("http", line)
 
     def _remember_reply(self, reply) -> None:
         self.publish({"event": "traffic", "id": self.request_id})
@@ -353,7 +463,7 @@ class LoggerTrick(Trick):
     def _log_path(self, stage: str) -> Path:
         """The file for "before" (requests) or "after" (the transformed
         conversation and the reply)."""
-        name = "before" if stage == "before" else "after"
+        name = stage if stage in ("before", "http") else "after"
         path = Path(self.path or str(DEFAULT_LOGGER_PATH)).expanduser()
         if path.suffix == ".jsonl" and not path.is_dir():
             return path.with_name(f"{path.stem}.{name}.jsonl")

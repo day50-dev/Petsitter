@@ -63,6 +63,10 @@
   .verdict b { color: var(--bad); letter-spacing: .08em; font-size: 12px; }
   .verdict ul { margin: 4px 0 0; padding-left: 18px; }
   .verdict li { margin: 2px 0; }
+  .changed { margin: 10px 0 4px; padding: 9px 12px; border: 1px solid var(--border); border-left: 3px solid var(--warn);
+             border-radius: 4px; background: #15151f; font-size: 12.5px; }
+  .changed b { color: var(--warn); letter-spacing: .08em; font-size: 12px; }
+  .changed ul { margin: 4px 0 0; padding-left: 18px; font-family: ui-monospace, "SF Mono", Consolas, monospace; }
   pre.bad { border-left-color: var(--bad); }
   ::-webkit-scrollbar { width: 14px; height: 14px; }
   ::-webkit-scrollbar-track { background: #0f0f23; border-left: 1px solid #1e2a3a; }
@@ -182,11 +186,15 @@ function renderDetail() {
     (((r.http || {}).verdict || []).length
       ? `<div class="verdict"><b>WHAT WENT WRONG</b><ul>${r.http.verdict.map(v => `<li>${esc(v)}</li>`).join("")}</ul></div>`
       : "") +
+    (((r.http || {}).changed || []).length
+      ? `<div class="changed"><b>WHAT PETSITTER CHANGED IN THE REQUEST</b><ul>${r.http.changed.map(v => `<li>${esc(v)}</li>`).join("")}</ul></div>`
+      : "") +
     parts.map(([kind, hop, text, cls]) =>
       `<div class="kind ${kind.toLowerCase()}"><span>${kind}</span><small>${esc(hop)}</small></div>` +
       `<pre class="${cls}">${esc(text)}</pre>`).join("");
   document.getElementById("copy-all").onclick = e =>
     copy(e.target, (((r.http || {}).verdict || []).length ? `=== WHAT WENT WRONG ===\n${r.http.verdict.map(v => "- " + v).join("\n")}\n\n` : "") +
+                   (((r.http || {}).changed || []).length ? `=== WHAT PETSITTER CHANGED IN THE REQUEST ===\n${r.http.changed.map(v => "- " + v).join("\n")}\n\n` : "") +
                    parts.map(([kind, hop, text]) => `=== ${kind}: ${hop} ===\n${text}`).join("\n\n"));
 }
 

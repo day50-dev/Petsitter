@@ -228,9 +228,10 @@ def verdict(record: dict) -> list[str]:
             # body, so a stream with [DONE] in it ended properly)
             out.append(f"petsitter stopped reading the provider's response at {up_ex.get('last_byte_ms') or 0:,} ms, "
                        f"before it ended.")
-        if up is not None and up_ex.get("ended") == "complete" and not up["done"]:
-            out.append("The provider's stream ended without [DONE]" +
-                       (f" (finish_reason {up['finish_reason']})." if up["finish_reason"] else " and without a finish_reason."))
+        # No [DONE] after a finish_reason is fine (some servers don't send
+        # one; petsitter adds it). Without either, the reply never finished.
+        if up is not None and up_ex.get("ended") == "complete" and not up["done"] and not up["finish_reason"]:
+            out.append("The provider's stream ended without a finish_reason or [DONE]: the reply never finished.")
         if up is not None:
             if up["finish_reason"] == "length":
                 out.append("The model stopped at its token limit (finish_reason length): the provider cut the reply off.")
@@ -267,6 +268,50 @@ def verdict(record: dict) -> list[str]:
     return out
 
 
+# Headers every HTTP client sets for itself; a difference in these says
+# nothing about what petsitter did to the request.
+_HOP_HEADERS = {"host", "content-length", "connection", "accept-encoding", "transfer-encoding", "keep-alive"}
+
+
+def request_changes(record: dict) -> list[str]:
+    """How the request petsitter sent the provider differs from the one your
+    tool sent: headers dropped, added or changed, and body fields dropped,
+    added or changed (messages and tools by count and size). For when a
+    request behaves differently through petsitter than without it."""
+    if not record["upstream"]:
+        return []
+    ex = record["upstream"][-1]
+    out: list[str] = []
+    mine = {k.lower(): v for k, v in record["request"]["headers"]}
+    sent = {k.lower(): v for k, v in ex.get("request_headers") or []}
+    for k, v in mine.items():
+        if k in _HOP_HEADERS:
+            continue
+        if k not in sent:
+            out.append(f"header dropped: {k}: {v}")
+        elif sent[k] != v:
+            out.append(f"header changed: {k}: {v} → {sent[k]}")
+    for k, v in sent.items():
+        if k not in mine and k not in _HOP_HEADERS:
+            out.append(f"header added: {k}: {v}")
+    a, b = _json(bytes(record["request"]["body"])), _json(ex.get("request_body") or b"")
+    if isinstance(a, dict) and isinstance(b, dict):
+        def note(key, value):
+            if key in ("messages", "tools", "input", "system") and isinstance(value, list):
+                return f"{len(value)} items, {len(json.dumps(value, default=str)):,} chars"
+            text = json.dumps(value, default=str)
+            return text if len(text) <= 120 else text[:120] + "..."
+        for k in a:
+            if k not in b:
+                out.append(f"field dropped: {k} = {note(k, a[k])}")
+            elif a[k] != b[k]:
+                out.append(f"field changed: {k}: {note(k, a[k])} → {note(k, b[k])}")
+        for k in b:
+            if k not in a:
+                out.append(f"field added: {k} = {note(k, b[k])}")
+    return out
+
+
 def _reason(status) -> str:
     try:
         return f"{status} {HTTPStatus(status).phrase}"
@@ -289,6 +334,7 @@ def _http(record: dict) -> dict:
         "client_status": resp["status"], "done": resp["done"],
         "client": {k: resp.get(k) for k in ("ended", "error", "first_byte_ms", "last_byte_ms", "ms", "client_gone_ms")},
         "verdict": verdict(record) if resp["done"] else [],
+        "changed": request_changes(record),
         "upstream": [],
     }
     for ex in record["upstream"]:

@@ -64,7 +64,11 @@ class TestVerdict:
 
     def test_provider_stopped_without_finishing(self):
         v = verdict(record(ch({"content": "hi"}), ch({"content": "hi"})))
-        assert any("without [DONE] and without a finish_reason" in x for x in v)
+        assert any("without a finish_reason or [DONE]" in x for x in v)
+
+    def test_finish_reason_without_done_is_fine(self):
+        body = ch({"content": "hi"}) + ch({}, "tool_calls")
+        assert verdict(record(body, body + "data: [DONE]\n\n")) == []
 
     def test_token_limit(self):
         body = ch({"content": "hi"}) + ch({}, "length") + "data: [DONE]\n\n"
@@ -105,3 +109,20 @@ class TestEndings:
         full = dict(ex, _eof=True); raw._finish(full)
         bad = dict(ex); raw._finish(bad, "ReadError: reset")
         assert (early["ended"], full["ended"], bad["ended"]) == ("closed early", "complete", "error")
+
+
+class TestRequestChanges:
+    def test_headers_and_fields(self):
+        from petsitter.tricks.logger import request_changes
+        rec = {"request": {"headers": [["User-Agent", "llcat"], ["X-Title", "llcat"], ["Host", "a"]],
+                           "body": bytearray(json.dumps({"model": "m", "stream": True, "temperature": 0.2,
+                                                         "messages": [{"role": "user", "content": "hi"}]}).encode())},
+               "upstream": [{"request_headers": [["user-agent", "python-httpx"], ["host", "b"]],
+                             "request_body": json.dumps({"messages": [{"role": "user", "content": "hi"}],
+                                                         "model": "m", "stream": True, "max_tokens": 9}).encode()}]}
+        assert request_changes(rec) == [
+            "header changed: user-agent: llcat → python-httpx",
+            "header dropped: x-title: llcat",
+            "field dropped: temperature = 0.2",
+            "field added: max_tokens = 9",
+        ]

@@ -278,7 +278,7 @@ class ExposePetsitterTrick(Trick):
             settings = []
             for s in trick.current_settings():
                 field = fields.get(s["key"], {})
-                if s.get("type") == "password":
+                if s.get("type") == "password" or fields.get(s["key"], {}).get("secret"):
                     continue
                 entry = {"key": s["key"], "label": s["label"], "type": s.get("type", "text"), "value": s["value"]}
                 if field.get("options"):
@@ -315,8 +315,8 @@ class ExposePetsitterTrick(Trick):
             self.report(f"Turned {name} {'on' if on else 'off'}", **who)
             return {"ok": True, "extension": name, "enabled": on}
         field = next((f for f in type(trick).config_fields or [] if isinstance(f, dict) and f.get("key") == setting), None)
-        if field is None or field.get("type") == "password":
-            keys = [f.get("key") for f in type(trick).config_fields or [] if isinstance(f, dict) and f.get("type") != "password"]
+        if field is None or field.get("type") == "password" or field.get("secret"):
+            keys = [f.get("key") for f in type(trick).config_fields or [] if isinstance(f, dict) and f.get("type") != "password" and not f.get("secret")]
             return {"error": f"{name} has no setting {setting!r}; its settings are {keys + ['enabled']}"}
         kind = field.get("type", "text")
         value = _unwrap(value, setting, field)
@@ -340,7 +340,7 @@ class ExposePetsitterTrick(Trick):
             return found
         ts, tid, trick, name = found["ts"], found["tid"], found["trick"], found["name"]
         field = next((f for f in type(trick).config_fields or [] if isinstance(f, dict) and f.get("key") == setting), None)
-        if field is None or field.get("type") == "password":
+        if field is None or field.get("type") == "password" or field.get("secret"):
             return {"error": f"{name} has no setting {setting!r}"}
         ts.remove_trick_config(tid, setting, changed_by=self._mark())
         self.report(f"Removed {name}'s {field.get('label') or setting}, back to its default", **self._who())

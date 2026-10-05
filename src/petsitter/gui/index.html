@@ -1403,13 +1403,16 @@ function _howToUse(e, installed) {
   }
   if ((e.config_fields || []).length) {
     // The values in use, so you can see where things are without opening Settings.
-    const fmt = v => v === '' || v === null || v === undefined ? '<span class="glance-dim">not set</span>'
+    // A list of secrets (or a password) shows how many, never what.
+    const fmt = (v, t) => v === '' || v === null || v === undefined ? '<span class="glance-dim">not set</span>'
+      : t === 'lines' ? (n => `${n} value${n === 1 ? '' : 's'}`)((Array.isArray(v) ? v : String(v).split('\n')).filter(x => String(x).trim()).length)
+      : t === 'password' ? 'set'
       : typeof v === 'boolean' ? (v ? 'on' : 'off') : `<code>${escapeHtml(String(v))}</code>`;
     const live = installed && Array.isArray(e.settings) ? e.settings : null;
     const by = e.changed_by || {};
     const pairs = live
-      ? live.map(x => `<span class="glance-k">${escapeHtml(x.label)}</span><span>${fmt(x.value)}${by[x.key] ? ' ' + _changedByNote(by[x.key]) : ''}</span>`)
-      : e.config_fields.map(f => `<span class="glance-k">${escapeHtml(f.label || f.key)}</span>${fmt(f.default)}`);
+      ? live.map(x => `<span class="glance-k">${escapeHtml(x.label)}</span><span>${fmt(x.value, x.type)}${by[x.key] ? ' ' + _changedByNote(by[x.key]) : ''}</span>`)
+      : e.config_fields.map(f => `<span class="glance-k">${escapeHtml(f.label || f.key)}</span>${fmt(f.default, f.type)}`);
     rows.push(['Settings', `<div class="glance-settings">${pairs.join('')}</div>`
       + (installed ? `<a href="#" onclick="openTrickConfig('${escapeHtml(e.id || '')}');return false">Change</a>`
                    : '<span class="glance-dim">Defaults shown; you can change them after installing.</span>')]);
@@ -3580,6 +3583,10 @@ async function openTrickConfig(id) {
       const desc = f.description ? `<div class="cfg-desc">${escapeHtml(f.description)}</div>` : '';
       if (type === 'boolean') {
         return `<label class="cfg-field cfg-bool"><input type="checkbox" id="cfg-${escapeHtml(key)}" ${cur ? 'checked' : ''}><span>${escapeHtml(label)}</span>${desc}</label>`;
+      }
+      if (type === 'lines') {
+        const text = Array.isArray(cur) ? cur.join('\n') : String(cur === undefined || cur === null ? '' : cur);
+        return `<label class="cfg-field"><span class="cfg-label">${escapeHtml(label)}</span><textarea id="cfg-${escapeHtml(key)}" rows="4" spellcheck="false" autocomplete="off">${escapeHtml(text)}</textarea>${desc}</label>`;
       }
       if (type === 'choice') {
         const opts = (f.options || []).map(o => `<option value="${escapeHtml(String(o))}"${String(o) === String(cur) ? ' selected' : ''}>${escapeHtml(String(o))}</option>`).join('');

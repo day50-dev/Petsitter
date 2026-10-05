@@ -371,3 +371,38 @@ class TestPersonalDetailSwitches:
         t.configure({"hide_email": False})
         out = t._sanitize('{"username": "bogus@yahoo.com", "password": "magical9bjyX"}')
         assert "bogus@yahoo.com" in out and "magical9bjyX" not in out
+
+
+class TestAlwaysHide:
+
+    def test_listed_values_are_hidden(self):
+        t = SecretsProtectorTrick()
+        t.configure({"always_hide": "Project Nightjar\nacme-internal.example\n"})
+        out = t._sanitize("Ship Project Nightjar to acme-internal.example by Friday")
+        assert "Nightjar" not in out and "acme-internal" not in out
+        assert len(STAND_IN.findall(out)) == 2
+
+    def test_and_put_back(self):
+        t = SecretsProtectorTrick()
+        t.configure({"always_hide": "Project Nightjar"})
+        hidden = t._sanitize("about Project Nightjar")
+        stand_in = STAND_IN.search(hidden).group(0)
+        assert t._restore(f"Sure, {stand_in} it is.") == "Sure, Project Nightjar it is."
+
+    def test_alongside_what_is_detected(self):
+        t = SecretsProtectorTrick()
+        t.configure({"always_hide": "bluebird"})
+        out = t._sanitize("codename bluebird, key sk-proj-AbcDefGhiJklMnoPqrStuVwxYz1234567890")
+        assert "bluebird" not in out and "AbcDefGhi" not in out
+
+    def test_longest_wins_when_one_contains_another(self):
+        t = SecretsProtectorTrick()
+        t.configure({"always_hide": "night\nnightjar"})
+        out = t._sanitize("the nightjar sings")
+        assert "jar" not in out and len(STAND_IN.findall(out)) == 1
+
+    def test_blank_lines_ignored(self):
+        t = SecretsProtectorTrick()
+        t.configure({"always_hide": "\n  \n"})
+        assert t._sanitize("nothing here") == "nothing here"
+

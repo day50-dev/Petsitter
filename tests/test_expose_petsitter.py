@@ -349,3 +349,19 @@ def test_sudo_removes_settings_and_runs_actions(tmp_path, monkeypatch):
         assert "no action" in t.run_action("Export It", "nope", "", convo)["error"]
         # sudo is everything: the controls too
         assert t.change("Secrets Protector", "enabled", "false")["enabled"] is False
+
+
+def test_always_hide_list_is_never_shown_or_changed(tmp_path):
+    """Secrets Protector's Always hide list is secrets: even under sudo, the
+    model can't read it or change it."""
+    ts = Trickset("_default", "0.3.0", {"X-Title": "*", "Model": "*"},
+                  ["tricks/expose_petsitter.py", "tricks/secrets_protector.py"], file_path=str(tmp_path / "_default.json"))
+    ts.load_tricks()
+    t, sp = ts.tricks
+    t.configure({"allow_changes": True})
+    sp.configure({"always_hide": "Project Nightjar"})
+    with _Request(ts, []):
+        conf = json.dumps(t.configuration())
+        assert "Nightjar" not in conf and "always_hide" not in conf
+        assert "error" in t.change("Secrets Protector", "always_hide", "")
+    assert sp.always_hide == "Project Nightjar"

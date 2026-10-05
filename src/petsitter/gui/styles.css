@@ -398,6 +398,7 @@ header .nav a:hover { background: #1a2a4d; }
 .cfg-field input[type="text"],
 .cfg-field input[type="number"],
 .cfg-field input[type="password"],
+.cfg-field textarea,
 .cfg-field select {
   width: 100%;
   box-sizing: border-box;
@@ -412,7 +413,9 @@ header .nav a:hover { background: #1a2a4d; }
 .cfg-field input[type="text"]:focus,
 .cfg-field input[type="number"]:focus,
 .cfg-field input[type="password"]:focus,
+.cfg-field textarea:focus,
 .cfg-field select:focus { outline: none; border-color: #5a8ab5; }
+.cfg-field textarea { resize: vertical; min-height: 70px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .cfg-field input[type="text"]::placeholder,
 .cfg-field input[type="password"]::placeholder { color: #3a4a5a; }
 .cfg-field code { font-family: monospace; color: #8ab4ff; }

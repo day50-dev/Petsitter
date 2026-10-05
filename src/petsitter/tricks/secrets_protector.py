@@ -13,6 +13,8 @@ Detected automatically:
   `"password": "..."`, `api_key = '...'`, `DB_PASSWORD=...`, `secret: ...`
 - about 200 kinds of vendor keys and tokens (OpenAI, Anthropic, AWS, GitHub,
   Slack, Stripe, Google...), database URLs and private keys
+- anything on your Always hide list (settings), one value per line, matched
+  exactly: for what no detector would guess, like a codename or a hostname
 - emails, SSNs and card numbers, and phone numbers if you turn them on. Each
   has a switch in the settings: a stand-in doesn't look like what it replaced,
   so hiding one the model needs to recognise can confuse it.
@@ -134,6 +136,11 @@ class SecretsProtectorTrick(Trick):
          "description": "Can confuse the model, and catches any 10-digit number."},
         {"key": "hide_ssn", "label": "Hide social security numbers", "type": "boolean", "default": True},
         {"key": "hide_credit_card", "label": "Hide card numbers", "type": "boolean", "default": True},
+        # Values that are always hidden, wherever they appear, on top of
+        # whatever the detectors find. "secret": never shown to a model, even
+        # through Expose Petsitter.
+        {"key": "always_hide", "label": "Always hide", "type": "lines", "secret": True, "default": "",
+         "description": "One per line. Hidden exactly as written, wherever it appears."},
     ]
 
     def __init__(self):
@@ -229,8 +236,30 @@ class SecretsProtectorTrick(Trick):
         self._marked[marker] = original
         return marker
 
+    def _listed(self) -> list[str]:
+        """The Always hide values, longest first (so one that contains
+        another wins)."""
+        raw = getattr(self, "always_hide", "") or ""
+        lines = raw if isinstance(raw, list) else str(raw).splitlines()
+        return sorted({v.strip() for v in lines if isinstance(v, str) and v.strip()}, key=len, reverse=True)
+
     def _find_spans(self, text: str) -> list[tuple[int, int, str, str]]:
-        return [s for s in find_secrets(text) if self._hiding(s[3])]
+        spans = [s for s in find_secrets(text) if self._hiding(s[3])]
+        for value in self._listed():
+            i = text.find(value)
+            while i >= 0:
+                spans.append((i, i + len(value), value, "listed"))
+                i = text.find(value, i + len(value))
+        if not spans:
+            return spans
+        # earliest first, then longest; anything overlapping an earlier one is dropped
+        spans.sort(key=lambda x: (x[0], -(x[1] - x[0])))
+        merged, end = [], 0
+        for sp in spans:
+            if sp[0] >= end:
+                merged.append(sp)
+                end = sp[1]
+        return merged
 
     def _hiding(self, kind: str) -> bool:
         if kind not in secret_scan.PERSONAL_KINDS:
@@ -349,6 +378,7 @@ class SecretsProtectorTrick(Trick):
         "email": "an email address", "phone": "a phone number",
         "ssn": "a Social Security number",
         "credit_card": "a card number", "marked": "a value you marked",
+        "listed": "a value on your Always hide list",
         "credential": "a password or secret",
     }
 

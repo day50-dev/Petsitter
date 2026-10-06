@@ -205,9 +205,14 @@ class LoggerTrick(Trick):
 ```
 
 Each field has a `key` (the attribute name) and `label`, and optionally a
-`description`, a `type` (`"text"`, `"number"`, `"boolean"`, `"path"` or
-`"choice"`, with its `options` listed), a `default`, and `required`. `"path"`
-is shown as a text box, `"choice"` as a list to pick from. Nothing may be
+`description`, a `type` (`"text"`, `"number"`, `"boolean"`, `"path"`,
+`"password"`, `"lines"` or `"choice"`, with its `options` listed), a `default`,
+`required`, and `secret`. `"path"` is shown as a text box, `"choice"` as a list
+to pick from, `"lines"` as a multi-line box whose value arrives as one string,
+an item per line (Secrets Protector's Always hide list). `"secret": True` keeps
+a field from any model: Expose Petsitter neither shows nor changes it, even
+under sudo, as with `"password"`; the dashboard shows only that it's set, or
+how many lines it has. Nothing may be
 stored yet, and a field cleared in the dashboard arrives as `""`, so fall back
 with `or` as above. Override `configure(config)` (calling
 `super().configure(config)`) to react when a value changes. The values in use
@@ -227,7 +232,8 @@ reply = ctx[-1]
 It appends the message (if given) as a user turn and returns a new list with
 the reply added. It takes `model_url`, `model_name`, `api_key` and `tools` (the
 reply may then carry `tool_calls`); without a model it uses the one petsitter
-was started with. It raises on HTTP errors and times out after 60 seconds.
+was started with. It raises on HTTP errors, and waits as long as petsitter's
+Provider timeout (its Settings page; 30 minutes by default).
 `callmodel` is the async version, for async code only.
 
 To ask **the model this request is going to** again, rather than the default
@@ -238,20 +244,34 @@ that answers some of the model's tool calls itself and then lets it carry on,
 as Expose Petsitter does. Outside a request it falls back to the default model.
 
 `get_raw()` returns the current request's raw HTTP, recorded at petsitter's two
-edges: the client's request as it arrived (`line`, `headers`, `body`), and each
-call made to a provider for it (`method`, `url`, `request_headers`,
-`request_body`, `status`, `headers`, `first_byte_ms`, `ms`, `error`, `body`,
-streams included). Bodies are bytes. A `raw_upstream` pipeline event (see
-`subscribe`) fires as each provider call finishes, failed ones too. The Traffic
-Logger is built on it.
+edges: the client's request as it arrived (`line`, `headers`, `body`) and
+petsitter's response to it, and each call made to a provider for it (`method`,
+`url`, `request_headers`, `request_body`, `status`, `headers`, `first_byte_ms`,
+`last_byte_ms`, `ms`, `error`, `body`, streams included). Bodies are bytes.
+Each response says how it ended, in `ended`: a provider call `"complete"`,
+`"closed early"` (petsitter stopped reading) or `"error"`; petsitter's own
+`"complete"`, `"client disconnected"` (with `client_gone_ms`), `"error"` (the
+traceback in `error`) or `"incomplete"`. A `raw_upstream` pipeline event (see
+`subscribe`) fires as each provider call finishes, failed ones too. From
+`petsitter.raw`: `current()` is the live record itself, still filling in;
+`on_finish(record, fn)` calls `fn(record)` once the response is over, however
+it ended (a trick's hooks may never run for a reply that was cut short); and
+`stream_report(text)` reads an SSE body: events, heartbeats, `[DONE]`, finish
+reason, usage, text and reasoning sizes, each tool call and whether its
+arguments are valid JSON, the last few events. The Traffic Logger is built on
+these.
 
 Anything petsitter itself puts into a conversation starts with its reserved
 id, `get_prefix()` (`gRefWg2D7zO8`), in the form `<prefix>-<context>-<id>`, the id 128 bits as 22 base62
 characters (`reserved_id()`):
 `reserved("sp")` gives `gRefWg2D7zO8-sp-3Lw9rTqXc0VbN7mK2pZs4a` (Secrets
 Protector's stand-ins), and `reserved_pattern("sp")` matches them.
-Expose Petsitter's tool names are `gRefWg2D7zO8-<name>`. Use these for yours,
-and sniff for them to tell petsitter's own things from the user's.
+Context Editor's conversation ids are `reserved("ctx", ...)`, and Expose
+Petsitter's tool names are `gRefWg2D7zO8-<name>`. Use these for yours, and
+sniff for them to tell petsitter's own things from the user's. The prefix can
+be changed on petsitter's Settings page; it takes effect at startup, before any
+trick loads, so a trick may build names from it at import time, but should
+always call `get_prefix()` / `reserved_pattern()` rather than copy the string.
 
 A trick that uses other models says so: `required_models` for ones it needs,
 `optional_models` for ones it uses if they're set up and otherwise does
@@ -599,6 +619,7 @@ If the handler doesn't `report()` anything, the extension's Live tab gets
 - The pattern `(<keyword>: <request>)` properly handles nested parentheses by tracking a depth counter.
 - A second, sed-style form `(<keyword>=<D><request><D>)` takes the request verbatim between a delimiter `D` of the user's choosing, for requests with unbalanced parentheses or significant whitespace: `(secret=|ab)c|)`. One optional space is allowed on either side of `=`. This form only counts when it names a registered keyword, so code like `f(x = 'a')` is left alone.
 - Set `strip_prompt_keyword = False` on a trick to have the framework leave its pattern where the user typed it, on every turn, for the trick's own `pre_hook` to rewrite in place (secrets_protector does this). `handle_prompt_keyword` isn't called for it, and `petsitter.trick.find_prompt_keyword_patterns` gives the trick the same parser the framework uses.
+- A `(word: ...)` that no trick in the channel claims is stripped from the newest message before any `pre_hook` runs, so a trick that reads its own pattern in `pre_hook` must claim the keyword this way or it never sees it. Context Editor sets `prompt_keyword = "context"` and `strip_prompt_keyword = False` for `(context:import:<id>)`. Build the pattern from `self.prompt_keyword`, since the user can rename it.
 - Inside `handle_prompt_keyword`, `petsitter.trick.transformed_messages()`
   gives the conversation as the channel's extensions would send it to the
   model (system prompts added, pre_hooks run, on a copy; no model call, and

@@ -42,6 +42,17 @@ for what each one keeps.
 
 Put it **first** in the channel, so what you edit is what your tool sent.
 
+**Continue in another program.** Every conversation has an id. Open it on the
+Live tab and press **continue in another program**: that copies
+`(context:import:<id>)`. Paste it into any other program connected to petsitter
+(followed by whatever you want to say next) and the model there picks the
+conversation up: its messages are swapped in where you pasted, on every
+request. That program's own system prompt and tools apply; the old program's
+tool calls come along renamed `legacy_<name>` (and declared, so every API
+accepts them), so the model sees what was done and that it can't call those
+tools here. Conversations are saved in `~/.cache/petsitter/contexts/` as the
+model last saw them, edits included, and survive a restart.
+
 ## How it works
 
 - `pre_hook` identifies the conversation (the program plus its first message,
@@ -55,17 +66,53 @@ Put it **first** in the channel, so what you edit is what your tool sent.
   choice is saved as the `compaction` setting.
 - The Live tab gets a small event per request; a conversation's messages are
   fetched when you open it (`ui_action({"action": "detail", ...})`).
+- A conversation's id is `reserved("ctx", ...)` derived from its key, so it's
+  the same on every request. After edits, before compaction, the conversation
+  is written to `~/.cache/petsitter/contexts/<id>.json` (`$PETSITTER_CONTEXTS_DIR`
+  overrides the folder), and again with the reply in `post_hook`.
+- `(context:import:<id>)` is the trick's prompt keyword with
+  `strip_prompt_keyword = False`, so the proxy leaves it where it was typed.
+  `pre_hook` replaces the message holding it with the saved conversation
+  (`as_imported`: system messages dropped, tool calls and tool results renamed
+  `legacy_<name>`), then the message's remaining text, or a one-line "Continued
+  from..." note when there is none. It does this on every request, since the
+  program keeps resending the marker. The `legacy_` names are added to the
+  request's tools with a "can't be run here" description, so APIs that check
+  the history against the tools accept it. An unknown id leaves the message as
+  it is and says so on the Live tab.
 """
 
+import copy
 import hashlib
 import json
+import os
+import re
 import threading
 import time
 from collections import OrderedDict
 
 from petsitter.compaction import TECHNIQUES, compact
-from petsitter.observability import current_user_agent, request_meta
-from petsitter.trick import Trick
+from petsitter.observability import LOG_DIR, current_user_agent, request_meta
+from petsitter.trick import Trick, reserved, reserved_id, reserved_pattern
+
+# Every conversation is saved here under its id, as the model last saw it, so
+# another program can pick it up with (context:import:<id>).
+CONTEXTS_DIR = LOG_DIR / "contexts"
+
+
+def _contexts_dir():
+    """Where conversations are saved; $PETSITTER_CONTEXTS_DIR overrides it
+    (the tests use that)."""
+    from pathlib import Path
+    return Path(os.environ.get("PETSITTER_CONTEXTS_DIR") or CONTEXTS_DIR)
+
+
+def import_re(keyword: str = "context") -> "re.Pattern":
+    """(<keyword>:import:<id>), the keyword being the trick's prompt keyword."""
+    return re.compile(r"\(\s*" + re.escape(keyword) + r"\s*:\s*import\s*:\s*(" + reserved_pattern("ctx").pattern +
+                      r")\s*\)", re.IGNORECASE)
+LEGACY_PREFIX = "legacy_"
+LEGACY_NOTE = "From an earlier conversation in another program. It can't be run here."
 
 KEEP_CONVERSATIONS = 30
 MAX_TEXT = 200_000          # characters of a message kept for the Live tab
@@ -141,6 +188,54 @@ def _conversation(context: list) -> tuple[str, str]:
     return key, who
 
 
+def context_id(key: str) -> str:
+    """A conversation's id for (context:import:<id>): a reserved name, the same
+    on every request of the conversation."""
+    return reserved("ctx", reserved_id(hashlib.sha256(f"ctx\x00{key}".encode()).digest()))
+
+
+def _legacy(name: str) -> str:
+    name = name or "tool"
+    return name if name.startswith(LEGACY_PREFIX) else (LEGACY_PREFIX + name)[:64]
+
+
+def as_imported(messages: list) -> tuple[list, set]:
+    """Another program's conversation, ready to continue in this one: its
+    system prompt left out (this program's own applies), and its tool calls
+    renamed legacy_<name>, so the model sees what was done and that it can't
+    call those tools here. Returns (messages, the legacy tool names)."""
+    out, names = [], set()
+    for msg in messages:
+        if not isinstance(msg, dict) or msg.get("role") in ("system", "developer"):
+            continue
+        msg = copy.deepcopy(msg)
+        for call in msg.get("tool_calls") or []:
+            fn = call.get("function") if isinstance(call, dict) else None
+            if isinstance(fn, dict):
+                fn["name"] = _legacy(fn.get("name"))
+                names.add(fn["name"])
+        if msg.get("role") == "tool" and msg.get("name"):
+            msg["name"] = _legacy(msg["name"])
+        out.append(msg)
+    return out, names
+
+
+def _without_marker(content, marker: str, fallback: str):
+    """The importing message with the (context:import:...) taken out."""
+    if isinstance(content, list):
+        parts = []
+        for p in content:
+            if isinstance(p, dict) and isinstance(p.get("text"), str) and marker in p["text"]:
+                text = p["text"].replace(marker, "").strip()
+                if text:
+                    parts.append({**p, "text": text})
+            else:
+                parts.append(p)
+        return parts or fallback
+    text = str(content or "").replace(marker, "").strip()
+    return text or fallback
+
+
 def apply_edit(msg: dict, edit: dict) -> dict:
     """msg with edit applied, as a new dict."""
     out = dict(msg)
@@ -168,6 +263,10 @@ class ContextEditorTrick(Trick):
     __display_name__ = "Context Editor"
     __category__ = "Context & Prompts"
     needs_window = 0     # reads the reply once it's sent, to show it; never changes it
+    # (context:import:<id>) is handled in pre_hook, where it was typed, so it
+    # isn't stripped before the trick sees it.
+    prompt_keyword = "context"
+    strip_prompt_keyword = False
     ui_page = "context_editor.html"
     config_fields = [
         {"key": "compaction", "label": "Compaction", "type": "choice",
@@ -193,9 +292,70 @@ class ContextEditorTrick(Trick):
         try:
             key, who = _conversation(context)
             request_meta()["ctxedit_conv"] = key
+            context, legacy = self._import(context)
+            if legacy:
+                # Declared too, so an API that checks history against the tools
+                # (Anthropic's does) accepts the renamed calls.
+                tools = [t for t in (params.get("tools") or [])
+                         if (t.get("function") or {}).get("name") not in legacy]
+                tools.extend({"type": "function", "function": {
+                    "name": n, "description": LEGACY_NOTE, "parameters": {"type": "object", "properties": {}}}}
+                    for n in sorted(legacy))
+                params["tools"] = tools
             return self._apply(key, who, context)
         except Exception:
             return context   # an editor must never break a request
+
+    # -- moving a conversation between programs -------------------------------
+
+    def _import(self, context: list) -> tuple[list, set]:
+        """Each (context:import:<id>) in a user message becomes that saved
+        conversation, in place, followed by whatever else the message said.
+        The program keeps resending the message with the marker in it, so this
+        happens on every request, like an edit."""
+        out, legacy = [], set()
+        for msg in context:
+            text = _text(msg.get("content")) if isinstance(msg, dict) and msg.get("role") == "user" else ""
+            keyword = (self.prompt_keyword or "context").lower()
+            m = import_re(keyword).search(text) if keyword in text.lower() else None
+            saved = self._load(m.group(1)) if m else None
+            if m and saved is None:
+                self.report(f"No saved conversation {m.group(1)}: left as it is")
+            if saved is None:
+                out.append(msg)
+                continue
+            imported, names = as_imported(saved.get("messages") or [])
+            legacy |= names
+            out.extend(imported)
+            fallback = f"(Continued from an earlier conversation in {saved.get('who') or 'another program'}.)"
+            out.append({**msg, "content": _without_marker(msg.get("content"), m.group(0), fallback)})
+            self.report(f"Imported {len(imported)} messages from {saved.get('who') or 'another program'}",
+                        conversation=m.group(1))
+        return out, legacy
+
+    def _path(self, cid: str):
+        return _contexts_dir() / f"{cid}.json"
+
+    def _load(self, cid: str) -> dict | None:
+        try:
+            return json.loads(self._path(cid).read_text())
+        except (OSError, ValueError):
+            return None
+
+    def _save(self, key: str, messages: list) -> None:
+        """The conversation as the model saw it (edits in, before compaction),
+        under its id. Never breaks a request."""
+        with self._lock:
+            conv = self._convs.get(key) or {}
+        cid = context_id(key)
+        try:
+            _contexts_dir().mkdir(parents=True, exist_ok=True)
+            tmp = self._path(cid).with_suffix(".tmp")
+            tmp.write_text(json.dumps({"id": cid, "who": conv.get("who", ""), "first": conv.get("first", ""),
+                                       "saved": time.time(), "messages": messages}, default=str))
+            os.replace(tmp, self._path(cid))
+        except OSError as e:
+            self.report(f"Couldn't save the conversation for importing: {e}")
 
     def post_hook(self, context: list) -> list:
         """Add the model's reply to the conversation as soon as it's back, so it
@@ -214,8 +374,10 @@ class ContextEditorTrick(Trick):
                     n = 1 + sum(1 for item in snapshot if item["key"].split(":")[0] == fp)
                     snapshot.append({"key": f"{fp}:{n}", "original": dict(reply), "latest": True})
                     conv["messages"] = snapshot
+                    sent = conv.get("sent") or []
                     # the list's size counts the reply now, not when the chat is next opened
                     conv["chars"] = conv.get("chars", 0) + len(json.dumps(reply.get("content"), default=str))
+                self._save(key, sent + [reply])
                 self.publish({"event": "context", "conv": key, "reply": True, "ts": time.time()})
         except Exception:
             pass
@@ -247,6 +409,7 @@ class ContextEditorTrick(Trick):
                 snapshot.append({"key": mkey, "original": msg})
             first = next((_text(m.get("content")).strip().split("\n")[0][:120]
                           for m in context if isinstance(m, dict) and m.get("role") == "user"), "")
+        sent = list(out)   # what's saved for importing: edits in, no compaction
         technique = getattr(self, "compaction", None) or "off"
         compacted, removed = compact(out, technique)
         if removed:
@@ -256,7 +419,8 @@ class ContextEditorTrick(Trick):
             out = compacted
         size = sum(len(json.dumps(m.get("content"), default=str)) for m in out if isinstance(m, dict))
         with self._lock:
-            conv.update(who=who, first=first, seen=time.time(), messages=snapshot, chars=size)
+            conv.update(who=who, first=first, seen=time.time(), messages=snapshot, chars=size, sent=sent)
+        self._save(key, sent)
         self.publish({"event": "context", "conv": key, "who": who, "first": first,
                       "messages": len(out), "tokens": round(size / 4), "edited": edited, "ts": time.time()})
         if edited:
@@ -272,7 +436,7 @@ class ContextEditorTrick(Trick):
         if action == "conversations":
             with self._lock:
                 return {"conversations": [
-                    {"conv": k, "who": c.get("who", ""), "first": c.get("first", ""),
+                    {"conv": k, "id": context_id(k), "who": c.get("who", ""), "first": c.get("first", ""),
                      "messages": len(c.get("messages", [])), "edited": len(c["edits"]),
                      "tokens": round(c.get("chars", 0) / 4),
                      "seen": c.get("seen", 0)}
@@ -333,7 +497,7 @@ class ContextEditorTrick(Trick):
                 self._convs[key]["chars"] = sent   # the list shows the size after edits too
         original = sum(len(json.dumps(item["original"].get("content"), default=str)) for item in messages)
         technique = TECHNIQUES.get(getattr(self, "compaction", None) or "", {}).get("name", "")
-        return {"conv": key, "who": conv.get("who", ""), "messages": rows,
+        return {"id": context_id(key), "keyword": self.prompt_keyword or "context", "conv": key, "who": conv.get("who", ""), "messages": rows,
                 "tokens": round(sent / 4), "saved": max(0, round((original - edited_chars) / 4)),
                 "compacted": max(0, round((edited_chars - sent) / 4)), "technique": technique}
 

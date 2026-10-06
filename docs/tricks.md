@@ -341,6 +341,8 @@ Recent conversations show as chats, you on the right and the model on the left, 
 
 **Compaction**, below the conversation list, does the cutting automatically on every request in the channel. Pick one published technique: *Observation masking* ([The Complexity Trap](https://arxiv.org/abs/2508.21433)), *clear_tool_uses_20250919* ([Anthropic context editing](https://platform.claude.com/docs/en/build-with-claude/context-editing)) or *only_n_most_recent_images* ([Anthropic's computer-use demo](https://github.com/anthropics/claude-quickstarts/blob/main/computer-use-demo/computer_use_demo/loop.py)). What it changed is marked in the chat. Details and defaults: [Compaction](compaction.md).
 
+**Continue a conversation in another program.** Every conversation has an id; **continue in another program** on its Live tab copies `(context:import:<id>)`. Paste that into any other program connected to petsitter, with whatever you want to say next, and its model picks the conversation up where it left off. The messages are swapped in where you pasted, on every request, like an edit. The new program's own system prompt and tools apply. The old program's tool calls come along renamed `legacy_<name>` and declared as tools that can't be run, so every API accepts the history and the model sees what was done. Conversations are saved, as the model last saw them with edits included, in `~/.cache/petsitter/contexts/` and survive a restart. The keyword is the extension's prompt keyword, `context` unless you change it.
+
 ```bash
 pet add mine context_editor
 ```

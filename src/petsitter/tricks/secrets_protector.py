@@ -66,7 +66,10 @@ directly before a `)`.
   arguments (JSON-escaped there). Only the stand-in format is swapped back,
   so nothing else in the reply can be mistaken for one.
 - The personal-detail patterns are broad: 16 digits in groups of four read as
-  a card number.
+  a card number. Each kind has a `hide_<kind>` setting.
+- The `always_hide` setting (type `"lines"`, marked `secret`) is matched
+  exactly, as plain text, alongside the detectors; overlaps keep the earliest,
+  longest. It's never shown to a model, even through Expose Petsitter.
 """
 
 import hashlib

@@ -186,3 +186,81 @@ def test_the_list_size_counts_the_reply_as_soon_as_it_comes_back():
     detail = t.ui_action({"action": "detail", "conv": listed["conv"]})
     assert listed["tokens"] > before + 90
     assert listed["tokens"] == detail["tokens"]       # same figure the chat shows
+
+
+# -- moving a conversation to another program: (context:import:<id>) ----------
+
+FROM_A = [
+    {"role": "system", "content": "You are Program A."},
+    {"role": "user", "content": "write snake.py"},
+    {"role": "assistant", "content": None, "tool_calls": [
+        {"id": "c1", "type": "function", "function": {"name": "Write", "arguments": '{"path": "snake.py"}'}}]},
+    {"role": "tool", "tool_call_id": "c1", "name": "Write", "content": "wrote snake.py"},
+]
+
+
+def run_with(trick, context, params, x_title):
+    token = start_request_meta(request_id="r", payload={}, x_title=x_title, tools=[])
+    try:
+        out = trick.pre_hook(copy.deepcopy(context), params)
+        return out
+    finally:
+        reset_request_meta(token)
+
+
+def a_conversation(t):
+    """Program A's conversation, with its last reply, and its id."""
+    token = start_request_meta(request_id="r", payload={}, x_title="Program A", tools=[])
+    try:
+        t.pre_hook(copy.deepcopy(FROM_A), {})
+        t.post_hook(copy.deepcopy(FROM_A) + [{"role": "assistant", "content": "Done: snake.py is written."}])
+    finally:
+        reset_request_meta(token)
+    conv = next(c for c in t.ui_action({"action": "conversations"})["conversations"] if c["who"] == "Program A")
+    assert t.ui_action({"action": "detail", "conv": conv["conv"]})["id"] == conv["id"]
+    return conv["id"]
+
+
+def test_another_program_continues_the_conversation():
+    t = ContextEditorTrick()
+    cid = a_conversation(t)
+    b_tools = [{"type": "function", "function": {"name": "bash", "parameters": {}}}]
+    params = {"tools": list(b_tools)}
+    b = [{"role": "system", "content": "You are Program B."},
+         {"role": "user", "content": f"(context:import:{cid}) now add a score counter"}]
+    out = run_with(t, b, params, "Program B")
+    assert [m["role"] for m in out] == ["system", "user", "assistant", "tool", "assistant", "user"]
+    assert out[0]["content"] == "You are Program B."              # B's own system prompt; A's is left out
+    assert out[2]["tool_calls"][0]["function"]["name"] == "legacy_Write"
+    assert out[3]["name"] == "legacy_Write" and out[3]["tool_call_id"] == "c1"
+    assert out[4]["content"] == "Done: snake.py is written."      # A's last reply came along
+    assert out[5]["content"] == "now add a score counter"
+    names = [x["function"]["name"] for x in params["tools"]]
+    assert names == ["bash", "legacy_Write"]                      # declared, so the API accepts the history
+    # B resends the marker every turn: it keeps being swapped
+    again = run_with(t, b + [{"role": "assistant", "content": "ok"}, {"role": "user", "content": "go"}],
+                     {"tools": list(b_tools)}, "Program B")
+    assert again[2]["tool_calls"][0]["function"]["name"] == "legacy_Write" and again[-1]["content"] == "go"
+
+
+def test_marker_alone_and_an_unknown_id():
+    t = ContextEditorTrick()
+    cid = a_conversation(t)
+    out = run_with(t, [{"role": "user", "content": f"(context:import:{cid})"}], {}, "Program B")
+    assert out[-1]["content"] == "(Continued from an earlier conversation in Program A.)"
+    missing = f"(context:import:{cid[:-1]}X)"
+    out = run_with(t, [{"role": "user", "content": missing}], {}, "Program B")
+    assert out == [{"role": "user", "content": missing}]
+
+
+def test_the_proxy_leaves_the_import_marker_for_the_trick():
+    """The keyword stage runs first: it must leave (context:import:...) where it
+    was typed, with no "unrecognized keyword" note, or the import never happens."""
+    from petsitter.proxy import ProxyHandler
+    t = ContextEditorTrick()
+    cid = a_conversation(t)
+    text = f"(context:import:{cid}) keep going"
+    out, short = ProxyHandler("http://unused", "m", tricks=[t])._filter_prompt_keywords(
+        [{"role": "system", "content": "B"}, {"role": "user", "content": text}])
+    assert short is None and out == [{"role": "system", "content": "B"}, {"role": "user", "content": text}]
+    assert len(run_with(t, out, {}, "Program B")) == 6

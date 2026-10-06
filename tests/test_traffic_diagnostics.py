@@ -126,3 +126,14 @@ class TestRequestChanges:
             "field dropped: temperature = 0.2",
             "field added: max_tokens = 9",
         ]
+
+
+def test_a_tool_call_without_a_name_does_not_break_the_list():
+    from petsitter.tricks.logger import _http
+    body = json.dumps({"choices": [{"message": {"role": "assistant", "tool_calls": [
+        {"function": {"name": "shell", "arguments": "{}"}}, {"function": {"name": None, "arguments": "{}"}}]}}]})
+    rec = {"request": {"line": "POST /v1/chat/completions", "headers": [], "body": bytearray(b"{}")},
+           "response": {"status": 200, "headers": [["content-type", "application/json"]], "body": bytearray(body.encode()),
+                        "done": True, "ended": "complete", "error": None, "client_gone_ms": None},
+           "upstream": []}
+    assert "tool calls: shell, ?" in _http(rec)["client_response"]

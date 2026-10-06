@@ -137,6 +137,11 @@ def handle_prompt_keyword(self, request: str, messages: list | None = None,
   `pre_hook` rewrites it in place (Secrets Protector replaces
   `(secret: value)` with a stand-in this way). `find_prompt_keyword_patterns`
   from `petsitter.trick` is the parser the framework uses.
+- A `(word: ...)` that no trick in the channel claims is stripped from the
+  newest message before any `pre_hook` runs. A trick that reads its own pattern
+  in `pre_hook` must claim the keyword this way, or it never sees it: Context
+  Editor sets `prompt_keyword = "context"` for `(context:import:<id>)`. Build
+  the pattern from `self.prompt_keyword`, since the user can rename it.
 
 ## Settings
 
@@ -153,8 +158,9 @@ config_fields = [
 | `key` (required) | The attribute name the value arrives as on `self` |
 | `label` (required) | Shown in the dashboard |
 | `description` | Help text under the field |
-| `type` | `"text"` (default), `"number"`, `"boolean"`, `"path"` (a text box) or `"choice"` (pick one of `options`) |
+| `type` | `"text"` (default), `"number"`, `"boolean"`, `"path"` (a text box), `"password"`, `"lines"` (a multi-line box; the value is one string, an item per line) or `"choice"` (pick one of `options`) |
 | `options` | For `"choice"`: the values to pick from |
+| `secret` | `True` keeps the value from any model: Expose Petsitter neither shows nor changes it, even under sudo (as with `"password"`), and the dashboard shows only that it's set or how many lines it has |
 | `default` | Shown in the form when nothing is stored |
 | `required` | Whether a value must be given |
 
@@ -194,20 +200,34 @@ that answers some of the model's tool calls itself and then lets it carry on,
 as Expose Petsitter does. Outside a request it falls back to the default model.
 
 `get_raw()` returns the current request's raw HTTP, recorded at petsitter's two
-edges: the client's request as it arrived (`line`, `headers`, `body`), and each
-call made to a provider for it (`method`, `url`, `request_headers`,
-`request_body`, `status`, `headers`, `first_byte_ms`, `ms`, `error`, `body`,
-streams included). Bodies are bytes. A `raw_upstream` pipeline event (see
-`subscribe`) fires as each provider call finishes, failed ones too. The Traffic
-Logger is built on it.
+edges: the client's request as it arrived (`line`, `headers`, `body`) and
+petsitter's response to it, and each call made to a provider for it (`method`,
+`url`, `request_headers`, `request_body`, `status`, `headers`, `first_byte_ms`,
+`last_byte_ms`, `ms`, `error`, `body`, streams included). Bodies are bytes.
+Each response says how it ended, in `ended`: a provider call `"complete"`,
+`"closed early"` (petsitter stopped reading) or `"error"`; petsitter's own
+`"complete"`, `"client disconnected"` (with `client_gone_ms`), `"error"` (the
+traceback in `error`) or `"incomplete"`. A `raw_upstream` pipeline event (see
+`subscribe`) fires as each provider call finishes, failed ones too. From
+`petsitter.raw`: `current()` is the live record itself, still filling in;
+`on_finish(record, fn)` calls `fn(record)` once the response is over, however
+it ended (a trick's hooks may never run for a reply that was cut short); and
+`stream_report(text)` reads an SSE body: events, heartbeats, `[DONE]`, finish
+reason, usage, text and reasoning sizes, each tool call and whether its
+arguments are valid JSON, the last few events. The Traffic Logger is built on
+these.
 
 Anything petsitter itself puts into a conversation starts with its reserved
 id, `get_prefix()` (`gRefWg2D7zO8`), in the form `<prefix>-<context>-<id>`, the id 128 bits as 22 base62
 characters (`reserved_id()`):
 `reserved("sp")` gives `gRefWg2D7zO8-sp-3Lw9rTqXc0VbN7mK2pZs4a` (Secrets
 Protector's stand-ins), and `reserved_pattern("sp")` matches them.
-Expose Petsitter's tool names are `gRefWg2D7zO8-<name>`. Use these for yours,
-and sniff for them to tell petsitter's own things from the user's.
+Context Editor's conversation ids are `reserved("ctx", ...)`, and Expose
+Petsitter's tool names are `gRefWg2D7zO8-<name>`. Use these for yours, and
+sniff for them to tell petsitter's own things from the user's. The prefix can
+be changed on petsitter's Settings page; it takes effect at startup, before any
+trick loads, so a trick may build names from it at import time, but should
+always call `get_prefix()` / `reserved_pattern()` rather than copy the string.
 
 ## Live page (optional)
 

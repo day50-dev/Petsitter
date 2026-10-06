@@ -47,6 +47,9 @@
   .size .saved { color: var(--ok); }
   .size .cmp { color: var(--cmp); }
   .size[hidden] { display: none; }
+  .size .carry { margin-left: auto; align-self: center; background: none; border: 1px solid var(--border); color: var(--text);
+                 border-radius: 5px; font: inherit; font-size: 12px; padding: 3px 10px; cursor: pointer; }
+  .size .carry:hover { border-color: var(--edit); }
   .chat { flex: 1; overflow-y: auto; padding: 14px 18px 40px; }
   .empty { color: var(--dim); padding: 40px 18px; max-width: 560px; line-height: 1.6; }
   .empty b { color: var(--text); }
@@ -200,8 +203,19 @@ function showDetail(d) {
   size.innerHTML = `<span>context sent to the model</span><b>~${tokens(d.tokens * 4)}</b>` +
     `<span>${rows.length} messages</span>` +
     (d.saved ? `<span class="saved">~${tokens(d.saved * 4)} saved by your edits</span>` : "") +
-    (d.compacted ? `<span class="cmp">~${tokens(d.compacted * 4)} removed by ${esc(d.technique || "compaction")}</span>` : "");
+    (d.compacted ? `<span class="cmp">~${tokens(d.compacted * 4)} removed by ${esc(d.technique || "compaction")}</span>` : "") +
+    (d.id ? `<button class="carry" id="carry" title="Copies (${esc(d.keyword)}:import:${esc(d.id)}). Paste it into another program connected to petsitter to continue this conversation there.">continue in another program</button>` : "");
+  const carry = document.getElementById("carry");
+  if (carry) carry.onclick = () => copyText(carry, `(${d.keyword}:import:${d.id})`);
   renderChat();
+}
+
+// Copy, and say so on the button; select-to-copy where the clipboard is refused.
+async function copyText(btn, text) {
+  const label = btn.textContent;
+  try { await navigator.clipboard.writeText(text); btn.textContent = "copied: paste it in the other program"; }
+  catch (_) { window.prompt("Copy this, then paste it in the other program:", text); }
+  setTimeout(() => { btn.textContent = label; }, 2500);
 }
 
 let totalChars = 1;

@@ -75,6 +75,17 @@ everything after it, so put the logger first to be sure of a record.
 - The Live tab keeps each request's raw HTTP record (`petsitter.raw`), which
   fills in as the provider answers and petsitter replies, and turns it into
   text once the request is done, dropping the bodies. A restart clears it.
+- `http.jsonl` is written from `raw.on_finish`, not a hook, so a reply that
+  was cut short (no `post_hook` ran) is recorded too.
+- `verdict(record)` compares the two sides: how each response ended
+  (`raw.finish` / `raw._finish`), and what `raw.stream_report` reads in each
+  stream. A provider stream with a finish_reason but no `[DONE]` isn't
+  flagged; petsitter adds the `[DONE]`. `request_changes(record)` diffs the
+  request your tool sent against the one petsitter sent: headers (not the ones
+  every HTTP client sets for itself) and top-level body fields, messages and
+  tools by count and size.
+- A record odd enough to trip the layout still shows, with what went wrong in
+  showing it (`_safe_http`), instead of taking the list down.
 """
 
 import json
@@ -108,7 +119,7 @@ def _chars(value) -> str:
 def _message_note(msg) -> str:
     if not isinstance(msg, dict):
         return f"<{_chars(msg)}>"
-    calls = [(c.get("function") or {}).get("name", "") for c in msg.get("tool_calls") or [] if isinstance(c, dict)]
+    calls = [str((c.get("function") or {}).get("name") or "?") for c in msg.get("tool_calls") or [] if isinstance(c, dict)]
     return f"<{msg.get('role', 'message')}, {_chars(msg.get('content'))}" + (f", tool calls: {', '.join(calls)}" if calls else "") + ">"
 
 
@@ -355,6 +366,21 @@ def _http(record: dict) -> dict:
     return blocks
 
 
+def _safe_http(record: dict) -> dict:
+    """_http(), but traffic odd enough to trip it still shows up, with what
+    went wrong in showing it, instead of taking the whole list down."""
+    try:
+        return _http(record)
+    except Exception as e:
+        import traceback
+        resp = record.get("response") or {}
+        return {"client_request": record.get("request", {}).get("line", ""), "client_response": None,
+                "client_status": resp.get("status"), "done": resp.get("done", True), "upstream": [],
+                "client": {}, "changed": [],
+                "verdict": [f"Traffic Logger couldn't lay this exchange out ({type(e).__name__}: {e}); "
+                            f"the raw bodies are in http.jsonl.\n" + traceback.format_exc(limit=3)]}
+
+
 def _size(messages) -> int:
     return len(json.dumps(messages, default=str)) if messages else 0
 
@@ -467,7 +493,7 @@ class LoggerTrick(Trick):
         can still be taken apart after it has left the last 40."""
         line = {k: v for k, v in entry.items() if k != "_record"}
         line["timestamp"] = _now()
-        line["http"] = _http(record)
+        line["http"] = _safe_http(record)
         line["client_response_body"] = bytes(record["response"]["body"]).decode("utf-8", "replace")
         line["upstream_response_bodies"] = [
             raw_http._decoded(bytes(ex["body"]), ex.get("headers") or []).decode("utf-8", "replace")
@@ -483,13 +509,13 @@ class LoggerTrick(Trick):
         for entry in self._recent:
             record = entry.get("_record")
             if record is not None and record["response"]["done"]:
-                entry["http"] = _http(record)
+                entry["http"] = _safe_http(record)
                 del entry["_record"]
 
     def _shown(self, entry: dict) -> dict:
         out = {k: v for k, v in entry.items() if k != "_record"}
         if entry.get("_record") is not None:
-            out["http"] = _http(entry["_record"])
+            out["http"] = _safe_http(entry["_record"])
         return out
 
     def ui_action(self, data):

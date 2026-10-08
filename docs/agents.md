@@ -28,11 +28,14 @@ The **exit button** in the top-right restores every tool's original configuratio
 | [Kilo Code](https://kilo.ai) (`kilo`) | `~/.config/kilo/kilo.json` or `kilo.jsonc` (`$XDG_CONFIG_HOME`) | Provider `baseURL`, as for OpenCode (it's a fork) | `X-Title: Kilo Code*` (its own) | @kilocode/cli 7.8.3 (`kilo run`) |
 | [Cline](https://cline.bot) (`cline`) | `~/.cline/data/settings/providers.json` (`$CLINE_DIR`, `$CLINE_DATA_DIR`, `$CLINE_PROVIDER_SETTINGS_PATH`) | `settings.baseUrl` and `settings.headers` `X-Title: Cline` on `lastUsedProvider` | `X-Title: Cline` | cline 3.0.68 (`cline "…"`) |
 | [Codex](https://developers.openai.com/codex) | `~/.codex/config.toml` (`$CODEX_HOME`) | `openai_base_url` | `Model: gpt*` | |
+| [OpenClaw](https://openclaw.ai) | `~/.openclaw/openclaw.json` (`$OPENCLAW_CONFIG_PATH`, `$OPENCLAW_STATE_DIR`) | `models.providers.<p>.baseUrl` and `headers` `X-Title: OpenClaw` on the provider of `agents.defaults.model.primary`. Plain JSON only: a hand-written JSON5 file (comments, trailing commas) is left alone, with a message saying so | `X-Title: OpenClaw` | openclaw 2026.9.9 (`openclaw agent exec`) |
 | [omp](https://omp.sh) | `~/.omp/agent/models.yml` (`$PI_CODING_AGENT_DIR`) | `baseUrl` and `headers` `X-Title: omp` on the provider of `config.yml`'s `modelRoles.default` | `X-Title: omp` | @oh-my-pi/pi-coding-agent 18.5.0 (`omp -p`) |
 | [pi](https://pi.dev) | `~/.pi/agent/models.json` (`$PI_CODING_AGENT_DIR`) | `baseUrl` and `headers` `X-Title: pi` on `settings.json`'s `defaultProvider` | `X-Title: pi` | @earendil-works/pi-coding-agent 1.0.0 (`pi -p`) |
 | [OpenCode](https://opencode.ai) | `~/.config/opencode/opencode.json` | Provider `baseURL` | `X-Title: opencode*` | |
 
 "Checked with" means: installed in a sandbox, a request run through petsitter landed in the tool's own channel, and the config came back byte-for-byte on shutdown. Not yet confirmed by a person on a real setup. These tools change their config formats; when one breaks, this says what it last worked with.
+
+Not yet: **Goose**. It works pointed at petsitter by hand, but has no one-click adapter.
 
 Not supported: **Freebuff**. Its normal mode runs on Freebuff's own models through its backend, with no base URL to change. A custom endpoint is only possible through its in-app "bring your own key" connections, which switch it off its free models, and it has no one-shot mode to test with.
 

@@ -39,6 +39,93 @@ uvx petsitter
 Nothing else to set up. Have a look around, and if none of it is useful, no harm
 done.
 
+## A quick tour
+
+### 1. Start here
+
+`uvx petsitter` opens the dashboard at `http://localhost:8080`. The first page
+is three steps: tell it where your requests should go, connect a tool, and watch
+what that tool sends. Each one ticks off as you do it, and the diagram underneath
+lights up once traffic is actually moving.
+
+![Start here](https://raw.githubusercontent.com/day50-dev/Petsitter/main/docs/screenshots/01-start-here.png)
+
+### 2. Point it at your provider
+
+**Models** is where the traffic goes. Pick a provider, paste your key, and
+petsitter asks the provider which models it has, so the list is never out of
+date. Anything that speaks the OpenAI API works, including a local server.
+
+![Models](https://raw.githubusercontent.com/day50-dev/Petsitter/main/docs/screenshots/04-models.png)
+
+### 3. Connect a tool
+
+**Agents** lists the coding tools petsitter knows how to set up. Flip the switch
+and it edits that tool's own settings file so its requests come through here
+first; flip it back and the file is restored exactly as it was. Your tool keeps
+its own account, and petsitter never needs your API key.
+
+![Agents](https://raw.githubusercontent.com/day50-dev/Petsitter/main/docs/screenshots/03-agents.png)
+
+For anything not on that list, **Connecting** has the address to paste in. Use
+`http://localhost:8080/v1` as the base URL of any OpenAI-compatible tool. To
+keep a tool's own provider and key and only add your extensions, put the
+provider after `/use/`, as in `http://localhost:8080/use/anthropic.com`
+([more](docs/proxy.md)).
+
+![Connecting](https://raw.githubusercontent.com/day50-dev/Petsitter/main/docs/screenshots/02-connecting.png)
+
+### 4. See what's going through
+
+Every request is now visible. **Context Monitor** shows which program sent each
+request, its system prompt, every message, the tools it offered, and how big it
+all is, with the largest and median context sizes up top.
+
+![Context Monitor](https://raw.githubusercontent.com/day50-dev/Petsitter/main/docs/screenshots/06-context-monitor.png)
+
+Each channel also has a **Logs** tab: what petsitter did with each request,
+which extensions ran, and what the upstream said back.
+
+![Logs](https://raw.githubusercontent.com/day50-dev/Petsitter/main/docs/screenshots/07-logs.png)
+
+### 5. Turn on extensions
+
+Extensions are the things that change a request on its way out, or a reply on
+its way back. They're grouped into **channels**, and a channel decides which
+requests it applies to: a `claude` channel for Claude Code, say, while
+**Default** catches everything no other channel matches. Installed extensions
+run in order; drag to reorder, switch them on and off, and browse below for
+more, including ones [other people have published](docs/community.md).
+
+![Extensions](https://raw.githubusercontent.com/day50-dev/Petsitter/main/docs/screenshots/05-extensions.png)
+
+### 6. Try it
+
+The speech-bubble button in the header opens a panel that sends a message
+through the selected channel, exactly as a real tool would. The reply comes back
+with a pill for each extension that ran, so you can see what fired and how long
+it took. [More on Try It](#try-it).
+
+![Try it](https://raw.githubusercontent.com/day50-dev/Petsitter/main/docs/screenshots/08-playground.png)
+
+### Running it other ways
+
+Everything you set in the dashboard is saved to a config file
+(`~/.config/petsitter/config.json`, or `$PET_CONFIG_DIR`), so a plain
+`petsitter` starts the same way next time.
+
+```bash
+# listen on a different address (0.0.0.0 lets other machines use it)
+petsitter -l localhost:8080
+
+# run from a different config file
+petsitter -c another_petsitter_config.conf.json -l localhost:8080
+```
+
+The `pet` command does the same configuration from the terminal, and takes the
+same `-c` flag before its subcommand, e.g. `pet -c another_petsitter_config.conf.json ls`.
+See the [command line reference](docs/cli.md).
+
 
 ## A bit more precisely
 
@@ -66,9 +153,7 @@ A trick can be as simple as appending a sentence to the system prompt, or as inv
 
 The Extensions tab lists the bundled extensions alongside [community tricks](docs/community.md#community-tricks) published by other people, and the speech-bubble button in the header opens a [Try It panel](#try-it) that sends a message through the pipeline so you can watch which tricks fire.
 
-You can also edit tricks, reorder them, disable, add new ones, and filter them:
-<img alt="2026-07-04_15-13" src="https://github.com/user-attachments/assets/c623f29a-8724-4fdb-bc6d-a76c3022183a" />
-
+You can also edit tricks, reorder them, disable, add new ones, and filter them.
 
 *Petsitter* is part of the [DAY50](https://github.com/day50-dev/) suite of open-source tools for local AI workflows and constructing better agents.
 
@@ -79,28 +164,6 @@ The core goals of Petsitter are:
 - **Mix and match** - Combine multiple tricks for compound effects
 
 ---
-
-## Quick Start
-
-Quickest way:
-
-```bash
-$ uvx petsitter
-```
-
-Or you can do one off invocation:
-```bash
-# Run petsitter, reading settings from the default config file
-# (~/.config/petsitter/config.json, or $PET_CONFIG_DIR)
-petsitter -l localhost:8080
-
-# Or point at a specific config file (model, tricksets, etc. all live there)
-petsitter -c another_petsitter_config.conf.json -l localhost:8080
-```
-
-Configure the upstream model, tricksets, and modelset via the dashboard at `http://localhost:8080` or the `pet` CLI — everything is persisted to the config file, so a plain `petsitter` starts the same way next time. `pet` accepts the same `-c` flag (before the subcommand, e.g. `pet -c another_petsitter_config.conf.json ls`) so both tools can target the same config area.
-
-Either way, now you can point your AI applications to `http://localhost:8080/v1` (with or without the `/v1`) and you're going through the petsitter middleware. To keep your tool's own provider, key and model and just add your extensions, use `http://localhost:8080/use/<provider>` instead, e.g. `/use/anthropic.com` or `/use/openai.com/v1` ([more](docs/proxy.md)).
 
 ## Try It
 

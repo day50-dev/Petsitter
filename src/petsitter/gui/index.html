@@ -3298,6 +3298,10 @@ async function savePetsitterSetting(key, value) {
 }
 
 // ---- agents ----
+// Stable order for the grid. Established once per page load; a re-fetch (e.g.
+// right after you flip a tool's switch) must not re-sort the list, or the
+// tool you just clicked jumps to the front and the page feels broken.
+let _agentOrder = null;
 async function fetchAgents() {
   try {
     const agents = await fetchJSON('/api/agents');
@@ -3316,9 +3320,24 @@ async function fetchAgents() {
       if (d.status === 'missing_creds') return 2;
       return 4;
     };
-    const ordered = ids.slice().sort((x, y) =>
-      rankOf(x) - rankOf(y) ||
-      String(agents[x].display_name || x).localeCompare(String(agents[y].display_name || y)));
+    let ordered;
+    if (_agentOrder) {
+      // Keep the order we already showed. New tools (none at page load) slot in
+      // by rank and name so they don't land mid-list; existing tools stay put
+      // even if a toggle just changed their rank.
+      const byId = new Map(ids.map(i => [i, i]));
+      const kept = _agentOrder.filter(i => byId.has(i));
+      const seen = new Set(kept);
+      const fresh = ids.filter(i => !seen.has(i)).sort((x, y) =>
+        rankOf(x) - rankOf(y) ||
+        String(agents[x].display_name || x).localeCompare(String(agents[y].display_name || y)));
+      ordered = kept.concat(fresh);
+    } else {
+      ordered = ids.slice().sort((x, y) =>
+        rankOf(x) - rankOf(y) ||
+        String(agents[x].display_name || x).localeCompare(String(agents[y].display_name || y)));
+      _agentOrder = ordered.slice();
+    }
     window._agentNames = {};
     ids.forEach(i => { window._agentNames[i] = agents[i].display_name || i; });
     // The onboarding tool step shows the same set, reduced to tools you can act

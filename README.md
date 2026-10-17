@@ -127,14 +127,6 @@ same `-c` flag before its subcommand, e.g. `pet -c another_petsitter_config.conf
 See the [command line reference](docs/cli.md).
 
 
-## A bit more precisely
-
-**Petsitter** is an OpenAI-compatible proxy that layers smart harnesses on top of language models to give them capabilities they don't natively have. It also makes finicky behaviors reliable and dependable.
-
-You install it, point it at a model, load a few example tricks, and suddenly things that model couldn't do before such as tool calling, structured JSON, multi-step reasoning start working. You can also protect secrets, have memory, share server instances across harnesses, and extend the tool trivially.
-
-The built-in tricks are starting points. Tweak them, combine them, or use them as a reference to build something entirely different. Petsitter isn't a turnkey product; it's a kit.
-
 ## How It Works
 
 <img alt="Petsitter_Intelligent_Proxy_-_Slide_2a" src="https://github.com/user-attachments/assets/b7a2a344-f438-4370-aee8-fd6f2dfe0756" />

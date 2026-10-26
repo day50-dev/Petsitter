@@ -4,19 +4,19 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PetSitter Dashboard</title>
-<link rel="icon" type="image/png" href="/static/favicon.png">
-<link rel="stylesheet" href="/static/styles.css">
-<link rel="stylesheet" href="/static/vendor/github-dark.min.css">
-<script src="/static/stream.js"></script>
-<script src="/static/vendor/marked.min.js"></script>
-<script src="/static/vendor/highlight.min.js"></script>
-<script src="/static/vendor/mermaid.min.js"></script>
+<link rel="icon" type="image/png" href="static/favicon.png">
+<link rel="stylesheet" href="static/styles.css">
+<link rel="stylesheet" href="static/vendor/github-dark.min.css">
+<script src="static/stream.js"></script>
+<script src="static/vendor/marked.min.js"></script>
+<script src="static/vendor/highlight.min.js"></script>
+<script src="static/vendor/mermaid.min.js"></script>
 </head>
 <body>
 
 <header>
 <div class="brand">
-<a href="https://github.com/day50-dev/Petsitter" target="_blank" rel="noopener"><img src="/static/petsitter-logo-dark.svg" alt="Petsitter" id="brand-logo" title="Petsitter"></a>
+<a href="https://github.com/day50-dev/Petsitter" target="_blank" rel="noopener"><img src="static/petsitter-logo-dark.svg" alt="Petsitter" id="brand-logo" title="Petsitter"></a>
 </div>
 <div class="info">
 <button class="base-chip" id="base-chip" onclick="copyBaseUrl(this)" title="Base URL: click to copy">
@@ -433,7 +433,7 @@ User-Agent, when it sends no X-Title), and which channel its requests went to. K
 <p>Looking for an extension's settings? They're on the extension itself: open a channel, pick the extension, and use its <b>⚙ Settings</b> button. A channel's logging and models are on that channel's Settings tab.</p>
 <figure class="ps-shot">
 <div class="ps-shot-frame" aria-hidden="true"><span></span><span></span><span></span></div>
-<img src="/static/help/settings-extension.png" alt="An extension's page, with its Settings button next to the on/off switch" width="664" height="200" draggable="false">
+<img src="static/help/settings-extension.png" alt="An extension's page, with its Settings button next to the on/off switch" width="664" height="200" draggable="false">
 <figcaption>Screenshot: Secrets Protector's page, in a channel's Extensions tab</figcaption>
 </figure>
 </div>
@@ -1463,7 +1463,7 @@ function renderExtDetail() {
     // Pop out: the Live page on its own in a browser tab. It only uses
     // relative URLs, so the same address works standalone.
     + (_extView === 'live'
-        ? `<a class="ext-popout" href="/api/tricks/ui/${encodeURIComponent(inst.id || '')}/" target="_blank" rel="noopener" title="Open ${escapeHtml(nm)}'s live view in its own tab" aria-label="Open in its own tab">`
+        ? `<a class="ext-popout" href="api/tricks/ui/${encodeURIComponent(inst.id || '')}/" target="_blank" rel="noopener" title="Open ${escapeHtml(nm)}'s live view in its own tab" aria-label="Open in its own tab">`
           + `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>`
           + `<span>Pop out</span></a>`
         : '')
@@ -1471,7 +1471,7 @@ function renderExtDetail() {
 
   let body;
   if (_extView === 'live') {
-    body = `<iframe class="ext-live" src="/api/tricks/ui/${encodeURIComponent(inst.id || '')}/" title="${escapeHtml(nm)}: live"></iframe>`;
+    body = `<iframe class="ext-live" src="api/tricks/ui/${encodeURIComponent(inst.id || '')}/" title="${escapeHtml(nm)}: live"></iframe>`;
   } else if (_extView === 'source') {
     body = `<div class="ext-note">Read before you run. An extension runs inside petsitter with your API keys, the same way a pip package runs inside your Python.</div><pre class="browse-source"><code id="ext-source" class="language-python">Loading&hellip;</code></pre>`;
   } else {

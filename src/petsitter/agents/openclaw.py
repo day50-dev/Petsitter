@@ -61,7 +61,7 @@ class OpenClawAgent(Agent):
     id = "openclaw"
     display_name = "OpenClaw"
     description = "Personal AI assistant across your chat apps (openclaw.ai)"
-    icon = "/static/agents/openclaw.svg"   # bundled: gui/agents/ (from the openclaw package, MIT)
+    icon = "static/agents/openclaw.svg"   # bundled: gui/agents/ (from the openclaw package, MIT)
     required_env: list[str] = []
     provider_name = "its AI provider"
     title = "OpenClaw"

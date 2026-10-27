@@ -35,7 +35,7 @@
     try {
       const src = document.currentScript && document.currentScript.src;
       const version = src ? new URL(src).search : '';
-      worker = new SharedWorker('/static/stream-worker.js' + version, {name: 'petsitter-stream'});
+      worker = new SharedWorker('static/stream-worker.js' + version, {name: 'petsitter-stream'});
     } catch (_) { worker = null; }
   }
   if (worker) {
@@ -56,13 +56,13 @@
         if (!subscribe.length && !unsubscribe.length) return;
         const forSid = sid;
         try {
-          const r = await fetch('/api/stream/' + forSid, {method: 'POST', headers: {'Content-Type': 'application/json'},
+          const r = await fetch('api/stream/' + forSid, {method: 'POST', headers: {'Content-Type': 'application/json'},
                                                           body: JSON.stringify({subscribe, unsubscribe})});
           if (r.ok && forSid === sid) serverTopics = new Set((await r.json()).topics || []);
         } catch (_) {}
       });
     };
-    es = new EventSource('/api/stream');
+    es = new EventSource('api/stream');
     es.onmessage = e => {
       let m;
       try { m = JSON.parse(e.data); } catch (_) { return; }
@@ -91,13 +91,15 @@
   };
 
   // A Live page: route its own "events" stream through the shared one.
-  const page = location.pathname.match(/^\/api\/tricks\/ui\/([^/]+)\//);
+  // Suffix-matched, so it also works when the app sits behind a reverse
+  // proxy prefix (e.g. /petsitter/api/tricks/ui/<id>/).
+  const page = location.pathname.match(/\/api\/tricks\/ui\/([^/]+)\/$/);
   if (!page) return;
   const tid = page[1];
   const Native = window.EventSource;
   function Shared(url, opts) {
     const target = new URL(url, location.href);
-    if (target.origin !== location.origin || target.pathname !== `/api/tricks/ui/${tid}/events`) {
+    if (target.origin !== location.origin || !target.pathname.endsWith(`/api/tricks/ui/${tid}/events`)) {
       return new Native(url, opts);
     }
     const listeners = {};

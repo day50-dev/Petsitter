@@ -53,7 +53,7 @@ class OmpAgent(Agent):
     id = "omp"
     display_name = "omp"
     description = "Oh My Pi: terminal coding agent (omp.sh)"
-    icon = "/static/agents/omp.png"   # bundled: gui/agents/
+    icon = "static/agents/omp.png"   # bundled: gui/agents/
     required_env: list[str] = []
     provider_name = "its AI provider"
     title = "omp"

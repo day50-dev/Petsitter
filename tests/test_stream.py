@@ -67,9 +67,10 @@ def test_unknown_stream_is_a_404(server):
 
 
 def test_pages_use_the_shared_stream(server):
-    assert '<script src="/static/stream.js?v=' in httpx.get(server + "/").text
+    # Relative on purpose, so the app works behind a reverse proxy prefix.
+    assert '<script src="static/stream.js?v=' in httpx.get(server + "/").text
     tid = next(t["id"] for t in httpx.get(server + "/api/tricks").json() if t["name"] == "ContextMonitorTrick")
     page = httpx.get(f"{server}/api/tricks/ui/{tid}/").text
-    assert '<script src="/static/stream.js?v=' in page and 'EventSource("events")' in page
+    assert '<script src="../../../../static/stream.js?v=' in page and 'EventSource("events")' in page
     for gone in ("/api/logs", "/api/pause/stream"):
         assert httpx.get(server + gone, timeout=3).status_code in (404, 405)

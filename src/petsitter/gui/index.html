@@ -562,12 +562,12 @@ async function loadHelpContent() {
   try {
     // docs/help.md. Its links to the other docs are relative to docs/: send
     // those to GitHub. Its screenshots ship in the package, under /static.
-    const md = await (await fetch('/api/help')).text();
+    const md = await (await fetch('api/help')).text();
     const html = marked.parse(md);   // hard-wrapped: a single newline isn't a break
     const box = document.getElementById('help-content');
     box.innerHTML = html;
     box.querySelectorAll('img[src]').forEach(img => {
-      img.src = img.getAttribute('src').replace(/^(\.\.\/)?src\/petsitter\/gui\//, '/static/');
+      img.src = img.getAttribute('src').replace(/^(\.\.\/)?src\/petsitter\/gui\//, 'static/');
       img.loading = 'lazy';
     });
     renderHelpStatus();
@@ -637,7 +637,7 @@ let _introLastAt = 0;
 
 async function refreshIntro() {
   try {
-    const d = await fetchJSON('/api/info');
+    const d = await fetchJSON('api/info');
     const listen = document.getElementById('intro-listen');
     const model = document.getElementById('intro-model');
     if (listen) listen.textContent = d.listen_on || '--';
@@ -768,9 +768,9 @@ async function openContextMonitor() {
   const path = 'tricks/context_monitor.py';
   try {
     if (selectedTrickset !== '_default') await switchTrickset('_default');
-    const all = await fetchJSON('/api/tricks');
+    const all = await fetchJSON('api/tricks');
     if (!all.some(t => t.trickset === '_default' && t.path === path)) {
-      await fetchJSON('/api/tricks/load', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      await fetchJSON('api/tricks/load', {method: 'POST', headers: {'Content-Type': 'application/json'},
                                            body: JSON.stringify({path, trickset: '_default'})});
     }
     // Selection first: switchTab writes the hash, and the hash listener would
@@ -794,7 +794,7 @@ function paintOnboardTools() {
     const btn = on
       ? `<button class="btn btn-sm btn-secondary" onclick="switchTab('agents')">&#10003; connected</button>`
       : `<button class="btn btn-sm btn-secondary" onclick="obConnectTool('${escapeHtml(a.id)}')">connect</button>`;
-    const icon = /^(https?:|\/)/.test(a.icon)
+    const icon = a.icon && /^(https?:|\/|static\/)/.test(a.icon)
       ? `<span class="ob-tool-icon"><img src="${escapeHtml(a.icon)}" alt="" onerror="defaultImage(this)"></span>` : '';
     return `<div class="ob-tool${on ? ' on' : ''}">${icon}<span class="ob-tool-name">${escapeHtml(a.name)}</span>${btn}</div>`;
   }).join('') : `<div class="ob-tool-none">No coding tools found on this machine. Point any tool at the address on <a href="#connecting/_default">Connecting</a>.</div>`;
@@ -882,7 +882,7 @@ function newChannelFor(key) {
 
 async function forgetProgram(key) {
   try {
-    await fetchJSON('/api/discovered/forget', {method: 'POST', headers: {'Content-Type': 'application/json'},
+    await fetchJSON('api/discovered/forget', {method: 'POST', headers: {'Content-Type': 'application/json'},
                                                 body: JSON.stringify({key})});
     await fetchTraffic();
   } catch(e) { showToast(e.message, true); }
@@ -890,7 +890,7 @@ async function forgetProgram(key) {
 
 // ---- base URL ----
 // The address the browser used is the one other tools on the same network use.
-function baseUrl() { return location.origin + '/v1'; }
+function baseUrl() { return new URL('v1', location.href).href; }
 
 function copyBaseUrl(btn) {
   const span = document.getElementById('base-chip-url');
@@ -905,10 +905,10 @@ function paintBaseUrl() {
   const base = baseUrl();
   document.getElementById('base-url').textContent = base;
   document.getElementById('base-url-env').textContent = `OPENAI_BASE_URL=${base} your-program`;
-  document.getElementById('bypass-url').textContent = location.origin + '/bypass/v1';
-  document.getElementById('use-claude').textContent = `ANTHROPIC_BASE_URL=${location.origin}/use/anthropic.com claude`;
-  document.getElementById('use-codex').textContent = `OPENAI_BASE_URL=${location.origin}/use/openai.com/v1 codex`;
-  document.getElementById('ignore-openwebui').textContent = `${location.origin}/ignore/openrouter.ai/v1`;
+  document.getElementById('bypass-url').textContent = new URL('bypass/v1', location.href).href;
+  document.getElementById('use-claude').textContent = `ANTHROPIC_BASE_URL=${new URL('use/anthropic.com', location.href).href} claude`;
+  document.getElementById('use-codex').textContent = `OPENAI_BASE_URL=${new URL('use/openai.com/v1', location.href).href} codex`;
+  document.getElementById('ignore-openwebui').textContent = `${new URL('ignore/openrouter.ai/v1', location.href).href}`;
   paintShare();
 }
 
@@ -989,13 +989,13 @@ async function dismissUpstream() {
   _upstream = null;
   paintUpstream();
   if (typeof renderChannelRail === 'function') renderChannelRail();
-  try { await fetchJSON('/api/upstream/clear', {method: 'POST'}); } catch(e) { showToast(e.message, true); }
+  try { await fetchJSON('api/upstream/clear', {method: 'POST'}); } catch(e) { showToast(e.message, true); }
 }
 
 let _info = null;
 async function fetchInfo() {
     try {
-      const d = await fetchJSON('/api/info');
+      const d = await fetchJSON('api/info');
       _info = d;
       if (currentTab === 'connecting') paintShare();
       _upstream = d.upstream || null;
@@ -1032,7 +1032,7 @@ async function togglePause() {
   const btn = document.getElementById('pause-btn');
   const nowPaused = !(btn && btn.classList.contains('active'));
   try {
-    const d = await fetchJSON('/api/pause', {
+    const d = await fetchJSON('api/pause', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({paused: nowPaused})
     });
@@ -1109,7 +1109,7 @@ function _problemCard(e) {
 async function fetchTricks() {
   const el = document.getElementById('loaded-tricks');
   try {
-    const all = await fetchJSON('/api/tricks');
+    const all = await fetchJSON('api/tricks');
     const hadProblems = _channelProblems();
     _allTricks = all;
     _installed = all.filter(t => t.trickset === selectedTrickset);
@@ -1186,7 +1186,7 @@ async function toggleTrick(btn, name, enabled) {
 async function setTrickEnabled(id, name, enabled) {
   try {
     if (!id) { showToast('Cannot toggle: missing extension ID', true); return; }
-    const d = await fetchJSON('/api/tricksets/' + encodeURIComponent(selectedTrickset), { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({tricks: [{id, enabled}]}) });
+    const d = await fetchJSON('api/tricksets/' + encodeURIComponent(selectedTrickset), { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({tricks: [{id, enabled}]}) });
     if (d.success) showToast(name + ': ' + (enabled ? 'on' : 'off'));
     fetchTricks();
   } catch(e) { showToast(e.message, true); }
@@ -1194,7 +1194,7 @@ async function setTrickEnabled(id, name, enabled) {
 
 async function reorderTrick(name, newIndex) {
   try {
-    await fetchJSON('/api/tricks/reorder', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name, new_index: newIndex, trickset: selectedTrickset}) });
+    await fetchJSON('api/tricks/reorder', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name, new_index: newIndex, trickset: selectedTrickset}) });
     fetchTricks();
   } catch(e) { showToast(e.message, true); }
 }
@@ -1204,7 +1204,7 @@ async function editKeyword(id, name, current) {
   if (val === null) return;
   const keyword = val.trim() || null;
   try {
-    await fetchJSON('/api/tricksets/' + encodeURIComponent(selectedTrickset), {
+    await fetchJSON('api/tricksets/' + encodeURIComponent(selectedTrickset), {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ tricks: [{ id, keyword }] })
@@ -1226,11 +1226,11 @@ let _remoteMeta = null;
 async function fetchAvailable() {
   // Two sources, one catalog: bundled .py files and the community index.
   // Where an extension came from changes its page, not where you look for it.
-  const localP = fetchJSON('/api/tricks/available').catch(() => null);
+  const localP = fetchJSON('api/tricks/available').catch(() => null);
   const params = new URLSearchParams();
   if (trickSearch) params.set('q', trickSearch);
   if (browseAll) params.set('all', '1');
-  const remoteP = fetchJSON('/api/registry?' + params.toString()).catch(e => ({error: e.message, tricks: []}));
+  const remoteP = fetchJSON('api/registry?' + params.toString()).catch(e => ({error: e.message, tricks: []}));
   const [local, remote] = await Promise.all([localP, remoteP]);
 
   if (local === null && (!remote || !remote.tricks.length)) {
@@ -1498,7 +1498,7 @@ function renderExtDetail() {
 function setExtView(v) { _extView = v; renderExtDetail(); }
 // Clicking Live while it's already showing pops it out, like the Pop out link.
 function liveTabClick(id) {
-  if (_extView === 'live' && id) window.open('/api/tricks/ui/' + encodeURIComponent(id) + '/', '_blank', 'noopener');
+  if (_extView === 'live' && id) window.open('api/tricks/ui/' + encodeURIComponent(id) + '/', '_blank', 'noopener');
   else setExtView('live');
 }
 
@@ -1554,7 +1554,7 @@ window.addEventListener('resize', queueFitExtPanes);
 async function _loadCommunityReadme(e) {
   const k = e.name + '@' + e.version;
   try {
-    const d = await fetchJSON('/api/registry/readme?name=' + encodeURIComponent(e.name) + '&version=' + encodeURIComponent(e.version));
+    const d = await fetchJSON('api/registry/readme?name=' + encodeURIComponent(e.name) + '&version=' + encodeURIComponent(e.version));
     _readmeCache[k] = d.readme || '';
   } catch(err) { _readmeCache[k] = ''; }
   if (_extSel === e.key) renderExtDetail();
@@ -1562,8 +1562,8 @@ async function _loadCommunityReadme(e) {
 
 async function _loadExtSource(e) {
   const url = e.source === 'community'
-    ? '/api/registry/source?name=' + encodeURIComponent(e.name) + '&version=' + encodeURIComponent(e.version)
-    : '/api/tricks/source?path=' + encodeURIComponent(e.path);
+    ? 'api/registry/source?name=' + encodeURIComponent(e.name) + '&version=' + encodeURIComponent(e.version)
+    : 'api/tricks/source?path=' + encodeURIComponent(e.path);
   const key = e.key;
   let text;
   try {
@@ -1596,7 +1596,7 @@ function _extWelcome() {
 
 async function loadTrick(path) {
   try {
-    const d = await fetchJSON('/api/tricks/load', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path, trickset: selectedTrickset}) });
+    const d = await fetchJSON('api/tricks/load', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path, trickset: selectedTrickset}) });
     _extSel = extKey(path);
     const e = _catalog.find(x => x.key === _extSel);
     _extView = (e && e.has_ui) ? 'live' : 'details';
@@ -1970,7 +1970,7 @@ async function pgRound(messages) {
   const node = pgPush(entry);
 
   try {
-    const d = await fetchJSON('/api/playground', {
+    const d = await fetchJSON('api/playground', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({messages: [{role: 'system', content: PG_SYSTEM}, ...messages],
                             trickset: selectedTrickset, tools: pgToolsOn ? PG_TOOLS : undefined})
@@ -2075,7 +2075,7 @@ function setScope(all) {
 
 async function installFromIndex(name, version) {
   try {
-    const d = await fetchJSON('/api/registry/install', {
+    const d = await fetchJSON('api/registry/install', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({name, version, trickset: selectedTrickset})
     });
@@ -2091,7 +2091,7 @@ async function addInstalled(name, version) {
 
 async function unloadTrick(id, name) {
   try {
-    await fetchJSON('/api/tricks/unload', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id, name, trickset: selectedTrickset}) });
+    await fetchJSON('api/tricks/unload', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id, name, trickset: selectedTrickset}) });
     const t = _installed.find(x => x.id === id);
     showToast('Uninstalled ' + ((t && t.display_name) || name));
     fetchTricks();
@@ -2174,7 +2174,7 @@ function _setTricksetList(loaded, avail) {
 }
 
 async function fetchTraffic() {
-  try { _traffic = await fetchJSON('/api/traffic'); } catch(e) {}
+  try { _traffic = await fetchJSON('api/traffic'); } catch(e) {}
   renderHelpStatus();
   renderRuleBar();
   renderDiscovered();
@@ -2317,8 +2317,8 @@ applyRailMode();
 async function refreshChannelList() {
   try {
     const [loaded, avail] = await Promise.all([
-      fetchJSON('/api/tricksets'),
-      fetchJSON('/api/tricksets/available'),
+      fetchJSON('api/tricksets'),
+      fetchJSON('api/tricksets/available'),
     ]);
     const sig = l => l.map(ts => ts.name).sort().join('\n');
     const before = sig(Object.values(loadedTricksets)) + '|' + sig(_availTricksets);
@@ -2447,7 +2447,7 @@ async function saveRule() {
   if (ua !== '*') filters['User-Agent'] = ua;
   try {
     if (_ruleEditingNew) {
-      const d = await fetchJSON('/api/tricksets/create', {
+      const d = await fetchJSON('api/tricksets/create', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({name, filters}),
       });
@@ -2458,7 +2458,7 @@ async function saveRule() {
       switchTab('tricks');
     } else {
       const orig = selectedTrickset;
-      await fetchJSON('/api/tricksets/' + encodeURIComponent(orig), {
+      await fetchJSON('api/tricksets/' + encodeURIComponent(orig), {
         method: 'PUT', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(name !== orig ? {filters, name} : {filters}),
       });
@@ -2473,7 +2473,7 @@ async function saveRule() {
 // On/off is saved in the channel's file, so it holds across restarts.
 async function setChannelOn(name, on) {
   try {
-    await fetchJSON('/api/tricksets/' + encodeURIComponent(name), {
+    await fetchJSON('api/tricksets/' + encodeURIComponent(name), {
       method: 'PUT', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({enabled: on}),
     });
@@ -2487,8 +2487,8 @@ function turnOnChannel(name) { return setChannelOn(name, true); }
 async function fetchTricksets() {
   try {
     const [loaded, avail] = await Promise.all([
-      fetchJSON('/api/tricksets'),
-      fetchJSON('/api/tricksets/available'),
+      fetchJSON('api/tricksets'),
+      fetchJSON('api/tricksets/available'),
     ]);
     _markNewTricksets(loaded.map(ts => ts.name));
     _setTricksetList(loaded, avail);
@@ -2537,7 +2537,7 @@ async function saveLogfile() {
   const orig = (loadedTricksets[selectedTrickset] || {}).logfile || '';
   if (val === orig) return;
   try {
-    await fetchJSON('/api/tricksets/' + encodeURIComponent(selectedTrickset), {
+    await fetchJSON('api/tricksets/' + encodeURIComponent(selectedTrickset), {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({logfile: val}),
@@ -2549,7 +2549,7 @@ async function saveLogfile() {
 
 async function saveLoglevel(val) {
   try {
-    await fetchJSON('/api/tricksets/' + encodeURIComponent(selectedTrickset), {
+    await fetchJSON('api/tricksets/' + encodeURIComponent(selectedTrickset), {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({loglevel: val}),
@@ -2562,7 +2562,7 @@ async function saveLoglevel(val) {
 async function deleteTrickset() {
   if (!confirm('Delete #' + selectedTrickset + ' and its extension list? This cannot be undone.')) return;
   try {
-    await fetchJSON('/api/tricksets/' + encodeURIComponent(selectedTrickset), {
+    await fetchJSON('api/tricksets/' + encodeURIComponent(selectedTrickset), {
       method: 'DELETE',
     });
     showToast('Deleted channel');
@@ -2581,7 +2581,7 @@ async function installExamples() {
   btn.textContent = 'Installing...';
   resultEl.innerHTML = '';
   try {
-    const res = await fetchJSON('/api/tricksets/install-examples', {
+    const res = await fetchJSON('api/tricksets/install-examples', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({force: false}),
@@ -2593,7 +2593,7 @@ async function installExamples() {
         btn.textContent = 'Install Examples';
         return;
       }
-      const res2 = await fetchJSON('/api/tricksets/install-examples', {
+      const res2 = await fetchJSON('api/tricksets/install-examples', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({force: true}),
@@ -2854,7 +2854,7 @@ async function fetchProviderModels(prefix) {
   _provState.busy = true;
   paintProvider();
   try {
-    const d = await fetchJSON('/api/models/discover', {
+    const d = await fetchJSON('api/models/discover', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
@@ -2910,7 +2910,7 @@ async function provPickModel(prefix, modelId) {
 // already in use instead of an empty form asking for them again.
 async function restoreProviderSelection() {
   let info = {};
-  try { info = await fetchJSON('/api/info'); } catch (e) { return; }
+  try { info = await fetchJSON('api/info'); } catch (e) { return; }
   if (!info || !info.model_url) return;
   _provState.savedModel = info.model_name || '';
   _provState.savedUrl = info.model_url;
@@ -2967,7 +2967,7 @@ function initModelMethod() {
 
 async function fetchProviders() {
   try {
-    const d = await fetchJSON('/api/providers');
+    const d = await fetchJSON('api/providers');
     _providers = d.providers || [];
     _provGroups = d.groups || {};
     mountProviderPanel('prov-panel-models', 'provm');
@@ -2988,9 +2988,9 @@ function _keyDisplay(v) { return v === false ? false : (v || ''); }
 async function fetchModels() {
   try {
     const [modelsData, loaded, avail] = await Promise.all([
-      fetchJSON('/api/models'),
-      fetchJSON('/api/tricksets'),
-      fetchJSON('/api/tricksets/available'),
+      fetchJSON('api/models'),
+      fetchJSON('api/tricksets'),
+      fetchJSON('api/tricksets/available'),
     ]);
     _cachedConfiguredModels = modelsData.configured_models || {};
     _tsModels = {};
@@ -3077,7 +3077,7 @@ async function setModelForScope(scope, key, model_url, model_name, api_key) {
   const kVal = api_key === '' ? '' : api_key;
   try {
     if (scope === '_default') {
-      await fetchJSON('/api/models', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({set_model: {key, model_url, model: model_name, api_key}})});
+      await fetchJSON('api/models', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({set_model: {key, model_url, model: model_name, api_key}})});
       fetchInfo();
       // Both views of the global model (Simple's provider picker and
       // Advanced's role list) re-read what was just saved.
@@ -3089,7 +3089,7 @@ async function setModelForScope(scope, key, model_url, model_name, api_key) {
       if (mVal !== '') entry.model = mVal;
       if (kVal !== '') entry.key = kVal;
       const updated = {...ts, [key]: entry};
-      await fetchJSON('/api/tricksets/' + encodeURIComponent(scope), {
+      await fetchJSON('api/tricksets/' + encodeURIComponent(scope), {
         method:'PUT',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({models: updated})
@@ -3230,7 +3230,7 @@ async function refreshTricksetLog() {
     return;
   }
   try {
-    const d = await fetchJSON('/api/tricksets/' + encodeURIComponent(name) + '/log?lines=200');
+    const d = await fetchJSON('api/tricksets/' + encodeURIComponent(name) + '/log?lines=200');
     fileEl.textContent = d.missing ? '(no log file yet) ' + d.logfile : d.logfile;
     fileEl.title = d.logfile;
     viewer.innerHTML = '';
@@ -3281,14 +3281,14 @@ function _paintPetsitterSettings(d) {
 }
 
 async function loadPetsitterSettings() {
-  try { _paintPetsitterSettings(await fetchJSON('/api/settings')); } catch (e) {}
+  try { _paintPetsitterSettings(await fetchJSON('api/settings')); } catch (e) {}
 }
 
 async function savePetsitterSetting(key, value) {
   const err = document.getElementById('ps-error');
   err.hidden = true;
   try {
-    const r = await fetch('/api/settings', {method: 'PUT', headers: {'Content-Type': 'application/json'},
+    const r = await fetch('api/settings', {method: 'PUT', headers: {'Content-Type': 'application/json'},
                                             body: JSON.stringify({[key]: value})});
     const d = await r.json();
     if (!r.ok) { err.textContent = d.error || 'Not saved'; err.hidden = false; return; }
@@ -3304,8 +3304,8 @@ async function savePetsitterSetting(key, value) {
 let _agentOrder = null;
 async function fetchAgents() {
   try {
-    const agents = await fetchJSON('/api/agents');
-    const registered = await fetchJSON('/api/agents/registered');
+    const agents = await fetchJSON('api/agents');
+    const registered = await fetchJSON('api/agents/registered');
     const regAgents = registered.agents || {};
     const el = document.getElementById('agents-grid');
     const ids = Object.keys(agents);
@@ -3404,7 +3404,7 @@ async function fetchAgents() {
         ? `<button class="agent-btn btn-configure" onclick="configureAgent('${idEsc}')"`
           + ` title="See and change the tricks applied to this tool">Configure</button>`
         : '';
-      var iconHtml = a.icon && /^(https?:|\/)/.test(a.icon)
+      var iconHtml = a.icon && /^(https?:|\/|static\/)/.test(a.icon)
         ? `<img src="${escapeHtml(a.icon)}" alt="" class="agent-favicon" onerror="defaultImage(this)">`
         : (a.icon || '\u{1F916}');
       const configPaths = a.config_paths || [];
@@ -3474,7 +3474,7 @@ async function configureAgent(id) {
       box.hidden = false;
     }
     try {
-      await fetchJSON('/api/agents/' + encodeURIComponent(id) + '/trickset', { method: 'POST' });
+      await fetchJSON('api/agents/' + encodeURIComponent(id) + '/trickset', { method: 'POST' });
       await fetchTricksets();
     } catch (e) {
       if (box) {
@@ -3507,12 +3507,12 @@ function dismissTricksContext() {
 async function toggleAgent(id, enable) {
   try {
     if (enable) {
-      const r = await fetchJSON('/api/agents/' + encodeURIComponent(id) + '/register', { method:'POST' });
+      const r = await fetchJSON('api/agents/' + encodeURIComponent(id) + '/register', { method:'POST' });
       if (r.success) showToast(`${escapeHtml(id)} routed through petsitter`);
       else if (r.log && r.log.length) showToast((r.log[0].message || 'Registration failed'), true);
       else showToast('Registration failed', true);
     } else {
-      await fetchJSON('/api/agents/' + encodeURIComponent(id) + '/unregister', { method:'POST' });
+      await fetchJSON('api/agents/' + encodeURIComponent(id) + '/unregister', { method:'POST' });
       showToast(`${escapeHtml(id)} configuration restored`);
     }
     fetchAgents();
@@ -3531,7 +3531,7 @@ async function shutdownPetsitter() {
   const titleEl = document.getElementById('agent-log-title');
   if (titleEl) titleEl.textContent = 'Shutting down...';
   try {
-    const r = await fetchJSON('/api/shutdown', { method:'POST' });
+    const r = await fetchJSON('api/shutdown', { method:'POST' });
     if (logEl && r.log) _appendAgentLog(r.log);
   } catch(e) {
     if (logEl) logEl.innerHTML += `<div class="agent-log-entry lvl-ERROR">Error: ${escapeHtml(e.message)}</div>`;
@@ -3584,7 +3584,7 @@ function _cfgValue(key) {
 
 async function openTrickConfig(id) {
   try {
-    const all = await fetchJSON('/api/tricks');
+    const all = await fetchJSON('api/tricks');
     const t = all.find(x => x.id === id && x.trickset === selectedTrickset) || all.find(x => x.id === id);
     if (!t || !((t.config_fields || []).length || t.prompt_keyword)) { showToast('This extension has no settings', true); return; }
     _configTrick = t;
@@ -3636,7 +3636,7 @@ async function saveTrickConfig() {
   try {
     const body = { id: t.id, config };
     if (keyword !== undefined) body.keyword = keyword;
-    const d = await fetchJSON('/api/tricksets/' + encodeURIComponent(t.trickset), {
+    const d = await fetchJSON('api/tricksets/' + encodeURIComponent(t.trickset), {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ tricks: [body] })

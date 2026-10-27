@@ -42,7 +42,7 @@ function sync() {
     if (!subscribe.length && !unsubscribe.length) return;
     const forSid = sid;
     try {
-      const r = await fetch('/api/stream/' + forSid, {
+      const r = await fetch('api/stream/' + forSid, {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({subscribe, unsubscribe}),
       });
@@ -52,7 +52,7 @@ function sync() {
 }
 
 function connect() {
-  es = new EventSource('/api/stream');
+  es = new EventSource('api/stream');
   es.onmessage = e => {
     let m;
     try { m = JSON.parse(e.data); } catch (_) { return; }

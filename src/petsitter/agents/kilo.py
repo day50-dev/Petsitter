@@ -24,7 +24,7 @@ class KiloAgent(OpenCodeAgent):
     id = "kilo"
     display_name = "Kilo Code"
     description = "Open-source AI coding agent, in the terminal (kilo)"
-    icon = "/static/agents/kilo.png"   # bundled: gui/agents/
+    icon = "static/agents/kilo.png"   # bundled: gui/agents/
     trickset_filters = {"X-Title": "Kilo Code*", "Model": "*"}     # it sends X-Title: Kilo Code
     config_paths = ["~/.config/kilo/kilo.json", "~/.config/kilo/kilo.jsonc", "$XDG_CONFIG_HOME/kilo/kilo.json"]
     file_label = "kilo.json"

@@ -65,7 +65,7 @@ class OpenCodeAgent(Agent):
     id = "opencode"
     display_name = "OpenCode"
     description = "Open-source AI coding agent for the terminal"
-    icon = "/static/agents/opencode.png"   # bundled: gui/agents/
+    icon = "static/agents/opencode.png"   # bundled: gui/agents/
     required_env: list[str] = []
     provider_name = "its AI provider"
     trickset_filters = {"X-Title": "opencode*", "Model": "*"}

@@ -131,7 +131,7 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
         for attr, name in (("href", "styles.css"), ("src", "stream.js")):
             try:
                 v = int((gui_dir / name).stat().st_mtime)
-                content = content.replace(f'{attr}="/static/{name}"', f'{attr}="/static/{name}?v={v}"', 1)
+                content = content.replace(f'{attr}="static/{name}"', f'{attr}="static/{name}?v={v}"', 1)
             except OSError:
                 pass
         return Response(content=content, media_type="text/html", headers=NO_STORE)
@@ -220,7 +220,9 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
         tid = request.path_params.get("tid", "")
         if not request.url.path.endswith("/"):
             from starlette.responses import RedirectResponse
-            return RedirectResponse(request.url.path + "/")
+            # Relative on purpose: the browser resolves "./" against the
+            # requested URL, so this works behind a reverse proxy prefix.
+            return RedirectResponse("./")
         trick = _trick_by_id(tid)
         if trick is None or not type(trick).has_ui():
             return JSONResponse({"error": "no live page for this extension"}, status_code=404)
@@ -234,7 +236,9 @@ def register_gui_routes(app, handler, api_key, config_path: str | None = None):
             v = int((gui_dir / "stream.js").stat().st_mtime)
         except OSError:
             v = 0
-        tag = f'<script src="/static/stream.js?v={v}"></script>'
+        # The page lives at /api/tricks/ui/<id>/, so four levels up is the
+        # app root — relative, so it also works behind a reverse proxy.
+        tag = f'<script src="../../../../static/stream.js?v={v}"></script>'
         m = re.search(r"<head[^>]*>", page, re.I)
         page = page[:m.end()] + tag + page[m.end():] if m else tag + page
         return Response(content=page, media_type="text/html", headers=NO_STORE)

@@ -48,7 +48,7 @@ class PiAgent(Agent):
     id = "pi"
     display_name = "pi"
     description = "Minimal terminal coding agent (pi.dev)"
-    icon = "/static/agents/pi.svg"   # bundled: gui/agents/
+    icon = "static/agents/pi.svg"   # bundled: gui/agents/
     required_env: list[str] = []
     provider_name = "its AI provider"
     title = "pi"

@@ -52,7 +52,7 @@ class ClineAgent(Agent):
     id = "cline"
     display_name = "Cline"
     description = "Open-source AI coding agent, in the terminal (cline)"
-    icon = "/static/agents/cline.png"   # bundled: gui/agents/
+    icon = "static/agents/cline.png"   # bundled: gui/agents/
     required_env: list[str] = []
     provider_name = "its AI provider"
     title = "Cline"

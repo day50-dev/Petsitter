@@ -49,7 +49,7 @@ class HermesAgent(Agent):
     id = "hermes"
     display_name = "Hermes Agent"
     description = "Nous Research's agent that grows with you"
-    icon = "/static/agents/hermes.png"   # bundled: gui/agents/
+    icon = "static/agents/hermes.png"   # bundled: gui/agents/
     required_env: list[str] = []
     provider_name = "its AI provider"
     # Hermes sends no X-Title of its own (its User-Agent is the OpenAI SDK's),

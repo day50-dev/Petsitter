@@ -11,7 +11,7 @@ Type `(exportit)` in a message. petsitter answers directly, without calling
 the model:
 
 ```
-Conversation exported to `/tmp/petsitter/convo-20260718-143022.json` (6 messages, llcat-compatible)
+Conversation exported to `/tmp/petsitter/convo-20260718-143022.json` (6 messages)
 ```
 
 The export is the conversation **after** the channel's extensions transformed
@@ -78,7 +78,7 @@ class ExportItTrick(Trick):
             with open(filepath, "w") as f:
                 json.dump(conversation, f, indent=2)
             label = f"{side.capitalize()}: " if side else "Conversation exported to "
-            lines.append(f"{label}`{filepath}` ({len(conversation)} messages, llcat-compatible)")
+            lines.append(f"{label}`{filepath}` ({len(conversation)} messages)")
             self.report(f"Exported {len(conversation)} messages to {filepath}")
 
         head = "Conversation exported, before and after the extensions:\n" if both else ""

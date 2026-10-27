@@ -23,7 +23,7 @@
   h1 { font-size: 14px; margin: 0; color: var(--title); font-weight: 600; }
   .sub { color: var(--dim); font-size: 12px; }
   .main { flex: 1; min-height: 0; display: grid; grid-template-columns: 270px minmax(0, 1fr); }
-  .side { border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+  .side { border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; min-width: 0; }
   .convs { flex: 1; min-height: 0; overflow-y: auto; }
   /* Compaction: one published technique per channel, at the foot of the list */
   .compact { border-top: 1px solid var(--border); padding: 10px 14px 12px; background: var(--panel2); }
@@ -40,7 +40,7 @@
   .conv .who .n { margin-left: auto; color: var(--dim); }
   .conv .first { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .conv .ed { color: var(--edit); font-size: 11px; }
-  .chat-wrap { display: flex; flex-direction: column; min-height: 0; }
+  .chat-wrap { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
   .size { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; padding: 9px 18px;
           border-bottom: 1px solid var(--border); background: var(--panel2); font-size: 12px; color: var(--dim); }
   .size b { font-size: 18px; color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -96,10 +96,10 @@
   .meta .cbadge { color: var(--cmp); }
   .bubble.clip { max-height: 16em; overflow: hidden; position: relative; }
   .more { background: none; border: none; color: var(--title); font: inherit; font-size: 12px; cursor: pointer; padding: 2px 4px; }
-  .calls, .imgs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .calls, .imgs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; max-width: 100%; }
   .chip { font: 11.5px ui-monospace, "SF Mono", Consolas, monospace; color: var(--muted); background: #0d1320;
           border: 1px solid var(--border); border-radius: 4px; padding: 1px 7px; max-width: 100%;
-          white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          white-space: pre-wrap; overflow-wrap: anywhere; }
   .orig-label { display: block; font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #8a7a52; }
   .orig { margin-top: 6px; font-size: 12px; color: var(--dim); white-space: pre-wrap; border-left: 2px solid #6b5a2a;
           padding-left: 8px; max-height: 12em; overflow: auto; }

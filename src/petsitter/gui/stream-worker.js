@@ -10,6 +10,13 @@
 // Messages from a page:  {subscribe: topic} | {unsubscribe: topic} | {bye: true}
 // Messages to a page:    {topic, data} | {state: true|false} (stream up/down)
 
+// Relative URLs inside a worker (fetch, EventSource) resolve against the
+// worker script's own URL, not the page's (per the HTML spec). This script
+// lives at <app-root>/static/stream-worker.js, so the app root is this URL
+// with that suffix stripped. Using 'api/stream' directly would resolve to
+// <app-root>/static/api/stream and 404, so every stream URL is made absolute.
+const APP_ROOT = self.location.href.replace(/\/static\/stream-worker\.js(\?.*)?$/, '/');
+
 const subs = new Map();     // topic -> Set of ports
 const recent = new Map();   // topic -> recent data, replayed to late subscribers
 const KEEP = {logs: 200, pause: 1};
@@ -42,7 +49,7 @@ function sync() {
     if (!subscribe.length && !unsubscribe.length) return;
     const forSid = sid;
     try {
-      const r = await fetch('api/stream/' + forSid, {
+      const r = await fetch(APP_ROOT + 'api/stream/' + forSid, {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({subscribe, unsubscribe}),
       });
@@ -52,7 +59,7 @@ function sync() {
 }
 
 function connect() {
-  es = new EventSource('api/stream');
+  es = new EventSource(APP_ROOT + 'api/stream');
   es.onmessage = e => {
     let m;
     try { m = JSON.parse(e.data); } catch (_) { return; }

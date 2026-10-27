@@ -31,11 +31,32 @@
   }
 
   let worker = null;
+  const src = document.currentScript && document.currentScript.src;
+  // App root, from this script's own URL (absolute and reverse-proxy-prefix
+  // aware). This script is at <app-root>/static/stream.js. Used to make the
+  // fallback's stream URLs absolute: a relative 'api/stream' resolves against
+  // the page's base, which on a Live page at /api/tricks/ui/<id>/ resolves
+  // one level too deep and 404s.
+  let appRoot = '';
+  if (src) {
+    const a = new URL(src);
+    a.pathname = a.pathname.replace(/\/static\/stream\.js$/, '/');
+    appRoot = a.origin + a.pathname;
+  }
   if (window.SharedWorker) {
     try {
-      const src = document.currentScript && document.currentScript.src;
-      const version = src ? new URL(src).search : '';
-      worker = new SharedWorker('static/stream-worker.js' + version, {name: 'petsitter-stream'});
+      // The worker lives next to this script, so resolve it from the script's
+      // own URL (already absolute and reverse-proxy-prefix aware). A path
+      // relative to the page would break on a Live page at
+      // /api/tricks/ui/<id>/, where 'static/stream-worker.js' resolves one
+      // level too deep and 404s.
+      let url = null;
+      if (src) {
+        const u = new URL(src);
+        u.pathname = u.pathname.replace(/stream\.js$/, 'stream-worker.js');
+        url = u.href;
+      }
+      worker = new SharedWorker(url || 'static/stream-worker.js', {name: 'petsitter-stream'});
     } catch (_) { worker = null; }
   }
   if (worker) {
@@ -56,13 +77,13 @@
         if (!subscribe.length && !unsubscribe.length) return;
         const forSid = sid;
         try {
-          const r = await fetch('api/stream/' + forSid, {method: 'POST', headers: {'Content-Type': 'application/json'},
+          const r = await fetch((appRoot || '') + 'api/stream/' + forSid, {method: 'POST', headers: {'Content-Type': 'application/json'},
                                                           body: JSON.stringify({subscribe, unsubscribe})});
           if (r.ok && forSid === sid) serverTopics = new Set((await r.json()).topics || []);
         } catch (_) {}
       });
     };
-    es = new EventSource('api/stream');
+    es = new EventSource((appRoot || '') + 'api/stream');
     es.onmessage = e => {
       let m;
       try { m = JSON.parse(e.data); } catch (_) { return; }

@@ -147,13 +147,17 @@ def chat_completions_url(base: str) -> str:
 def build_upstream_payload(model_cfg: dict[str, Any], messages: list, extra: dict | None = None) -> dict:
     """Build the upstream request payload from a model config.
 
-    If ``model_cfg["model"]`` is boolean ``false``, the ``model`` field is
-    omitted from the payload (passthrough).  ``""`` or missing means the
-    upstream default.
+    If ``model_cfg["model"]`` is boolean ``false`` (passthrough), the client's
+    model name is forwarded (``extra["model"]`` when the client sent one); if
+    the client sent none, the ``model`` field is left out.  ``""`` or missing
+    means the upstream default.
     """
     payload: dict[str, Any] = {"messages": messages}
     model_val = model_cfg.get("model")
-    if model_val is not False:
+    if model_val is False:
+        if extra and extra.get("model"):
+            payload["model"] = extra["model"]
+    else:
         payload["model"] = (model_val if model_val else "default")
     if extra:
         for k in ("temperature", "max_tokens", "tools", "tool_choice"):

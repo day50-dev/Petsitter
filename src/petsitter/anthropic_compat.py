@@ -11,10 +11,10 @@ in, run through the normal pipeline, and converted back on the way out.  A trick
 does not need to know which API the caller used.
 
 What survives the round trip: system prompts, text content, tool definitions,
-assistant tool calls, tool results, stop reasons and usage.  What does not:
-image and document blocks are carried through untouched but are invisible to a
-trick reading message text, and extended-thinking blocks are preserved in place
-rather than exposed as text.
+assistant tool calls, tool results, stop reasons and usage, the caller's
+``cache_control`` breakpoints, and image and document blocks (carried through
+untouched, invisible to a trick reading message text).  Extended-thinking
+blocks are preserved in place rather than exposed as text.
 """
 
 import json
@@ -61,7 +61,15 @@ def to_openai_messages(payload: dict) -> tuple[list[dict], list[dict]]:
 
     system = _system_text(payload.get("system"))
     if system:
-        messages.append({"role": "system", "content": system})
+        sys_msg: dict[str, Any] = {"role": "system", "content": system}
+        if isinstance(payload.get("system"), list):
+            # Block form: the caller may have marked a cache breakpoint on
+            # the system prompt, which the flat string loses. Stashed here
+            # so to_anthropic_payload can put the blocks back, the same way
+            # _thinking_blocks works.
+            sys_msg["_system_blocks"] = payload["system"]
+            sys_msg["_block_text"] = system
+        messages.append(sys_msg)
 
     for entry in payload.get("messages") or []:
         if not isinstance(entry, dict):
@@ -84,16 +92,28 @@ def to_openai_messages(payload: dict) -> tuple[list[dict], list[dict]]:
         if tool_results:
             for block in tool_results:
                 body = block.get("content")
-                messages.append({
+                msg: dict[str, Any] = {
                     "role": "tool",
                     "tool_call_id": block.get("tool_use_id", ""),
                     "content": body if isinstance(body, str) else _blocks_to_text(body),
-                })
+                }
+                if isinstance(body, list):
+                    # e.g. a result carrying images: the flattened text loses
+                    # them, so stash the original blocks for the way back.
+                    msg["_blocks"] = body
+                    msg["_block_text"] = msg["content"]
+                messages.append(msg)
             if text:
                 messages.append({"role": role, "content": text})
             continue
 
         message: dict[str, Any] = {"role": role, "content": text}
+        # The OpenAI shape can only carry text (plus tool calls and
+        # thinking); everything else in the block list -- images, documents,
+        # cache_control breakpoints -- is stashed so to_anthropic_payload
+        # can put it back, the same way _thinking_blocks works.
+        message["_blocks"] = content
+        message["_block_text"] = text
         # Extended thinking (and redacted_thinking) blocks aren't text and
         # aren't a tool call, so a trick has no reason to see them -- but if
         # this assistant turn was followed by tool use, Anthropic requires
@@ -139,6 +159,20 @@ def to_openai_messages(payload: dict) -> tuple[list[dict], list[dict]]:
 # outbound: OpenAI-shaped messages -> Anthropic request
 # --------------------------------------------------------------------------
 
+def _carried_blocks(message: dict) -> list[dict] | None:
+    """The message's original Anthropic block list, for re-emission as-is,
+    when a trick left the text alone; None otherwise. This is how images,
+    documents and cache_control breakpoints survive the round trip: stashed
+    on the way in, put back on the way out, invisible to a trick in between
+    (as _thinking_blocks is)."""
+    original = message.get("_blocks")
+    if original is None or message.get("tool_calls"):
+        return None
+    if (message.get("content") or "") != (message.get("_block_text") or ""):
+        return None
+    return [dict(b) for b in original if isinstance(b, dict)]
+
+
 def to_anthropic_payload(messages: list[dict], tools: list[dict], original: dict) -> dict:
     """Rebuild an Anthropic request, carrying the caller's own fields through."""
     out: dict[str, Any] = {}
@@ -156,10 +190,11 @@ def to_anthropic_payload(messages: list[dict], tools: list[dict], original: dict
                 system_parts.append(message["content"])
             continue
         if role == "tool":
+            carried = _carried_blocks(message)
             converted.append({"role": "user", "content": [{
                 "type": "tool_result",
                 "tool_use_id": message.get("tool_call_id", ""),
-                "content": message.get("content") or "",
+                "content": carried if carried is not None else (message.get("content") or ""),
             }]})
             continue
         thinking_blocks = message.get("_thinking_blocks")
@@ -180,15 +215,57 @@ def to_anthropic_payload(messages: list[dict], tools: list[dict], original: dict
             converted.append({"role": "assistant", "content": blocks})
             continue
         if role == "assistant" and thinking_blocks:
+            carried = _carried_blocks(message)
+            if carried is not None:
+                converted.append({"role": "assistant", "content": carried})
+                continue
             blocks = list(thinking_blocks)
             if message.get("content"):
                 blocks.append({"type": "text", "text": message["content"]})
             converted.append({"role": "assistant", "content": blocks})
             continue
+        carried = _carried_blocks(message)
+        if carried is not None:
+            converted.append({"role": role or "user", "content": carried})
+            continue
+        if message.get("_blocks") is not None:
+            # A trick rewrote the text: rebuild the block list, carrying the
+            # non-text blocks along and re-attaching the caller's cache
+            # breakpoint on the last block, where it was.
+            blocks = [{"type": "text", "text": message.get("content") or ""}]
+            for b in message["_blocks"]:
+                if isinstance(b, dict) and b.get("type") not in (
+                        "text", "tool_use", "tool_result", "thinking", "redacted_thinking"):
+                    blocks.append(dict(b))
+            cc = next((b.get("cache_control") for b in reversed(message["_blocks"])
+                      if isinstance(b, dict) and b.get("cache_control")), None)
+            if cc:
+                blocks[-1]["cache_control"] = dict(cc)
+            converted.append({"role": role or "user", "content": blocks})
+            continue
         converted.append({"role": role or "user", "content": message.get("content") or ""})
 
     if system_parts:
         out["system"] = "\n".join(system_parts)
+        sys_msgs = [m for m in messages if m.get("role") == "system" and m.get("content")]
+        if any(m.get("_system_blocks") for m in sys_msgs):
+            # Re-emit as blocks so the caller's cache breakpoint survives.
+            # A trick that rewrote the prompt keeps it on the last block,
+            # with the new text in it.
+            blocks: list[dict] = []
+            for m in sys_msgs:
+                orig = m.get("_system_blocks")
+                if orig:
+                    bs = [dict(b) for b in orig if isinstance(b, dict)]
+                    if m.get("content") != m.get("_block_text"):
+                        for b in reversed(bs):
+                            if b.get("type") == "text":
+                                b["text"] = m.get("content") or ""
+                                break
+                    blocks.extend(bs)
+                else:
+                    blocks.append({"type": "text", "text": m["content"]})
+            out["system"] = blocks
     out["messages"] = converted
 
     if tools:
@@ -198,6 +275,13 @@ def to_anthropic_payload(messages: list[dict], tools: list[dict], original: dict
             "input_schema": (t.get("function") or {}).get("parameters")
                             or {"type": "object", "properties": {}},
         } for t in tools]
+        marked = [t for t in (original.get("tools") or [])
+                  if isinstance(t, dict) and t.get("cache_control")]
+        if marked:
+            # A caller may mark the tool definitions as a cache breakpoint
+            # (Claude Code does, on the last tool); the conversion loses it,
+            # so re-attach it where it was.
+            out["tools"][-1]["cache_control"] = dict(marked[-1]["cache_control"])
     return out
 
 

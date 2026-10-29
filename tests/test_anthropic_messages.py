@@ -312,3 +312,134 @@ def test_thinking_blocks_survive_history_round_trip_before_tool_use():
     thinking_block = assistant_turn["content"][0]
     assert thinking_block["thinking"] == "should check the docs"
     assert thinking_block["signature"] == "sig-1"
+
+
+EPHEMERAL = {"type": "ephemeral"}
+
+
+def test_cache_control_breakpoints_survive_the_round_trip():
+    """Claude Code marks the system prompt, the tool definitions and the
+    last user turn as cache breakpoints. The conversion used to flatten
+    all of them to plain strings, silently turning prompt caching off
+    (nothing breaks, but every turn re-prices the whole conversation).
+    """
+    payload = {
+        "model": "claude-sonnet-4",
+        "max_tokens": 1024,
+        "system": [
+            {"type": "text", "text": "you are a helpful assistant"},
+            {"type": "text", "text": "be terse", "cache_control": EPHEMERAL},
+        ],
+        "tools": [{"name": "list_mp3s", "description": "List MP3s",
+                   "input_schema": {"type": "object", "properties": {}},
+                   "cache_control": EPHEMERAL}],
+        "messages": [
+            {"role": "user", "content": [
+                {"type": "text", "text": "list ~/mp3", "cache_control": EPHEMERAL}]},
+        ],
+    }
+    messages, tools = ac.to_openai_messages(payload)
+    rebuilt = ac.to_anthropic_payload(messages, tools, payload)
+
+    assert isinstance(rebuilt["system"], list), "the system blocks must go back as blocks"
+    assert rebuilt["system"][-1]["cache_control"] == EPHEMERAL
+    assert rebuilt["tools"][-1]["cache_control"] == EPHEMERAL
+    assert rebuilt["messages"][0]["content"][-1]["cache_control"] == EPHEMERAL
+
+
+def test_pasted_images_survive_the_round_trip():
+    """A user turn carrying an image alongside its text: the image used to
+    be dropped in the conversion (the OpenAI shape has no place for it),
+    so a pasted screenshot never reached the model."""
+    payload = {
+        "model": "claude-sonnet-4",
+        "messages": [
+            {"role": "user", "content": [
+                {"type": "text", "text": "what is in this screenshot?"},
+                {"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                             "data": "iVBORw0KGgo="}},
+            ]},
+        ],
+    }
+    messages, tools = ac.to_openai_messages(payload)
+    # a trick reading the message text sees the text, and nothing breaks
+    assert messages[0]["content"] == "what is in this screenshot?"
+    rebuilt = ac.to_anthropic_payload(messages, tools, payload)
+    blocks = rebuilt["messages"][0]["content"]
+    image = next(b for b in blocks if b["type"] == "image")
+    assert image["source"]["data"] == "iVBORw0KGgo="
+
+
+def test_tool_result_with_image_blocks_survives():
+    payload = {
+        "model": "claude-sonnet-4",
+        "messages": [
+            {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "tu_1", "name": "screenshot", "input": {}}]},
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "tu_1", "content": [
+                    {"type": "text", "text": "here you go"},
+                    {"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                                "data": "iVBORw0KGgo="}},
+                ]},
+            ]},
+        ],
+    }
+    messages, tools = ac.to_openai_messages(payload)
+    rebuilt = ac.to_anthropic_payload(messages, tools, payload)
+    tool_msg = next(m for m in rebuilt["messages"] if m["role"] == "user")
+    body = tool_msg["content"][0]["content"]
+    assert isinstance(body, list)
+    assert {b["type"] for b in body} == {"text", "image"}
+
+
+@pytest.mark.asyncio
+async def test_cache_breakpoints_survive_the_pipeline_with_a_system_trick():
+    """The pipeline pops the system message and re-adds a fresh one; the
+    stashed Anthropic blocks must ride along, or a system_prompt trick
+    would drop the caller's breakpoint on the system prompt."""
+    trick = RecordingTrick()
+    handler = ProxyHandler("http://unused", "m", tricks=[trick])
+    captured = {}
+    payload = {
+        "model": "claude-sonnet-4",
+        "max_tokens": 1024,
+        "system": [{"type": "text", "text": "be terse", "cache_control": EPHEMERAL}],
+        "messages": [{"role": "user", "content": "list ~/mp3"}],
+    }
+    with patch("httpx.AsyncClient", _mock_post(captured)):
+        await handler.messages(payload, x_title="claude")
+    system = captured["body"]["system"]
+    assert isinstance(system, list)
+    assert system[-1]["cache_control"] == EPHEMERAL
+    assert "be terse" in system[-1]["text"] and "house rules" in system[-1]["text"]
+
+
+@pytest.mark.asyncio
+async def test_rewritten_text_keeps_its_image_and_breakpoint():
+    """A trick that rewrites the user's text must not drop the image that
+    came with it or the cache breakpoint on the turn."""
+    class RewriteTrick(Trick):
+        def pre_hook(self, context, params):
+            for m in context:
+                if m.get("role") == "user" and isinstance(m.get("content"), str):
+                    m["content"] = m["content"] + " (hurry)"
+            return context
+    handler = ProxyHandler("http://unused", "m", tricks=[RewriteTrick()])
+    captured = {}
+    payload = {
+        "model": "claude-sonnet-4",
+        "messages": [
+            {"role": "user", "content": [
+                {"type": "text", "text": "list ~/mp3"},
+                {"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                             "data": "iVBORw0KGgo="}},
+                {"type": "text", "text": "", "cache_control": EPHEMERAL},
+            ]},
+        ],
+    }
+    with patch("httpx.AsyncClient", _mock_post(captured)):
+        await handler.messages(payload)
+    blocks = captured["body"]["messages"][0]["content"]
+    assert "image" in [b["type"] for b in blocks]
+    assert blocks[-1]["cache_control"] == EPHEMERAL

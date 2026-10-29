@@ -1512,12 +1512,17 @@ class ProxyHandler:
         req.tricks = tricks
 
         system_prompt = ""
+        sys_stash: dict = {}
         if messages and messages[0].get("role") == "system":
             system_prompt = messages[0].get("content", "")
+            # The private keys to_openai_messages stashed on the system
+            # message (its Anthropic blocks, carrying the caller's cache
+            # breakpoint) must survive the pop and re-add below.
+            sys_stash = {k: v for k, v in messages[0].items() if k.startswith("_")}
             messages = messages[1:]
         new_system_prompt = self._apply_system_prompt_tricks(system_prompt, tricks)
         if new_system_prompt:
-            messages = [{"role": "system", "content": new_system_prompt}] + messages
+            messages = [{"role": "system", "content": new_system_prompt, **sys_stash}] + messages
 
         shadow["messages"] = messages
         messages = self._apply_pre_hooks(messages, shadow, tricks)

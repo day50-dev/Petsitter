@@ -9,6 +9,8 @@
 
 Petsitter sits between the tools you already use and the AI provider they talk to.
 
+[Here's the demo server, click around, it's fine](https://day50.dev/petsitter/)
+
 That's really all it is: a small thing running on your own machine that requests
 pass through on their way out, and replies pass through on their way back. Your
 tools don't need to know it's there, and nothing about the way you work has to

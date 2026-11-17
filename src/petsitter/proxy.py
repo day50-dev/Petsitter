@@ -352,12 +352,16 @@ class ProxyHandler:
         params["messages"] = msgs
         return self._apply_pre_hooks(msgs, params, tricks)
 
-    def _build_headers(self, model_cfg: dict | None = None) -> dict[str, str]:
+    def _build_headers(self, model_cfg: dict | None = None,
+                       extra_headers: dict | None = None) -> dict[str, str]:
         if model_cfg is not None:
-            return build_upstream_headers(model_cfg)
+            return build_upstream_headers(model_cfg, extra_headers)
         headers = {"Content-Type": "application/json"}
+        if extra_headers:
+            headers.update(extra_headers)
         if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
+            # The client's own key, when it sent one, wins over ours.
+            headers.setdefault("Authorization", f"Bearer {self.api_key}")
         return headers
 
     @staticmethod
@@ -1036,7 +1040,7 @@ class ProxyHandler:
             target = upstream_request_url
         else:
             upstream_payload = build_upstream_payload(default_cfg, messages, payload)
-            upstream_headers = self._build_headers(default_cfg)
+            upstream_headers = self._build_headers(default_cfg, forward_headers or None)
             target = chat_completions_url(upstream_url)
             req.base = upstream_url
 

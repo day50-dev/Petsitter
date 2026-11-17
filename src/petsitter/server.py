@@ -764,13 +764,21 @@ def create_app(
                 if api_key is not False and api_key:
                     extra_headers["authorization"] = f"Bearer {api_key}"
                 return await _generic_proxy(target, request, extra_headers=extra_headers)
+            # The client's own Authorization fills in upstream, as on the
+            # /use/ route and the paused passthrough: a `key: false` config
+            # means "use the client's key", not "send none".
+            forward_headers = {}
+            if request.headers.get("authorization"):
+                forward_headers["Authorization"] = request.headers["authorization"]
             if stream:
                 return StreamingResponse(
-                    stream_chat_completions(handler, payload, x_title),
+                    stream_chat_completions(handler, payload, x_title,
+                                            forward_headers=forward_headers),
                     media_type="text/event-stream",
                 )
             else:
-                result = await handler.chat_completions(payload, x_title=x_title)
+                result = await handler.chat_completions(payload, x_title=x_title,
+                                                         forward_headers=forward_headers)
                 return JSONResponse(result)
         except json.JSONDecodeError as e:
             return JSONResponse({"error": "Invalid JSON", "type": "invalid_request"}, status_code=400)

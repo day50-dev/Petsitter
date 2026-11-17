@@ -151,6 +151,15 @@ def build_upstream_payload(model_cfg: dict[str, Any], messages: list, extra: dic
     model name is forwarded (``extra["model"]`` when the client sent one); if
     the client sent none, the ``model`` field is left out.  ``""`` or missing
     means the upstream default.
+
+    Every other field the client sent is carried through unchanged --
+    ``think: false``, ``reasoning_effort``, ``top_p``, ``stream_options``,
+    ....  The old allowlist (temperature, max_tokens, tools, tool_choice)
+    silently dropped the rest: a client that had switched thinking off still
+    got thinking tokens, and a streamed reply lost its usage chunk.
+    Only the fields petsitter itself decides are excluded: ``messages``
+    (the pipeline rewrote them), ``model`` (the config decides) and
+    ``stream`` (the route decides).
     """
     payload: dict[str, Any] = {"messages": messages}
     model_val = model_cfg.get("model")
@@ -160,9 +169,10 @@ def build_upstream_payload(model_cfg: dict[str, Any], messages: list, extra: dic
     else:
         payload["model"] = (model_val if model_val else "default")
     if extra:
-        for k in ("temperature", "max_tokens", "tools", "tool_choice"):
-            if k in extra:
-                payload[k] = extra[k]
+        for k, v in extra.items():
+            if k in ("messages", "model", "stream"):
+                continue
+            payload[k] = v
     return payload
 
 
@@ -171,12 +181,16 @@ def build_upstream_headers(model_cfg: dict[str, Any], extra_headers: dict | None
 
     If ``model_cfg["key"]`` is boolean ``false``, no Authorization header is
     set (passthrough).  ``""`` or missing also means no header.
+
+    The caller's own Authorization, when it sent one, wins: petsitter's
+    configured key fills in only when the client didn't bring its own (the
+    same contract as the paused passthrough and the /use/ route).
     """
     headers = dict(extra_headers) if extra_headers else {}
     headers.setdefault("Content-Type", "application/json")
     api_key = model_cfg.get("key")
     if api_key is not False and api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+        headers.setdefault("Authorization", f"Bearer {api_key}")
     return headers
 
 

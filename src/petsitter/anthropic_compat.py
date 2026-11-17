@@ -176,10 +176,14 @@ def _carried_blocks(message: dict) -> list[dict] | None:
 def to_anthropic_payload(messages: list[dict], tools: list[dict], original: dict) -> dict:
     """Rebuild an Anthropic request, carrying the caller's own fields through."""
     out: dict[str, Any] = {}
-    for key in ("model", "max_tokens", "temperature", "top_p", "top_k",
-                "stop_sequences", "metadata", "tool_choice", "thinking"):
-        if key in original:
-            out[key] = original[key]
+    # Everything the caller sent travels with it -- thinking, service_tier,
+    # mcp_servers, ... The old allowlist dropped any field it didn't know.
+    # Excluded: messages, system and tools (rebuilt below) and stream
+    # (decided by the route).
+    for k, v in original.items():
+        if k in ("messages", "system", "tools", "stream"):
+            continue
+        out[k] = v
     out.setdefault("max_tokens", 4096)
 
     system_parts, converted = [], []

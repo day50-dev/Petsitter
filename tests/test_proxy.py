@@ -210,6 +210,94 @@ class TestProxyHandler:
             mock_client.post.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_client_request_fields_reach_upstream(self):
+        """Every field the client sends -- `think: false`, reasoning_effort,
+        stream_options, ... -- reaches the upstream as sent. The old
+        allowlist (temperature, max_tokens, tools, tool_choice) silently
+        dropped the rest: a client that had switched thinking off still got
+        thinking tokens, and a streamed reply lost its usage chunk."""
+        handler = ProxyHandler(
+            model_url="http://localhost:11434",
+            model_name="test-model",
+        )
+
+        mock_response = create_mock_response({
+            "choices": [{"message": {"role": "assistant", "content": "Hello!"}}]
+        })
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+
+        payload = {
+            "messages": [{"role": "user", "content": "Hi"}],
+            "temperature": 0.7,
+            "think": False,
+            "reasoning_effort": "none",
+            "top_p": 0.2,
+            "seed": 7,
+            "stop": ["\n\n"],
+            "stream_options": {"include_usage": True},
+        }
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            await handler.chat_completions(payload)
+
+        sent = mock_client.post.call_args.kwargs["json"]
+        for k, v in payload.items():
+            if k == "messages":
+                continue
+            assert sent.get(k) == v, f"{k} must reach the upstream exactly as sent"
+
+    @pytest.mark.asyncio
+    async def test_client_authorization_reaches_upstream(self):
+        """A `key: false` config means "use the client's key", not "send
+        none": the client's Authorization fills in for the upstream."""
+        handler = ProxyHandler(
+            model_url="http://localhost:11434",
+            model_name="test-model",
+        )
+        mock_response = create_mock_response({
+            "choices": [{"message": {"role": "assistant", "content": "Hello!"}}]
+        })
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            await handler.chat_completions(
+                {"messages": [{"role": "user", "content": "Hi"}]},
+                forward_headers={"Authorization": "Bearer client-token"})
+
+        headers = mock_client.post.call_args.kwargs["headers"]
+        assert headers.get("Authorization") == "Bearer client-token"
+
+    @pytest.mark.asyncio
+    async def test_client_key_wins_over_configured_key(self):
+        """Both keys present: the client's own goes upstream, petsitter's
+        configured one doesn't override it (as on /use/ and while paused)."""
+        handler = ProxyHandler(
+            model_url="http://localhost:11434",
+            model_name="test-model",
+            api_key="configured-key",
+        )
+        mock_response = create_mock_response({
+            "choices": [{"message": {"role": "assistant", "content": "Hello!"}}]
+        })
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            await handler.chat_completions(
+                {"messages": [{"role": "user", "content": "Hi"}]},
+                forward_headers={"Authorization": "Bearer client-token"})
+
+        headers = mock_client.post.call_args.kwargs["headers"]
+        assert headers.get("Authorization") == "Bearer client-token"
+
+    @pytest.mark.asyncio
     async def test_config_magic_returns_diag(self):
         """__petsitter_config__ returns a config snapshot without calling upstream,
         after running the same filter/pre-hook pipeline."""

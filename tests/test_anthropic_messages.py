@@ -314,6 +314,28 @@ def test_thinking_blocks_survive_history_round_trip_before_tool_use():
     assert thinking_block["signature"] == "sig-1"
 
 
+def test_caller_fields_outside_the_rebuild_survive():
+    """Anything the caller sent that petsitter doesn't rebuild itself --
+    thinking, service_tier, mcp_servers, ... -- travels to the upstream as
+    sent. The old allowlist dropped any field it didn't know, so a client
+    that had switched extended thinking off (thinking: disabled) still paid
+    for thinking tokens."""
+    payload = {
+        "model": "claude-sonnet-4",
+        "max_tokens": 1024,
+        "thinking": {"type": "disabled"},
+        "service_tier": "standard",
+        "messages": [{"role": "user", "content": "hi"}],
+    }
+    messages, tools = ac.to_openai_messages(payload)
+    rebuilt = ac.to_anthropic_payload(messages, tools, payload)
+
+    assert rebuilt["thinking"] == {"type": "disabled"}
+    assert rebuilt["service_tier"] == "standard"
+    assert rebuilt["max_tokens"] == 1024
+    assert rebuilt["model"] == "claude-sonnet-4"
+
+
 EPHEMERAL = {"type": "ephemeral"}
 
 
